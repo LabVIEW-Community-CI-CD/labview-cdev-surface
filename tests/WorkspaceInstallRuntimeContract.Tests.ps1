@@ -51,6 +51,8 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'skipped_non_blocking_roots'
         $script:scriptContent | Should -Match 'sas_workshops_lib_lunit_for_g_cli'
         $script:scriptContent | Should -Not -Match '''vipc'', ''apply'''
+        $script:scriptContent | Should -Match 'Invoke-VipBuild\.ps1'
+        $script:scriptContent | Should -Match '''-ExecutionLabVIEWYear'', \$RequiredLabviewYear'
         $script:scriptContent | Should -Match 'vipc assert'
         $script:scriptContent | Should -Match 'vip build'
         $script:scriptContent | Should -Match 'Write-InstallerFeedback'

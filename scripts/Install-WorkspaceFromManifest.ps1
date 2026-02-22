@@ -511,29 +511,35 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         }
 
         $commitArg = if ($PinnedSha.Length -gt 12) { $PinnedSha.Substring(0, 12) } else { $PinnedSha }
-        $vipBuildArgs = @(
-            'vip', 'build',
-            '--repo-root', $IconEditorRepoPath,
-            '--supported-bitness', $RequiredBitness,
-            '--vipb-path', $vipbPath,
-            '--labview-version', $RequiredLabviewYear,
-            '--labview-minor-revision', '0',
-            '--major', '0',
-            '--minor', '0',
-            '--patch', '0',
-            '--build', '1',
-            '--commit', $commitArg,
-            '--release-notes-file', $releaseNotesPath,
-            '--display-information-json-path', $displayInfoPath,
-            '--status-path', $vipBuildStatusPath,
-            '--vipm-timeout-seconds', '1200'
+        $invokeVipBuildScriptPath = Join-Path -Path $IconEditorRepoPath -ChildPath 'Tooling\Invoke-VipBuild.ps1'
+        if (-not (Test-Path -LiteralPath $invokeVipBuildScriptPath -PathType Leaf)) {
+            throw "Invoke-VipBuild.ps1 was not found: $invokeVipBuildScriptPath"
+        }
+        $nativeVipBuildArgs = @(
+            '-NoProfile',
+            '-File', $invokeVipBuildScriptPath,
+            '-SupportedBitness', $RequiredBitness,
+            '-RepoRoot', $IconEditorRepoPath,
+            '-VIPBPath', $vipbPath,
+            '-LabVIEWVersion', $RequiredLabviewYear,
+            '-ExecutionLabVIEWYear', $RequiredLabviewYear,
+            '-DisplayInformationJsonPath', $displayInfoPath,
+            '-LabVIEWMinorRevision', '0',
+            '-Major', '0',
+            '-Minor', '0',
+            '-Patch', '0',
+            '-Build', '1',
+            '-Commit', $commitArg,
+            '-ReleaseNotesFile', $releaseNotesPath,
+            '-VipmTimeoutSeconds', '1200',
+            '-StatusPath', $vipBuildStatusPath
         )
-        $result.command.vip_build = @($vipBuildArgs)
-        Write-InstallerFeedback -Message 'Running runner-cli vip build.'
-        & $RunnerCliPath @vipBuildArgs | Out-Host
+        $result.command.vip_build = @('pwsh', @($nativeVipBuildArgs))
+        Write-InstallerFeedback -Message 'Running native VIP build harness via Invoke-VipBuild.ps1 (ExecutionLabVIEWYear=2020 contract).'
+        & pwsh @nativeVipBuildArgs | Out-Host
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
-            throw "runner-cli vip build failed with exit code $($result.exit_code)."
+            throw "native VIP build failed with exit code $($result.exit_code)."
         }
 
         $vipPath = ''
