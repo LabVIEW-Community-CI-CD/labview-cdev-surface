@@ -22,6 +22,7 @@ jobs:
         shell: pwsh
         env:
           GH_ADMIN_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
           pwsh -NoProfile -File ./.github/scripts/Invoke-GovernanceContract.ps1 `

@@ -37,6 +37,12 @@ Describe 'Workspace SHA drift signal contract' {
         $script:scriptContent | Should -Match '--jq ''\.sha'''
     }
 
+    It 'uses workflow bot token strategy for cross-repo drift lookup' {
+        $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN:\s*\$\{\{\s*secrets\.WORKFLOW_BOT_TOKEN\s*\}\}'
+        $script:workflowContent | Should -Match 'GH_TOKEN:\s*\$\{\{\s*secrets\.WORKFLOW_BOT_TOKEN\s*\}\}'
+        $script:scriptContent | Should -Match 'Initialize-GhToken'
+    }
+
     It 'uploads drift report artifacts' {
         $script:workflowContent | Should -Match 'workspace-sha-drift-report-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'Upload drift report'

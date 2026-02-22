@@ -16,10 +16,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate workflow bot token
+        shell: pwsh
+        env:
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+            throw "Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with repository read access for governed repos."
+          }
+
       - name: Run manifest drift signal
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'workspace-sha-drift-report.json'

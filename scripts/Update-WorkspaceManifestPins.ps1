@@ -14,9 +14,21 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
-    $env:GH_TOKEN = $env:GITHUB_TOKEN
+function Initialize-GhToken {
+    if (-not [string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+        $env:GH_TOKEN = $env:WORKFLOW_BOT_TOKEN
+        return 'WORKFLOW_BOT_TOKEN'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        return 'GH_TOKEN'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $env:GH_TOKEN = $env:GITHUB_TOKEN
+        return 'GITHUB_TOKEN'
+    }
+    return ''
 }
+$tokenSource = Initialize-GhToken
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "Required command 'gh' was not found on PATH."
@@ -108,6 +120,7 @@ $report = [ordered]@{
     timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
     manifest_path = $resolvedManifestPath
     output_path = $resolvedOutputPath
+    token_source = $tokenSource
     write_changes = [bool]$WriteChanges
     status = $status
     changed = ($changes.Count -gt 0)

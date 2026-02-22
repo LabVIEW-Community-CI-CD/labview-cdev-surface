@@ -14,6 +14,9 @@ $tokenSource = ''
 if (-not [string]::IsNullOrWhiteSpace($env:GH_ADMIN_TOKEN)) {
     $env:GH_TOKEN = $env:GH_ADMIN_TOKEN
     $tokenSource = 'GH_ADMIN_TOKEN'
+} elseif (-not [string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+    $env:GH_TOKEN = $env:WORKFLOW_BOT_TOKEN
+    $tokenSource = 'WORKFLOW_BOT_TOKEN'
 } elseif (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
     $tokenSource = 'GH_TOKEN'
 } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
@@ -31,7 +34,7 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'gh CLI is required.'
 }
 if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
-    throw 'GH token is required. Set GH_ADMIN_TOKEN (preferred) or GH_TOKEN/GITHUB_TOKEN.'
+    throw 'GH token is required. Set GH_ADMIN_TOKEN (preferred) or WORKFLOW_BOT_TOKEN/GH_TOKEN/GITHUB_TOKEN.'
 }
 
 $requiredContexts = @(

@@ -20,6 +20,7 @@ This repository is the canonical policy and manifest surface for deterministic `
 ## Release Signal Contract
 - `Workspace SHA Refresh PR` is the primary path for updating `pinned_sha` values.
 - On drift, automation must update manifest pins, create/update branch `automation/sha-refresh`, and open or update a PR to `main`.
+- `workspace-sha-drift-signal.yml` uses `WORKFLOW_BOT_TOKEN` for cross-repo default-branch SHA reads.
 - `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation, PR operations, and workflow dispatch.
 - If `WORKFLOW_BOT_TOKEN` is missing or misconfigured, refresh automation must fail fast with explicit remediation.
 - Auto-merge is enabled by default for refresh PRs using squash strategy.

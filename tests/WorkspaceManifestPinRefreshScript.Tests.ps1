@@ -32,6 +32,8 @@ Describe 'Workspace manifest pin refresh script contract' {
         $script:scriptContent | Should -Match 'repos/\$repoSlug/commits/\$encodedBranch'
         $script:scriptContent | Should -Match 'ConvertTo-Json -Depth 12'
         $script:scriptContent | Should -Match 'workspace-sha-refresh-report\.json'
+        $script:scriptContent | Should -Match 'Initialize-GhToken'
+        $script:scriptContent | Should -Match 'token_source'
     }
 
     It 'has parse-safe PowerShell syntax' {
