@@ -44,6 +44,7 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'required_vip_bitness'
         $script:scriptContent | Should -Match '-InstallerExecutionContext NsisInstall'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliPplCapabilityCheck'
+        $script:scriptContent | Should -Match 'failed on first attempt; retrying once after additional LabVIEW cleanup'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliVipPackageHarnessCheck'
         $script:scriptContent | Should -Match 'Invoke-VipcApplyWithVipmCli'
         $script:scriptContent | Should -Match 'Get-VipcMismatchAssessment'
