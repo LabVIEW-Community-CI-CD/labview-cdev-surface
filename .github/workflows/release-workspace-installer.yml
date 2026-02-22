@@ -191,24 +191,23 @@ jobs:
           }
 
           $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
-          @(
-            "# Workspace Installer $releaseTag"
-            ""
-            "Release assets:"
-            "- $assetName"
-            "- $(Split-Path -Path $shaPath -Leaf)"
-            "- $(Split-Path -Path $reproPath -Leaf)"
-            "- $(Split-Path -Path $spdxPath -Leaf)"
-            "- $(Split-Path -Path $slsaPath -Leaf)"
-            ""
-            "SHA256:"
-            "- $assetSha"
-            ""
-            "Install command:"
-            "```powershell"
-            $installCommand
-            "```"
-          ) | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
+          $releaseNotes = @"
+# Workspace Installer $releaseTag
+
+Release assets:
+- $assetName
+- $(Split-Path -Path $shaPath -Leaf)
+- $(Split-Path -Path $reproPath -Leaf)
+- $(Split-Path -Path $spdxPath -Leaf)
+- $(Split-Path -Path $slsaPath -Leaf)
+
+SHA256:
+- $assetSha
+
+Install command:
+$installCommand
+"@
+          $releaseNotes | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
 
           $repo = [string]$env:TARGET_REPOSITORY
           $prerelease = $false
@@ -218,26 +217,21 @@ jobs:
 
           & gh release view $releaseTag -R $repo *> $null
           $releaseExists = ($LASTEXITCODE -eq 0)
+          $releaseTitle = "Workspace Installer $releaseTag"
 
           if (-not $releaseExists) {
-            $createArgs = @(
-              'release', 'create', $releaseTag,
-              '-R', $repo,
-              '--title', "Workspace Installer $releaseTag",
-              '--notes-file', $releaseNotesPath
-            )
-            if ($prerelease) { $createArgs += '--prerelease' }
-            & gh @createArgs
+            if ($prerelease) {
+              & gh release create $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+            } else {
+              & gh release create $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
+            }
             if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo'." }
           } else {
-            $editArgs = @(
-              'release', 'edit', $releaseTag,
-              '-R', $repo,
-              '--title', "Workspace Installer $releaseTag",
-              '--notes-file', $releaseNotesPath
-            )
-            if ($prerelease) { $editArgs += '--prerelease' }
-            & gh @editArgs
+            if ($prerelease) {
+              & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+            } else {
+              & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
+            }
             if ($LASTEXITCODE -ne 0) { throw "Failed to edit release '$releaseTag' for '$repo'." }
           }
 

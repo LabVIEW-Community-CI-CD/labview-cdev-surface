@@ -34,7 +34,7 @@ Describe 'Workspace installer release workflow contract' {
         $script:workflowContent | Should -Match 'Write-ReleaseProvenance\.ps1'
         $script:workflowContent | Should -Match 'Test-ProvenanceContracts\.ps1'
         $script:workflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match '''release'',\s*''create'''
+        $script:workflowContent | Should -Match '(gh release create|''release'',\s*''create'')'
         $script:workflowContent | Should -Match 'gh release upload'
         $script:workflowContent | Should -Match '--clobber'
     }
