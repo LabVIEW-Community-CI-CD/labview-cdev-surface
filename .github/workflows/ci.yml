@@ -32,5 +32,259 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Invoke-Pester -Path @(
             './tests/WorkspaceSurfaceContract.Tests.ps1',
-            './tests/WorkspaceShaDriftSignalContract.Tests.ps1'
+            './tests/WorkspaceShaDriftSignalContract.Tests.ps1',
+            './tests/WorkspaceShaRefreshPrContract.Tests.ps1',
+            './tests/WorkspaceManifestPinRefreshScript.Tests.ps1',
+            './tests/WorkspaceInstallerReleaseContract.Tests.ps1',
+            './tests/WorkspaceInstallRuntimeContract.Tests.ps1',
+            './tests/Build-WorkspaceBootstrapInstaller.Tests.ps1',
+            './tests/Build-RunnerCliBundleFromManifest.Tests.ps1',
+            './tests/RunnerCliBundleDeterminismContract.Tests.ps1',
+            './tests/WorkspaceInstallerDeterminismContract.Tests.ps1',
+            './tests/ProvenanceContract.Tests.ps1',
+            './tests/NightlySupplyChainCanaryWorkflowContract.Tests.ps1',
+            './tests/WindowsLabviewImageGateWorkflowContract.Tests.ps1',
+            './tests/DockerDesktopLinuxIterationContract.Tests.ps1',
+            './tests/WorkspaceInstallerExerciseContract.Tests.ps1',
+            './tests/WorkspaceInstallerIterationContract.Tests.ps1'
           ) -CI -Output Detailed
+
+  workspace-installer-contract:
+    name: Workspace Installer Contract
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    needs: [ci-pipeline]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: build-workspace-installer
+        name: Build deterministic Cdev workspace installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetName = 'lvie-cdev-workspace-installer.exe'
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+          if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+            Remove-Item -LiteralPath $assetPath -Force
+          }
+
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-bootstrap-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
+          if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
+            throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+          }
+          & $bundleRunnerCliScript `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build-RunnerCliBundleFromManifest.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $buildScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-WorkspaceBootstrapInstaller.ps1'
+          if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
+            throw "Workspace installer build script not found: $buildScript"
+          }
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) {
+            $nsisRoot = 'C:\Program Files (x86)\NSIS'
+          }
+          $makensis = Join-Path $nsisRoot 'makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw "Required NSIS binary not found at '$makensis'. Set repository variable NSIS_ROOT or install NSIS at C:\Program Files (x86)\NSIS."
+          }
+
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version probe failed with exit code $LASTEXITCODE"
+          }
+
+          & $buildScript -PayloadRoot $payloadRoot -OutputPath $assetPath -WorkspaceRootDefault 'C:\dev' -NsisRoot $nsisRoot -Deterministic $true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build-WorkspaceBootstrapInstaller.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload workspace bootstrap installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-bootstrap-installer-${{ github.run_id }}
+          path: ${{ steps.build-workspace-installer.outputs.asset_path }}
+          if-no-files-found: error
+
+  reproducibility-contract:
+    name: Reproducibility Contract
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    needs: [ci-pipeline]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage payload for determinism tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-repro-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1') `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build deterministic runner-cli payload bundle."
+          }
+
+      - name: Run runner-cli reproducibility checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'reproducibility'
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-RunnerCliBundleDeterminism.ps1" `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot $outputRoot `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64'
+          if ($LASTEXITCODE -ne 0) { throw 'win-x64 runner-cli determinism failed.' }
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-RunnerCliBundleDeterminism.ps1" `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot $outputRoot `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'linux-x64'
+          if ($LASTEXITCODE -ne 0) { throw 'linux-x64 runner-cli determinism failed.' }
+
+      - name: Run installer reproducibility check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'reproducibility'
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-repro-payload'
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-WorkspaceInstallerDeterminism.ps1" `
+            -PayloadRoot $payloadRoot `
+            -OutputRoot $outputRoot `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot
+          if ($LASTEXITCODE -ne 0) { throw 'workspace installer determinism failed.' }
+
+      - name: Upload reproducibility artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducibility-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/reproducibility
+          if-no-files-found: error
+
+  provenance-contract:
+    name: Provenance Contract
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    needs: [reproducibility-contract]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build installer and provenance subjects
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-provenance-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1') `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build runner-cli bundle.' }
+
+          $installerPath = Join-Path $env:RUNNER_TEMP 'lvie-cdev-workspace-installer.exe'
+          if (Test-Path -LiteralPath $installerPath -PathType Leaf) { Remove-Item -LiteralPath $installerPath -Force }
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-WorkspaceBootstrapInstaller.ps1') `
+            -PayloadRoot $payloadRoot `
+            -OutputPath $installerPath `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build workspace installer for provenance.' }
+
+          $provRoot = Join-Path $env:RUNNER_TEMP 'provenance'
+          New-Item -Path $provRoot -ItemType Directory -Force | Out-Null
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseProvenance.ps1') `
+            -InstallerPath $installerPath `
+            -RunnerCliPath (Join-Path $payloadRoot 'tools/runner-cli/win-x64/runner-cli.exe') `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputDirectory $provRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to generate provenance assets.' }
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-ProvenanceContracts.ps1') `
+            -SpdxPath (Join-Path $provRoot 'workspace-installer.spdx.json') `
+            -SlsaPath (Join-Path $provRoot 'workspace-installer.slsa.json') `
+            -InstallerPath $installerPath `
+            -RunnerCliPath (Join-Path $payloadRoot 'tools/runner-cli/win-x64/runner-cli.exe') `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Provenance contract validation failed.' }
+
+      - name: Upload provenance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/provenance
+          if-no-files-found: error

@@ -1,0 +1,113 @@
+name: windows-labview-image-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-labview-image-gate:
+    name: Windows LabVIEW Image Gate
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build installer payload for gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gateRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate'
+          $payloadRoot = Join-Path $gateRoot 'payload'
+          if (Test-Path -LiteralPath $gateRoot -PathType Container) {
+            Remove-Item -LiteralPath $gateRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build runner-cli bundle for windows image gate."
+          }
+
+          $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
+            -PayloadRoot $payloadRoot `
+            -OutputPath $installerPath `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build installer for windows image gate."
+          }
+
+      - name: Switch to Windows containers and pull image
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & 'C:\Program Files\Docker\Docker\DockerCli.exe' -SwitchWindowsEngine
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to switch Docker to Windows engine.' }
+          docker pull nationalinstruments/labview:latest-windows
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to pull LabVIEW Windows image.' }
+
+      - name: Run installer and runner-cli gate in Windows container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gateRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate'
+          $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
+          if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+            throw "Installer missing for gate: $installerPath"
+          }
+
+          $containerCmd = @'
+          $ErrorActionPreference = "Stop"
+          & "C:\workspace\artifacts\windows-image-gate\lvie-cdev-workspace-installer.exe" /S
+          if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
+
+          & "C:\dev\tools\runner-cli\win-x64\runner-cli.exe" ppl build --repo-root "C:\dev\labview-icon-editor" --labview-version 2026 --supported-bitness 64 --major 0 --minor 0 --patch 0 --build 1 --commit gatecheck
+          if ($LASTEXITCODE -ne 0) { throw "runner-cli ppl build failed with exit code $LASTEXITCODE" }
+
+          $ppl = "C:\dev\labview-icon-editor\resource\plugins\lv_icon.lvlibp"
+          if (-not (Test-Path -LiteralPath $ppl -PathType Leaf)) {
+            throw "Expected PPL output missing: $ppl"
+          }
+
+          [ordered]@{
+            status = "pass"
+            ppl_output = $ppl
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "C:\workspace\artifacts\windows-image-gate\windows-image-gate-report.json" -Encoding utf8
+          '@
+
+          docker run --rm `
+            -v "${env:GITHUB_WORKSPACE}:C:\workspace" `
+            nationalinstruments/labview:latest-windows `
+            powershell -NoProfile -Command $containerCmd
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows image gate failed."
+          }
+
+      - name: Upload windows image gate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-labview-image-gate-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate
+          if-no-files-found: error

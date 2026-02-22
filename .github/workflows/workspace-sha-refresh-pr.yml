@@ -1,0 +1,118 @@
+name: Workspace SHA Refresh PR
+
+on:
+  schedule:
+    - cron: '30 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  workspace-sha-refresh-pr:
+    name: Workspace SHA Refresh PR
+    runs-on: ubuntu-latest
+    concurrency:
+      group: workspace-sha-refresh-pr
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: refresh
+        name: Update manifest pinned SHAs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'workspace-sha-refresh-report.json'
+
+          & pwsh -NoProfile -File ./scripts/Update-WorkspaceManifestPins.ps1 `
+            -ManifestPath ./workspace-governance.json `
+            -OutputPath $reportPath `
+            -WriteChanges
+          if ($LASTEXITCODE -ne 0) {
+            throw "Update-WorkspaceManifestPins.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          "report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "changed=$([string]$report.changed)".ToLowerInvariant() | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "change_count=$([string]$report.change_count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "status=$([string]$report.status)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload SHA refresh report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-sha-refresh-report-${{ github.run_id }}
+          path: ${{ steps.refresh.outputs.report_path }}
+          if-no-files-found: error
+
+      - name: Sync canonical payload manifest
+        if: steps.refresh.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item -LiteralPath ./workspace-governance.json `
+            -Destination ./workspace-governance-payload/workspace-governance/workspace-governance.json `
+            -Force
+
+      - name: Run refresh contract tests
+        if: steps.refresh.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-Pester -Path @(
+            './tests/WorkspaceShaDriftSignalContract.Tests.ps1',
+            './tests/WorkspaceShaRefreshPrContract.Tests.ps1',
+            './tests/WorkspaceManifestPinRefreshScript.Tests.ps1'
+          ) -CI -Output Detailed
+
+      - id: create_pr
+        name: Create or update SHA refresh PR
+        if: steps.refresh.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ github.token }}
+          commit-message: 'chore(manifest): refresh pinned SHAs'
+          branch: automation/sha-refresh
+          delete-branch: true
+          title: 'chore(manifest): refresh pinned SHAs'
+          body: |
+            Automated workspace manifest SHA refresh.
+
+            - Changed repos: ${{ steps.refresh.outputs.change_count }}
+            - Source workflow: `${{ github.workflow }}`
+            - Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Merge strategy: squash auto-merge
+          labels: |
+            automation
+            sha-refresh
+          add-paths: |
+            workspace-governance.json
+            workspace-governance-payload/workspace-governance/workspace-governance.json
+
+      - name: Enable squash auto-merge for refresh PR
+        if: steps.create_pr.outputs.pull-request-number != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & gh pr merge "${{ steps.create_pr.outputs.pull-request-number }}" `
+            --repo "${{ github.repository }}" `
+            --auto `
+            --squash `
+            --delete-branch
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to enable auto-merge on PR #${{ steps.create_pr.outputs.pull-request-number }}."
+          }
+
+      - name: No changes detected
+        if: steps.refresh.outputs.changed != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "No manifest drift detected. No PR created."

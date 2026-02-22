@@ -1,0 +1,126 @@
+name: nightly-supplychain-canary
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly-canary:
+    name: Nightly Supply-Chain Canary
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run linux container + reproducibility canary checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $canaryRoot = Join-Path $env:RUNNER_TEMP 'nightly-supplychain-canary'
+          if (Test-Path -LiteralPath $canaryRoot -PathType Container) {
+            Remove-Item -LiteralPath $canaryRoot -Recurse -Force
+          }
+          New-Item -Path $canaryRoot -ItemType Directory -Force | Out-Null
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Invoke-DockerDesktopLinuxIteration.ps1" `
+            -DockerContext 'desktop-linux' `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot (Join-Path $canaryRoot 'docker-linux')
+          if ($LASTEXITCODE -ne 0) { throw 'Docker linux iteration canary failed.' }
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-RunnerCliBundleDeterminism.ps1" `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot (Join-Path $canaryRoot 'repro') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64'
+          if ($LASTEXITCODE -ne 0) { throw 'win-x64 runner-cli determinism canary failed.' }
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-RunnerCliBundleDeterminism.ps1" `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot (Join-Path $canaryRoot 'repro') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'linux-x64'
+          if ($LASTEXITCODE -ne 0) { throw 'linux-x64 runner-cli determinism canary failed.' }
+
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'nightly-canary-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic $true
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build runner-cli payload for installer determinism canary.' }
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Test-WorkspaceInstallerDeterminism.ps1" `
+            -PayloadRoot $payloadRoot `
+            -OutputRoot (Join-Path $canaryRoot 'repro') `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Workspace installer determinism canary failed.' }
+
+      - name: Upload canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-supplychain-canary-${{ github.run_id }}
+          path: ${{ runner.temp }}/nightly-supplychain-canary
+          if-no-files-found: warn
+
+      - name: Open or update canary tracking issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Nightly Supply-Chain Canary Failure'
+          $runUrl = "https://github.com/$env:REPO/actions/runs/$env:GITHUB_RUN_ID"
+          $body = @"
+          Nightly supply-chain canary failed.
+
+          - Run: $runUrl
+          - Workflow: $env:GITHUB_WORKFLOW
+          - Branch: $env:GITHUB_REF_NAME
+          - SHA: $env:GITHUB_SHA
+          "@
+
+          $existingJson = & gh issue list -R $env:REPO --state open --search "$title in:title" --json number --limit 1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to query existing canary tracking issue."
+          }
+          $existing = @($existingJson | ConvertFrom-Json)
+          if ($existing.Count -gt 0) {
+            $number = [string]$existing[0].number
+            & gh issue comment $number -R $env:REPO --body $body
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to comment on issue #$number."
+            }
+          } else {
+            & gh issue create -R $env:REPO --title $title --body $body
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create canary tracking issue."
+            }
+          }
