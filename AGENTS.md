@@ -15,8 +15,9 @@ This repository is the canonical policy and manifest surface for deterministic `
 - Keep the drift-signal workflow enabled; drift failures are expected release signals.
 
 ## Release Signal Contract
-- If `Workspace SHA Drift Signal` fails, create a PR that updates `pinned_sha` values to the intended default-branch SHAs.
+- If `Workspace SHA Drift Signal` fails on org `main`, create a fork feature branch in `svelderrainruiz/labview-cdev-surface`, update `pinned_sha`, and create a PR from fork to org.
 - Do not bypass this by weakening checks or disabling scheduled runs.
+- Do not use auto-PR bot behavior for SHA refresh in this repository; keep drift-to-PR manual.
 
 ## Local Verification
 ```powershell
