@@ -191,23 +191,23 @@ jobs:
           }
 
           $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
-          $releaseNotes = @"
-# Workspace Installer $releaseTag
-
-Release assets:
-- $assetName
-- $(Split-Path -Path $shaPath -Leaf)
-- $(Split-Path -Path $reproPath -Leaf)
-- $(Split-Path -Path $spdxPath -Leaf)
-- $(Split-Path -Path $slsaPath -Leaf)
-
-SHA256:
-- $assetSha
-
-Install command:
-$installCommand
-"@
-          $releaseNotes | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
+          $releaseNoteLines = @(
+            "# Workspace Installer $releaseTag"
+            ""
+            "Release assets:"
+            "- $assetName"
+            "- $(Split-Path -Path $shaPath -Leaf)"
+            "- $(Split-Path -Path $reproPath -Leaf)"
+            "- $(Split-Path -Path $spdxPath -Leaf)"
+            "- $(Split-Path -Path $slsaPath -Leaf)"
+            ""
+            "SHA256:"
+            "- $assetSha"
+            ""
+            "Install command:"
+            $installCommand
+          )
+          $releaseNoteLines | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
 
           $repo = [string]$env:TARGET_REPOSITORY
           $prerelease = $false
