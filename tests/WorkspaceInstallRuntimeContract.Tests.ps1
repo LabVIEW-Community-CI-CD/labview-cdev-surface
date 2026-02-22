@@ -55,6 +55,12 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'branch_only_failure'
     }
 
+    It 'sets a workspace-scoped LVIE_WORKTREE_ROOT during post-actions' {
+        $script:scriptContent | Should -Match '\$originalWorktreeRoot = \$env:LVIE_WORKTREE_ROOT'
+        $script:scriptContent | Should -Match '\$env:LVIE_WORKTREE_ROOT = \$effectiveWorktreeRoot'
+        $script:scriptContent | Should -Match 'Overriding LVIE_WORKTREE_ROOT for post-actions'
+    }
+
     It 'has parse-safe PowerShell syntax' {
         $tokens = $null
         $errors = $null

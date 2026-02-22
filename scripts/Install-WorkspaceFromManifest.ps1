@@ -1070,104 +1070,135 @@ try {
         -Status ([string]$cliBundle.status) `
         -Message ([string]$cliBundle.message)
 
-    if ($runnerCliBundle.status -eq 'pass') {
-        $repoContractStatus = $repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1
-        if ($null -eq $repoContractStatus -or [string]$repoContractStatus.status -ne 'pass') {
-            $blockingMessage = "Cannot run runner-cli PPL capability checks because icon-editor repo contract failed at '$iconEditorRepoPath'."
+    $originalWorktreeRoot = $env:LVIE_WORKTREE_ROOT
+    $effectiveWorktreeRoot = $resolvedWorkspaceRoot
+    $worktreeRootOverridden = $false
+    if (-not [string]::IsNullOrWhiteSpace($effectiveWorktreeRoot)) {
+        if ([string]::IsNullOrWhiteSpace($originalWorktreeRoot)) {
+            Write-InstallerFeedback -Message ("Setting LVIE_WORKTREE_ROOT to workspace root for post-actions: {0}" -f $effectiveWorktreeRoot)
+            $worktreeRootOverridden = $true
+        } else {
+            $normalizedOriginal = [System.IO.Path]::GetFullPath($originalWorktreeRoot).TrimEnd('\')
+            $normalizedEffective = [System.IO.Path]::GetFullPath($effectiveWorktreeRoot).TrimEnd('\')
+            if ($normalizedOriginal -ne $normalizedEffective) {
+                Write-InstallerFeedback -Message ("Overriding LVIE_WORKTREE_ROOT for post-actions. previous='{0}' effective='{1}'" -f $originalWorktreeRoot, $effectiveWorktreeRoot)
+                $worktreeRootOverridden = $true
+            }
+        }
+    }
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($effectiveWorktreeRoot)) {
+            $env:LVIE_WORKTREE_ROOT = $effectiveWorktreeRoot
+        }
+
+        if ($runnerCliBundle.status -eq 'pass') {
+            $repoContractStatus = $repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1
+            if ($null -eq $repoContractStatus -or [string]$repoContractStatus.status -ne 'pass') {
+                $blockingMessage = "Cannot run runner-cli PPL capability checks because icon-editor repo contract failed at '$iconEditorRepoPath'."
+                foreach ($bitness in $requiredPplBitnesses) {
+                    $pplCapabilityChecks[$bitness].status = 'fail'
+                    $pplCapabilityChecks[$bitness].message = $blockingMessage
+                    Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status 'fail' -Message $blockingMessage
+                }
+                $vipPackageBuildCheck.status = 'blocked'
+                $vipPackageBuildCheck.message = 'VIP harness was not run because icon-editor repository contract failed.'
+                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status 'blocked' -Message $vipPackageBuildCheck.message
+                $errors += $blockingMessage
+            } else {
+                $allPplPass = $true
+                foreach ($bitness in $requiredPplBitnesses) {
+                    Write-InstallerFeedback -Message ("Running runner-cli PPL capability gate ({0}-bit)." -f $bitness)
+                    $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
+                        -RunnerCliPath $runnerCliExePath `
+                        -IconEditorRepoPath $iconEditorRepoPath `
+                        -PinnedSha $iconEditorPinnedSha `
+                        -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                        -RequiredBitness $bitness
+
+                    $pplCapabilityChecks[$bitness] = [ordered]@{
+                        status = [string]$capabilityResult.status
+                        message = [string]$capabilityResult.message
+                        runner_cli_path = [string]$capabilityResult.runner_cli_path
+                        repo_path = [string]$capabilityResult.repo_path
+                        required_labview_year = [string]$capabilityResult.required_labview_year
+                        required_bitness = [string]$capabilityResult.required_bitness
+                        output_ppl_path = [string]$capabilityResult.output_ppl_path
+                        output_ppl_snapshot_path = [string]$capabilityResult.output_ppl_snapshot_path
+                        command = @($capabilityResult.command)
+                        exit_code = $capabilityResult.exit_code
+                        labview_install_root = [string]$capabilityResult.labview_install_root
+                    }
+
+                    Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
+
+                    if ([string]$capabilityResult.status -ne 'pass') {
+                        $allPplPass = $false
+                        $errors += "Runner CLI PPL capability check failed ($bitness-bit). $([string]$capabilityResult.message)"
+                    }
+                }
+
+                if (-not $allPplPass) {
+                    $vipPackageBuildCheck.status = 'blocked'
+                    $vipPackageBuildCheck.message = 'VIP harness was not run because one or more PPL capability checks failed.'
+                    Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status 'blocked' -Message $vipPackageBuildCheck.message
+                } else {
+                    Write-InstallerFeedback -Message 'Running runner-cli VI Package harness gate.'
+                    $vipResult = Invoke-RunnerCliVipPackageHarnessCheck `
+                        -RunnerCliPath $runnerCliExePath `
+                        -IconEditorRepoPath $iconEditorRepoPath `
+                        -PinnedSha $iconEditorPinnedSha `
+                        -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                        -RequiredBitness ([string]$requiredVipBitness)
+
+                    $vipPackageBuildCheck = [ordered]@{
+                        status = [string]$vipResult.status
+                        message = [string]$vipResult.message
+                        runner_cli_path = [string]$vipResult.runner_cli_path
+                        repo_path = [string]$vipResult.repo_path
+                        required_labview_year = [string]$vipResult.required_labview_year
+                        required_bitness = [string]$vipResult.required_bitness
+                        vipb_path = [string]$vipResult.vipb_path
+                        vipc_path = [string]$vipResult.vipc_path
+                        vipc_assert_output_path = [string]$vipResult.vipc_assert_output_path
+                        vip_build_status_path = [string]$vipResult.vip_build_status_path
+                        release_notes_path = [string]$vipResult.release_notes_path
+                        display_information_path = [string]$vipResult.display_information_path
+                        output_vip_path = [string]$vipResult.output_vip_path
+                        command = [ordered]@{
+                            vipc_assert = @($vipResult.command.vipc_assert)
+                            vipc_apply = @($vipResult.command.vipc_apply)
+                            vip_build = @($vipResult.command.vip_build)
+                        }
+                        exit_code = $vipResult.exit_code
+                        labview_install_root = [string]$vipResult.labview_install_root
+                    }
+                    Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status ([string]$vipResult.status) -Message ([string]$vipResult.message)
+
+                    if ($vipPackageBuildCheck.status -ne 'pass') {
+                        $errors += "Runner CLI VIP harness check failed. $($vipPackageBuildCheck.message)"
+                    }
+                }
+            }
+        } else {
+            $bundleBlockingMessage = "Runner CLI bundle verification failed; capability gates were not run. $([string]$runnerCliBundle.message)"
             foreach ($bitness in $requiredPplBitnesses) {
-                $pplCapabilityChecks[$bitness].status = 'fail'
-                $pplCapabilityChecks[$bitness].message = $blockingMessage
-                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status 'fail' -Message $blockingMessage
+                $pplCapabilityChecks[$bitness].status = 'blocked'
+                $pplCapabilityChecks[$bitness].message = $bundleBlockingMessage
+                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status 'blocked' -Message $bundleBlockingMessage
             }
             $vipPackageBuildCheck.status = 'blocked'
-            $vipPackageBuildCheck.message = 'VIP harness was not run because icon-editor repository contract failed.'
+            $vipPackageBuildCheck.message = 'VIP harness was not run because runner-cli bundle verification failed.'
             Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status 'blocked' -Message $vipPackageBuildCheck.message
-            $errors += $blockingMessage
-        } else {
-            $allPplPass = $true
-            foreach ($bitness in $requiredPplBitnesses) {
-                Write-InstallerFeedback -Message ("Running runner-cli PPL capability gate ({0}-bit)." -f $bitness)
-                $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
-                    -RunnerCliPath $runnerCliExePath `
-                    -IconEditorRepoPath $iconEditorRepoPath `
-                    -PinnedSha $iconEditorPinnedSha `
-                    -RequiredLabviewYear ([string]$requiredLabviewYear) `
-                    -RequiredBitness $bitness
-
-                $pplCapabilityChecks[$bitness] = [ordered]@{
-                    status = [string]$capabilityResult.status
-                    message = [string]$capabilityResult.message
-                    runner_cli_path = [string]$capabilityResult.runner_cli_path
-                    repo_path = [string]$capabilityResult.repo_path
-                    required_labview_year = [string]$capabilityResult.required_labview_year
-                    required_bitness = [string]$capabilityResult.required_bitness
-                    output_ppl_path = [string]$capabilityResult.output_ppl_path
-                    output_ppl_snapshot_path = [string]$capabilityResult.output_ppl_snapshot_path
-                    command = @($capabilityResult.command)
-                    exit_code = $capabilityResult.exit_code
-                    labview_install_root = [string]$capabilityResult.labview_install_root
-                }
-
-                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
-
-                if ([string]$capabilityResult.status -ne 'pass') {
-                    $allPplPass = $false
-                    $errors += "Runner CLI PPL capability check failed ($bitness-bit). $([string]$capabilityResult.message)"
-                }
-            }
-
-            if (-not $allPplPass) {
-                $vipPackageBuildCheck.status = 'blocked'
-                $vipPackageBuildCheck.message = 'VIP harness was not run because one or more PPL capability checks failed.'
-                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status 'blocked' -Message $vipPackageBuildCheck.message
+        }
+    } finally {
+        if ($worktreeRootOverridden) {
+            if ([string]::IsNullOrWhiteSpace($originalWorktreeRoot)) {
+                Remove-Item Env:LVIE_WORKTREE_ROOT -ErrorAction SilentlyContinue
             } else {
-                Write-InstallerFeedback -Message 'Running runner-cli VI Package harness gate.'
-                $vipResult = Invoke-RunnerCliVipPackageHarnessCheck `
-                    -RunnerCliPath $runnerCliExePath `
-                    -IconEditorRepoPath $iconEditorRepoPath `
-                    -PinnedSha $iconEditorPinnedSha `
-                    -RequiredLabviewYear ([string]$requiredLabviewYear) `
-                    -RequiredBitness ([string]$requiredVipBitness)
-
-                $vipPackageBuildCheck = [ordered]@{
-                    status = [string]$vipResult.status
-                    message = [string]$vipResult.message
-                    runner_cli_path = [string]$vipResult.runner_cli_path
-                    repo_path = [string]$vipResult.repo_path
-                    required_labview_year = [string]$vipResult.required_labview_year
-                    required_bitness = [string]$vipResult.required_bitness
-                    vipb_path = [string]$vipResult.vipb_path
-                    vipc_path = [string]$vipResult.vipc_path
-                    vipc_assert_output_path = [string]$vipResult.vipc_assert_output_path
-                    vip_build_status_path = [string]$vipResult.vip_build_status_path
-                    release_notes_path = [string]$vipResult.release_notes_path
-                    display_information_path = [string]$vipResult.display_information_path
-                    output_vip_path = [string]$vipResult.output_vip_path
-                    command = [ordered]@{
-                        vipc_assert = @($vipResult.command.vipc_assert)
-                        vipc_apply = @($vipResult.command.vipc_apply)
-                        vip_build = @($vipResult.command.vip_build)
-                    }
-                    exit_code = $vipResult.exit_code
-                    labview_install_root = [string]$vipResult.labview_install_root
-                }
-                Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status ([string]$vipResult.status) -Message ([string]$vipResult.message)
-
-                if ($vipPackageBuildCheck.status -ne 'pass') {
-                    $errors += "Runner CLI VIP harness check failed. $($vipPackageBuildCheck.message)"
-                }
+                $env:LVIE_WORKTREE_ROOT = $originalWorktreeRoot
             }
         }
-    } else {
-        $bundleBlockingMessage = "Runner CLI bundle verification failed; capability gates were not run. $([string]$runnerCliBundle.message)"
-        foreach ($bitness in $requiredPplBitnesses) {
-            $pplCapabilityChecks[$bitness].status = 'blocked'
-            $pplCapabilityChecks[$bitness].message = $bundleBlockingMessage
-            Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status 'blocked' -Message $bundleBlockingMessage
-        }
-        $vipPackageBuildCheck.status = 'blocked'
-        $vipPackageBuildCheck.message = 'VIP harness was not run because runner-cli bundle verification failed.'
-        Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'vip-harness' -Bitness $requiredVipBitness -Status 'blocked' -Message $vipPackageBuildCheck.message
     }
 
     $assertScriptPath = Join-Path $resolvedWorkspaceRoot 'scripts\Assert-WorkspaceGovernance.ps1'
