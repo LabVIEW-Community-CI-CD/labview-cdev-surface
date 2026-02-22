@@ -180,6 +180,7 @@ if (-not $SkipSmokeBuild) {
 
 $releaseSha = Write-Sha256File -FilePath $releaseInstallerPath -OutputPath $releaseShaPath
 $smokeReportPath = Join-Path $resolvedSmokeRoot 'artifacts\workspace-install-latest.json'
+$smokeLaunchLogPath = Join-Path $resolvedSmokeRoot 'artifacts\workspace-installer-launch.log'
 $smokeStatus = if ($SkipSmokeBuild) { 'build_skipped' } elseif ($SkipSmokeInstall) { 'install_skipped' } else { 'pending' }
 $smokeExitCode = $null
 $smokeErrorMessage = ''
@@ -218,6 +219,15 @@ if ((-not $SkipSmokeInstall) -and (-not $SkipSmokeBuild)) {
         }
         $smokeStatus = 'failed'
         $smokeErrorMessage = $_.Exception.Message
+
+        if (Test-Path -LiteralPath $smokeLaunchLogPath -PathType Leaf) {
+            try {
+                $smokeReportWarnings += "NSIS launch log found: $smokeLaunchLogPath"
+                $smokeReportErrors += (Get-Content -LiteralPath $smokeLaunchLogPath -Raw)
+            } catch {
+                $smokeReportWarnings += "Unable to read NSIS launch log: $($_.Exception.Message)"
+            }
+        }
 
         if (Test-Path -LiteralPath $smokeReportPath -PathType Leaf) {
             try {
@@ -310,6 +320,7 @@ $report = [ordered]@{
         status = $smokeStatus
         exit_code = $smokeExitCode
         report_path = $smokeReportPath
+        launch_log_path = $smokeLaunchLogPath
         error_message = $smokeErrorMessage
         report_status = $smokeReportStatus
         report_errors = @($smokeReportErrors)

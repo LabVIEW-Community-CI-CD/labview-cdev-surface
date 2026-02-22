@@ -31,6 +31,10 @@ Name "LVIE Cdev Workspace Bootstrap"
   !define REPORT_REL "artifacts\workspace-install-latest.json"
 !endif
 
+!ifndef LAUNCH_LOG_REL
+  !define LAUNCH_LOG_REL "artifacts\workspace-installer-launch.log"
+!endif
+
 OutFile "${OUT_FILE}"
 InstallDir "$TEMP\lvie-cdev-workspace-installer"
 Page instfiles
@@ -38,6 +42,7 @@ Page instfiles
 Section "Install"
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}\*"
+  CreateDirectory "${WORKSPACE_ROOT}\artifacts"
 
   StrCpy $1 ""
   IfFileExists "$PROGRAMFILES64\PowerShell\7\pwsh.exe" 0 +2
@@ -50,7 +55,16 @@ Section "Install"
     StrCpy $1 "pwsh"
   ${EndIf}
 
+  FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" w
+  FileWrite $2 "workspace_root=${WORKSPACE_ROOT}$\r$\n"
+  FileWrite $2 "install_script=$INSTDIR\${INSTALL_SCRIPT_REL}$\r$\n"
+  FileWrite $2 "manifest=$INSTDIR\${MANIFEST_REL}$\r$\n"
+  FileWrite $2 "report=${WORKSPACE_ROOT}\${REPORT_REL}$\r$\n"
+  FileWrite $2 "powershell_exe=$1$\r$\n"
+
   ExecWait '"$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
+  FileWrite $2 "exit_code=$0$\r$\n"
+  FileClose $2
   ${If} $0 != 0
     SetErrorLevel $0
     Abort

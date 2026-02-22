@@ -212,4 +212,5 @@ jobs:
             ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer-bundle.zip
             ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer.exe.sha256
             ${{ runner.temp }}/dev-smoke-lvie/artifacts/workspace-install-latest.json
+            ${{ runner.temp }}/dev-smoke-lvie/artifacts/workspace-installer-launch.log
           if-no-files-found: warn
