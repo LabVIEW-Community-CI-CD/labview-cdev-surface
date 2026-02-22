@@ -460,7 +460,15 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
 $resolvedWorkspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
 $resolvedManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
 $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
-$payloadRoot = Split-Path -Parent $resolvedManifestPath
+$governancePayloadRoot = Split-Path -Parent $resolvedManifestPath
+$payloadRoot = Split-Path -Parent $governancePayloadRoot
+if ([string]::IsNullOrWhiteSpace($payloadRoot)) {
+    $payloadRoot = $governancePayloadRoot
+}
+if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot 'tools') -PathType Container) -and (Test-Path -LiteralPath (Join-Path $governancePayloadRoot 'tools') -PathType Container)) {
+    # Backward compatibility for payloads that still place tools under workspace-governance.
+    $payloadRoot = $governancePayloadRoot
+}
 
 $errors = @()
 $warnings = @()
@@ -910,10 +918,10 @@ try {
     $cliBundle.extracted_win_root = Join-Path $resolvedWorkspaceRoot 'tools\cdev-cli\win-x64'
 
     $payloadFiles = @(
-        @{ source = (Join-Path $payloadRoot 'AGENTS.md'); destination = (Join-Path $resolvedWorkspaceRoot 'AGENTS.md') },
-        @{ source = (Join-Path $payloadRoot 'workspace-governance.json'); destination = (Join-Path $resolvedWorkspaceRoot 'workspace-governance.json') },
-        @{ source = (Join-Path $payloadRoot 'scripts\Assert-WorkspaceGovernance.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Assert-WorkspaceGovernance.ps1') },
-        @{ source = (Join-Path $payloadRoot 'scripts\Test-PolicyContracts.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Test-PolicyContracts.ps1') },
+        @{ source = (Join-Path $governancePayloadRoot 'AGENTS.md'); destination = (Join-Path $resolvedWorkspaceRoot 'AGENTS.md') },
+        @{ source = (Join-Path $governancePayloadRoot 'workspace-governance.json'); destination = (Join-Path $resolvedWorkspaceRoot 'workspace-governance.json') },
+        @{ source = (Join-Path $governancePayloadRoot 'scripts\Assert-WorkspaceGovernance.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Assert-WorkspaceGovernance.ps1') },
+        @{ source = (Join-Path $governancePayloadRoot 'scripts\Test-PolicyContracts.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Test-PolicyContracts.ps1') },
         @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe') },
         @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256') },
         @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json') },
