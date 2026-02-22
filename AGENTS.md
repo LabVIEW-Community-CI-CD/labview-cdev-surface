@@ -51,8 +51,9 @@ This repository is the canonical policy and manifest surface for deterministic `
 
 ## Installer Runtime Gate Contract
 - Installer runtime (`scripts/Install-WorkspaceFromManifest.ps1`) must fail fast if bundled `runner-cli` integrity checks fail.
-- Installer runtime must enforce LabVIEW 2026 (64-bit) capability gate by executing `runner-cli ppl build` against installed `labview-icon-editor`.
-- Branch-protection-only governance failures remain audit-only; runner-cli/PPL capability failures are hard-stop failures.
+- Installer runtime must enforce LabVIEW 2026 (64-bit) capability gate by executing `runner-cli ppl build` and `runner-cli vip build` against installed `labview-icon-editor`.
+- Installer runtime must surface phase-level terminal feedback (clone, payload sync, runner-cli validation, PPL gate, VIP harness gate, governance audit).
+- Branch-protection-only governance failures remain audit-only; runner-cli/PPL/VIP capability failures are hard-stop failures.
 
 ## Post-Gate Docker Extension
 - After installer runtime gates are consistently green, add a Docker Desktop Windows-image lane that runs installer + `runner-cli ppl build` inside the LabVIEW-enabled image.

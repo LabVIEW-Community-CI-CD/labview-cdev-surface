@@ -81,7 +81,7 @@ When enabled, `Workspace Installer Contract` compiles:
 - `lvie-cdev-workspace-installer.exe`
 
 The job stages a deterministic workspace payload, builds a manifest-pinned `runner-cli` bundle, and validates that NSIS build tooling can produce the installer on the self-hosted Windows lane.
-Installer runtime is a hard gate for `runner-cli ppl build` capability against LabVIEW 2026 (64-bit).
+Installer runtime is a hard gate for `runner-cli ppl build` and `runner-cli vip build` capability against LabVIEW 2026 (64-bit), with phase-level terminal feedback.
 
 Additional supply-chain contract jobs:
 - `Reproducibility Contract`: validates bit-for-bit determinism for `runner-cli` bundles (`win-x64`, `linux-x64`) and installer output.
@@ -92,8 +92,8 @@ Additional supply-chain contract jobs:
 After the installer hard gate is consistently green, extend CI with a Docker Desktop Windows-image lane that:
 1. Installs the workspace via `lvie-cdev-workspace-installer.exe /S`.
 2. Uses bundled `runner-cli` from the installed workspace.
-3. Runs `runner-cli ppl build` on the LabVIEW-enabled Windows image.
-4. Fails the lane on command-surface regressions or PPL capability loss.
+3. Runs `runner-cli ppl build` and `runner-cli vip build` on the LabVIEW-enabled Windows image.
+4. Fails the lane on command-surface regressions or PPL/VIP capability loss.
 
 ## Fast Docker Desktop Linux iteration
 
@@ -143,4 +143,4 @@ On failure, it updates a single tracking issue (`Nightly Supply-Chain Canary Fai
 ## Windows LabVIEW image gate
 
 `windows-labview-image-gate.yml` is dispatch-only in phase 1 and targets a dedicated self-hosted Windows runner with Windows containers.  
-It pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build`, and verifies PPL output presence.
+It pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build` and `runner-cli vip build`, and verifies PPL + VIP output presence.
