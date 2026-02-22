@@ -214,4 +214,7 @@ jobs:
             ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer.exe.sha256
             ${{ runner.temp }}/dev-smoke-lvie/artifacts/workspace-install-latest.json
             ${{ runner.temp }}/dev-smoke-lvie/artifacts/workspace-installer-launch.log
+            ${{ runner.temp }}/dev-smoke-lvie/labview-icon-editor/builds/status/workspace-installer-vip-build.json
+            ${{ runner.temp }}/dev-smoke-lvie/labview-icon-editor/builds/logs/vipm-build.log
+            ${{ runner.temp }}/dev-smoke-lvie/labview-icon-editor/builds/logs/vipm/**
           if-no-files-found: warn
