@@ -8,14 +8,21 @@
       "metadata_file": "runner-cli.metadata.json"
     },
     "labview_gate": {
-      "required_year": "2026",
-      "required_bitness": "64"
+      "required_year": "2020",
+      "required_ppl_bitnesses": [
+        "32",
+        "64"
+      ],
+      "required_vip_bitness": "64"
     },
     "ppl_capability_proof": {
       "repo_name": "labview-icon-editor",
-      "labview_version": "2026",
-      "supported_bitness": "64",
-      "command": "runner-cli ppl build"
+      "labview_version": "2020",
+      "command": "runner-cli ppl build",
+      "supported_bitnesses": [
+        "32",
+        "64"
+      ]
     },
     "reproducibility": {
       "required": true,
@@ -43,6 +50,12 @@
       "schedule_cron_utc": "0 3 * * *",
       "docker_context": "desktop-linux",
       "linux_image": "mcr.microsoft.com/powershell:7.4-ubuntu-22.04"
+    },
+    "vip_capability_proof": {
+      "repo_name": "labview-icon-editor",
+      "labview_version": "2020",
+      "supported_bitness": "64",
+      "command": "runner-cli vip build"
     }
   },
   "managed_repos": [

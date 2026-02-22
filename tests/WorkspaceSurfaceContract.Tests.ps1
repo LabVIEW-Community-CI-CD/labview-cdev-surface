@@ -82,8 +82,14 @@ Describe 'Workspace surface contract' {
         @($script:manifest.managed_repos).Count | Should -BeGreaterOrEqual 9
         $script:manifest.PSObject.Properties.Name | Should -Contain 'installer_contract'
         $script:manifest.installer_contract.runner_cli_bundle.executable | Should -Be 'runner-cli.exe'
-        $script:manifest.installer_contract.labview_gate.required_year | Should -Be '2026'
+        $script:manifest.installer_contract.labview_gate.required_year | Should -Be '2020'
+        ((@($script:manifest.installer_contract.labview_gate.required_ppl_bitnesses) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
+        $script:manifest.installer_contract.labview_gate.required_vip_bitness | Should -Be '64'
         $script:manifest.installer_contract.ppl_capability_proof.command | Should -Be 'runner-cli ppl build'
+        ((@($script:manifest.installer_contract.ppl_capability_proof.supported_bitnesses) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
+        $script:manifest.installer_contract.vip_capability_proof.command | Should -Be 'runner-cli vip build'
+        $script:manifest.installer_contract.vip_capability_proof.labview_version | Should -Be '2020'
+        $script:manifest.installer_contract.vip_capability_proof.supported_bitness | Should -Be '64'
         $script:manifest.installer_contract.reproducibility.required | Should -BeTrue
         $script:manifest.installer_contract.reproducibility.strict_hash_match | Should -BeTrue
         $script:manifest.installer_contract.provenance.schema_version | Should -Be '1.0'

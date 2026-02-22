@@ -48,7 +48,8 @@ pwsh -NoProfile -File .\scripts\Invoke-WorkspaceInstallerIteration.ps1 `
 ```
 
 Prerequisites for full installer qualification:
-- LabVIEW 2026 (64-bit) installed.
+- LabVIEW 2020 (32-bit and 64-bit) installed for PPL capability.
+- LabVIEW 2020 (64-bit) installed for VIP capability.
 - `g-cli`, `git`, `gh`, `pwsh`, and `dotnet` available on PATH.
 - NSIS installed at `C:\Program Files (x86)\NSIS` (or pass an override).
 
@@ -81,7 +82,10 @@ When enabled, `Workspace Installer Contract` compiles:
 - `lvie-cdev-workspace-installer.exe`
 
 The job stages a deterministic workspace payload, builds a manifest-pinned `runner-cli` bundle, and validates that NSIS build tooling can produce the installer on the self-hosted Windows lane.
-Installer runtime is a hard gate for `runner-cli ppl build` and `runner-cli vip build` capability against LabVIEW 2026 (64-bit), with phase-level terminal feedback.
+Installer runtime is a hard gate for post-install capability in this order:
+1. `runner-cli ppl build` with LabVIEW 2020 x86.
+2. `runner-cli ppl build` with LabVIEW 2020 x64.
+3. `runner-cli vipc assert/apply/assert` and `runner-cli vip build` with LabVIEW 2020 x64.
 
 Additional supply-chain contract jobs:
 - `Reproducibility Contract`: validates bit-for-bit determinism for `runner-cli` bundles (`win-x64`, `linux-x64`) and installer output.

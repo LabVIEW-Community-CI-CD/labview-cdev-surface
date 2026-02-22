@@ -82,17 +82,34 @@ jobs:
           & "C:\workspace\artifacts\windows-image-gate\lvie-cdev-workspace-installer.exe" /S
           if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
 
-          & "C:\dev\tools\runner-cli\win-x64\runner-cli.exe" ppl build --repo-root "C:\dev\labview-icon-editor" --labview-version 2026 --supported-bitness 64 --major 0 --minor 0 --patch 0 --build 1 --commit gatecheck
-          if ($LASTEXITCODE -ne 0) { throw "runner-cli ppl build failed with exit code $LASTEXITCODE" }
+          $installReportPath = "C:\dev\artifacts\workspace-install-latest.json"
+          if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
+            throw "Installer report missing: $installReportPath"
+          }
+          $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$installReport.status -ne "succeeded") {
+            throw "Installer report status is not succeeded: $([string]$installReport.status)"
+          }
 
-          $ppl = "C:\dev\labview-icon-editor\resource\plugins\lv_icon.lvlibp"
-          if (-not (Test-Path -LiteralPath $ppl -PathType Leaf)) {
-            throw "Expected PPL output missing: $ppl"
+          $ppl32 = [string]$installReport.ppl_capability_checks.'32'.status
+          $ppl64 = [string]$installReport.ppl_capability_checks.'64'.status
+          if ($ppl32 -ne "pass") { throw "PPL 32-bit gate did not pass. status=$ppl32" }
+          if ($ppl64 -ne "pass") { throw "PPL 64-bit gate did not pass. status=$ppl64" }
+
+          $vipStatus = [string]$installReport.vip_package_build_check.status
+          $vipPath = [string]$installReport.vip_package_build_check.output_vip_path
+          if ($vipStatus -ne "pass") { throw "VIP gate did not pass. status=$vipStatus" }
+          if ([string]::IsNullOrWhiteSpace($vipPath) -or -not (Test-Path -LiteralPath $vipPath -PathType Leaf)) {
+            throw "VIP output missing after successful gate: $vipPath"
           }
 
           [ordered]@{
             status = "pass"
-            ppl_output = $ppl
+            install_report = $installReportPath
+            ppl_32_status = $ppl32
+            ppl_64_status = $ppl64
+            vip_status = $vipStatus
+            vip_output = $vipPath
             timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "C:\workspace\artifacts\windows-image-gate\windows-image-gate-report.json" -Encoding utf8
           '@
