@@ -12,7 +12,13 @@ This repository owns:
 
 `Workspace SHA Drift Signal` runs on a schedule and on demand. It fails when any governed repo default branch SHA differs from its `pinned_sha` in `workspace-governance.json`.
 
-Failure is the signal to open a PR that updates the manifest SHAs.
+Failure is the signal to open a PR that updates the manifest SHAs (manual fork-to-org flow).
+
+Manual flow:
+1. Create a feature branch in `svelderrainruiz/labview-cdev-surface`.
+2. Update `workspace-governance.json` `pinned_sha` values.
+3. Open a PR from the fork branch to `LabVIEW-Community-CI-CD/labview-cdev-surface:main`.
+4. Do not rely on auto-PR bot behavior for this process.
 
 ## Local checks
 
