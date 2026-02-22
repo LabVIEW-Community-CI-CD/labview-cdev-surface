@@ -51,6 +51,7 @@ jobs:
 
   workspace-installer-contract:
     name: Workspace Installer Contract
+    if: ${{ vars.ENABLE_SELF_HOSTED_CONTRACTS == 'true' }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     needs: [ci-pipeline]
     steps:
@@ -136,6 +137,7 @@ jobs:
 
   reproducibility-contract:
     name: Reproducibility Contract
+    if: ${{ vars.ENABLE_SELF_HOSTED_CONTRACTS == 'true' }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     needs: [ci-pipeline]
     steps:
@@ -216,6 +218,7 @@ jobs:
 
   provenance-contract:
     name: Provenance Contract
+    if: ${{ vars.ENABLE_SELF_HOSTED_CONTRACTS == 'true' }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     needs: [reproducibility-contract]
     steps:

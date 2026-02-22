@@ -35,10 +35,13 @@ This repository is the canonical policy and manifest surface for deterministic `
 - Phase-1 release policy is unsigned installer with mandatory SHA256 provenance in release notes.
 
 ## Installer Build Contract
-- `CI Pipeline` must include `Workspace Installer Contract`.
+- `CI Pipeline` (GitHub-hosted) is the required merge check.
+- Self-hosted contract lanes are opt-in via repository variable `ENABLE_SELF_HOSTED_CONTRACTS=true`.
+- If no self-hosted runner is configured, self-hosted lanes must remain skipped and non-blocking.
+- When self-hosted lanes are enabled, `CI Pipeline` must include `Workspace Installer Contract`.
 - The contract job must stage deterministic payload inputs from `workspace-governance-payload`, bundle `runner-cli` from manifest-pinned icon-editor SHA, and build `lvie-cdev-workspace-installer.exe` with NSIS on self-hosted Windows.
 - The job must publish the built installer as a workflow artifact.
-- `CI Pipeline` must also include:
+- When self-hosted lanes are enabled, `CI Pipeline` must also include:
   - `Reproducibility Contract` (bit-for-bit hash checks for runner-cli and installer).
   - `Provenance Contract` (SPDX/SLSA generation + hash-link validation).
 - Keep default-branch required checks unchanged until branch-protection contract is intentionally updated.

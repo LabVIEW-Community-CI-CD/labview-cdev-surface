@@ -17,6 +17,7 @@ Describe 'Workspace SHA refresh PR workflow contract' {
     It 'is schedule and dispatch driven with write permissions' {
         $script:workflowContent | Should -Match 'schedule:'
         $script:workflowContent | Should -Match 'workflow_dispatch:'
+        $script:workflowContent | Should -Match 'actions:\s*write'
         $script:workflowContent | Should -Match 'contents:\s*write'
         $script:workflowContent | Should -Match 'pull-requests:\s*write'
     }
@@ -32,5 +33,10 @@ Describe 'Workspace SHA refresh PR workflow contract' {
         $script:workflowContent | Should -Match 'gh pr merge'
         $script:workflowContent | Should -Match '--auto'
         $script:workflowContent | Should -Match '--squash'
+    }
+
+    It 'dispatches CI Pipeline for automation branch' {
+        $script:workflowContent | Should -Match 'gh workflow run ci\.yml'
+        $script:workflowContent | Should -Match '--ref automation/sha-refresh'
     }
 }

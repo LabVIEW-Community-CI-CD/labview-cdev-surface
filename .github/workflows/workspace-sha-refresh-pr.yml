@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -94,6 +95,20 @@ jobs:
           add-paths: |
             workspace-governance.json
             workspace-governance-payload/workspace-governance/workspace-governance.json
+
+      - name: Dispatch CI Pipeline for refresh branch
+        if: steps.create_pr.outputs.pull-request-number != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & gh workflow run ci.yml `
+            --repo "${{ github.repository }}" `
+            --ref automation/sha-refresh
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to dispatch CI Pipeline for automation/sha-refresh."
+          }
 
       - name: Enable squash auto-merge for refresh PR
         if: steps.create_pr.outputs.pull-request-number != ''

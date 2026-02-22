@@ -70,7 +70,12 @@ pwsh -NoProfile -File .\scripts\Invoke-WorkspaceInstallerIteration.ps1 `
 
 ## Build in CI
 
-`CI Pipeline` includes the `Workspace Installer Contract` job, which compiles:
+`CI Pipeline` always runs on GitHub-hosted Linux and is the required merge check.
+
+Self-hosted contract jobs are opt-in via repository variable `ENABLE_SELF_HOSTED_CONTRACTS=true`.
+If no self-hosted runner is configured, these jobs stay skipped and do not block merge policy.
+
+When enabled, `Workspace Installer Contract` compiles:
 - `lvie-cdev-workspace-installer.exe`
 
 The job stages a deterministic workspace payload, builds a manifest-pinned `runner-cli` bundle, and validates that NSIS build tooling can produce the installer on the self-hosted Windows lane.
