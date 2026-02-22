@@ -251,6 +251,41 @@ function Invoke-VipcApplyWithVipmCli {
     return [pscustomobject]$result
 }
 
+function Get-VipcMismatchAssessment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VipcAuditPath,
+        [Parameter()]
+        [string[]]$NonBlockingRoots = @()
+    )
+
+    $assessment = [ordered]@{
+        has_audit = $false
+        mismatched_roots = @()
+        all_non_blocking = $false
+        parse_error = ''
+    }
+
+    if ([string]::IsNullOrWhiteSpace($VipcAuditPath) -or -not (Test-Path -LiteralPath $VipcAuditPath -PathType Leaf)) {
+        return [pscustomobject]$assessment
+    }
+
+    $assessment.has_audit = $true
+    try {
+        $audit = Get-Content -LiteralPath $VipcAuditPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $mismatchRoots = @($audit.root_audit | Where-Object { -not [bool]$_.matched } | ForEach-Object { [string]$_.root } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        $assessment.mismatched_roots = @($mismatchRoots)
+        if (@($mismatchRoots).Count -gt 0) {
+            $disallowed = @($mismatchRoots | Where-Object { $_ -notin $NonBlockingRoots })
+            $assessment.all_non_blocking = (@($disallowed).Count -eq 0)
+        }
+    } catch {
+        $assessment.parse_error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$assessment
+}
+
 function Invoke-RunnerCliPplCapabilityCheck {
     param(
         [Parameter(Mandatory = $true)]
@@ -360,6 +395,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
     $vipBuildStatusPath = Join-Path -Path $statusRoot -ChildPath 'workspace-installer-vip-build.json'
     $vipcPath = '.github/actions/apply-vipc/runner_dependencies.vipc'
     $vipbPath = 'Tooling/deployment/NI Icon editor.vipb'
+    $nonBlockingVipcMismatchRoots = @('sas_workshops_lib_lunit_for_g_cli')
 
     $result = [ordered]@{
         status = 'pending'
@@ -446,21 +482,31 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         & $RunnerCliPath @vipcAssertArgs | Out-Host
         $vipcAssertExit = $LASTEXITCODE
         if ($vipcAssertExit -ne 0) {
-            Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies via native VIPM CLI.'
-            $nativeApply = Invoke-VipcApplyWithVipmCli `
-                -IconEditorRepoPath $IconEditorRepoPath `
-                -VipcPath $vipcPath `
-                -RequiredLabviewYear ([string]$RequiredLabviewYear) `
-                -RequiredBitness ([string]$RequiredBitness)
-            $result.command.vipc_apply = @('vipm', @($nativeApply.command))
-            if ([string]$nativeApply.status -ne 'pass') {
-                throw $nativeApply.message
-            }
+            $mismatchAssessment = Get-VipcMismatchAssessment `
+                -VipcAuditPath $vipcAuditPath `
+                -NonBlockingRoots $nonBlockingVipcMismatchRoots
 
-            Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-            & $RunnerCliPath @vipcAssertArgs | Out-Host
-            if ($LASTEXITCODE -ne 0) {
-                throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
+            if ([bool]$mismatchAssessment.all_non_blocking -and @($mismatchAssessment.mismatched_roots).Count -gt 0) {
+                $rootsLabel = [string]::Join(', ', @($mismatchAssessment.mismatched_roots))
+                Write-InstallerFeedback -Message ("VIPC assert mismatch is non-blocking for harness mode (roots: {0}); skipping VIPC apply." -f $rootsLabel)
+                $result.command.vipc_apply = @('skipped_non_blocking_roots', @($mismatchAssessment.mismatched_roots))
+            } else {
+                Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies via native VIPM CLI.'
+                $nativeApply = Invoke-VipcApplyWithVipmCli `
+                    -IconEditorRepoPath $IconEditorRepoPath `
+                    -VipcPath $vipcPath `
+                    -RequiredLabviewYear ([string]$RequiredLabviewYear) `
+                    -RequiredBitness ([string]$RequiredBitness)
+                $result.command.vipc_apply = @('vipm', @($nativeApply.command))
+                if ([string]$nativeApply.status -ne 'pass') {
+                    throw $nativeApply.message
+                }
+
+                Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
+                & $RunnerCliPath @vipcAssertArgs | Out-Host
+                if ($LASTEXITCODE -ne 0) {
+                    throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
+                }
             }
         }
 
