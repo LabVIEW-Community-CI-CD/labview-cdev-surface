@@ -28,7 +28,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
-            throw "Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with contents:write, pull-requests:write, and workflow dispatch capability."
+            throw "Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with contents:write and pull-requests:write scopes."
           }
 
       - id: refresh
@@ -105,20 +105,6 @@ jobs:
           add-paths: |
             workspace-governance.json
             workspace-governance-payload/workspace-governance/workspace-governance.json
-
-      - name: Dispatch CI Pipeline for refresh branch
-        if: steps.create_pr.outputs.pull-request-number != ''
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & gh workflow run ci.yml `
-            --repo "${{ github.repository }}" `
-            --ref automation/sha-refresh
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to dispatch CI Pipeline for automation/sha-refresh."
-          }
 
       - name: Enable squash auto-merge for refresh PR
         if: steps.create_pr.outputs.pull-request-number != ''

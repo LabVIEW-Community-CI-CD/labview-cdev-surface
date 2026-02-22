@@ -21,7 +21,8 @@ This repository is the canonical policy and manifest surface for deterministic `
 - `Workspace SHA Refresh PR` is the primary path for updating `pinned_sha` values.
 - On drift, automation must update manifest pins, create/update branch `automation/sha-refresh`, and open or update a PR to `main`.
 - `workspace-sha-drift-signal.yml` uses `WORKFLOW_BOT_TOKEN` for cross-repo default-branch SHA reads.
-- `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation, PR operations, and workflow dispatch.
+- `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation and PR operations.
+- Refresh CI propagation is PR-event-driven; do not explicitly dispatch `ci.yml` from refresh automation.
 - If `WORKFLOW_BOT_TOKEN` is missing or misconfigured, refresh automation must fail fast with explicit remediation.
 - Auto-merge is enabled by default for refresh PRs using squash strategy.
 - Maintainer review is not required for `labview-cdev-surface` refresh PR merges (`required_approving_review_count = 0`).
@@ -45,6 +46,8 @@ This repository is the canonical policy and manifest surface for deterministic `
 - When self-hosted lanes are enabled, `CI Pipeline` must include `Workspace Installer Contract`.
 - The contract job must stage deterministic payload inputs from `workspace-governance-payload`, bundle `runner-cli` from manifest-pinned icon-editor SHA, and build `lvie-cdev-workspace-installer.exe` with NSIS on self-hosted Windows.
 - The job must publish the built installer as a workflow artifact.
+- CI workflow-level concurrency must deduplicate same workflow/ref execution across PR, push, and manual dispatch events.
+- Self-hosted artifact uploads must use deterministic two-attempt retry and fail only when both attempts fail.
 - When self-hosted lanes are enabled, `CI Pipeline` must also include:
   - `Reproducibility Contract` (bit-for-bit hash checks for runner-cli and installer).
   - `Provenance Contract` (SPDX/SLSA generation + hash-link validation).

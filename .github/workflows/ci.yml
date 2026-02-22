@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ci-pipeline-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -32,6 +36,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Invoke-Pester -Path @(
             './tests/WorkspaceSurfaceContract.Tests.ps1',
+            './tests/CiWorkflowReliabilityContract.Tests.ps1',
             './tests/WorkspaceShaDriftSignalContract.Tests.ps1',
             './tests/WorkspaceShaRefreshPrContract.Tests.ps1',
             './tests/WorkspaceManifestPinRefreshScript.Tests.ps1',
@@ -129,12 +134,35 @@ jobs:
           "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Upload workspace bootstrap installer artifact
+      - id: upload-workspace-installer-artifact-attempt-1
+        name: Upload workspace bootstrap installer artifact (attempt 1)
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: workspace-bootstrap-installer-${{ github.run_id }}
           path: ${{ steps.build-workspace-installer.outputs.asset_path }}
           if-no-files-found: error
+
+      - id: upload-workspace-installer-artifact-attempt-2
+        name: Upload workspace bootstrap installer artifact (attempt 2)
+        if: steps.upload-workspace-installer-artifact-attempt-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-bootstrap-installer-${{ github.run_id }}
+          path: ${{ steps.build-workspace-installer.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Validate workspace bootstrap installer artifact upload
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $attempt1 = '${{ steps.upload-workspace-installer-artifact-attempt-1.outcome }}'
+          $attempt2 = '${{ steps.upload-workspace-installer-artifact-attempt-2.outcome }}'
+          if ($attempt1 -ne 'success' -and $attempt2 -ne 'success') {
+            throw 'Workspace bootstrap installer artifact upload failed after two attempts.'
+          }
 
   reproducibility-contract:
     name: Reproducibility Contract
@@ -214,12 +242,35 @@ jobs:
             -NsisRoot $nsisRoot
           if ($LASTEXITCODE -ne 0) { throw 'workspace installer determinism failed.' }
 
-      - name: Upload reproducibility artifacts
+      - id: upload-reproducibility-artifacts-attempt-1
+        name: Upload reproducibility artifacts (attempt 1)
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: reproducibility-contract-${{ github.run_id }}
           path: ${{ runner.temp }}/reproducibility
           if-no-files-found: error
+
+      - id: upload-reproducibility-artifacts-attempt-2
+        name: Upload reproducibility artifacts (attempt 2)
+        if: steps.upload-reproducibility-artifacts-attempt-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducibility-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/reproducibility
+          if-no-files-found: error
+
+      - name: Validate reproducibility artifact upload
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $attempt1 = '${{ steps.upload-reproducibility-artifacts-attempt-1.outcome }}'
+          $attempt2 = '${{ steps.upload-reproducibility-artifacts-attempt-2.outcome }}'
+          if ($attempt1 -ne 'success' -and $attempt2 -ne 'success') {
+            throw 'Reproducibility artifact upload failed after two attempts.'
+          }
 
   provenance-contract:
     name: Provenance Contract
@@ -294,9 +345,32 @@ jobs:
             -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
           if ($LASTEXITCODE -ne 0) { throw 'Provenance contract validation failed.' }
 
-      - name: Upload provenance artifacts
+      - id: upload-provenance-artifacts-attempt-1
+        name: Upload provenance artifacts (attempt 1)
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: provenance-contract-${{ github.run_id }}
           path: ${{ runner.temp }}/provenance
           if-no-files-found: error
+
+      - id: upload-provenance-artifacts-attempt-2
+        name: Upload provenance artifacts (attempt 2)
+        if: steps.upload-provenance-artifacts-attempt-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/provenance
+          if-no-files-found: error
+
+      - name: Validate provenance artifact upload
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $attempt1 = '${{ steps.upload-provenance-artifacts-attempt-1.outcome }}'
+          $attempt2 = '${{ steps.upload-provenance-artifacts-attempt-2.outcome }}'
+          if ($attempt1 -ne 'success' -and $attempt2 -ne 'success') {
+            throw 'Provenance artifact upload failed after two attempts.'
+          }

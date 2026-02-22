@@ -20,9 +20,10 @@ Auto-refresh policy:
 2. Maintainer approval is not required for `labview-cdev-surface` refresh merges (`required_approving_review_count = 0`).
 3. Required status checks remain strict (`CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`).
 4. `workspace-sha-drift-signal.yml` uses `WORKFLOW_BOT_TOKEN` for cross-repo default-branch SHA reads.
-5. `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation, PR operations, and workflow dispatch.
+5. `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation and PR operations.
 6. If `WORKFLOW_BOT_TOKEN` is missing or misconfigured, refresh automation fails fast with an explicit error.
-7. Manual refresh PR flow is fallback only for platform outages, not routine check propagation.
+7. Refresh CI propagation is PR-event-driven; refresh automation does not explicitly dispatch `ci.yml`.
+8. Manual refresh PR flow is fallback only for platform outages, not routine check propagation.
 
 ## Local checks
 
@@ -78,6 +79,7 @@ pwsh -NoProfile -File .\scripts\Invoke-WorkspaceInstallerIteration.ps1 `
 
 Self-hosted contract jobs are opt-in via repository variable `ENABLE_SELF_HOSTED_CONTRACTS=true`.
 If no self-hosted runner is configured, these jobs stay skipped and do not block merge policy.
+The workflow uses concurrency dedupe keyed by workflow/repo/ref to avoid duplicate active runs on the same branch.
 
 When enabled, `Workspace Installer Contract` compiles:
 - `lvie-cdev-workspace-installer.exe`
@@ -91,6 +93,10 @@ Installer runtime is a hard gate for post-install capability in this order:
 Additional supply-chain contract jobs:
 - `Reproducibility Contract`: validates bit-for-bit determinism for `runner-cli` bundles (`win-x64`, `linux-x64`) and installer output.
 - `Provenance Contract`: generates and validates SPDX + SLSA provenance artifacts linked to installer/bundle/manifest hashes.
+
+Artifact upload reliability:
+1. Self-hosted artifact uploads run with deterministic two-attempt retry behavior.
+2. Operator escalation is required only when both upload attempts fail.
 
 ## Post-gate extension (Docker Desktop Windows image)
 

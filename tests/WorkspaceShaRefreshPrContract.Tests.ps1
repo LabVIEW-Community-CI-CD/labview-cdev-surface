@@ -42,8 +42,8 @@ Describe 'Workspace SHA refresh PR workflow contract' {
         $script:workflowContent | Should -Match '--squash'
     }
 
-    It 'dispatches CI Pipeline for automation branch' {
-        $script:workflowContent | Should -Match 'gh workflow run ci\.yml'
-        $script:workflowContent | Should -Match '--ref automation/sha-refresh'
+    It 'relies on PR-driven CI propagation and avoids explicit CI dispatch' {
+        $script:workflowContent | Should -Not -Match 'gh workflow run ci\.yml'
+        $script:workflowContent | Should -Not -Match '--ref automation/sha-refresh'
     }
 }
