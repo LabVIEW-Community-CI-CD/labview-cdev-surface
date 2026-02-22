@@ -248,7 +248,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        & $RunnerCliPath @commandArgs
+        & $RunnerCliPath @commandArgs | Out-Host
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
             throw "runner-cli ppl build failed with exit code $($result.exit_code)."
@@ -376,7 +376,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vipc_assert = @($vipcAssertArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vipc assert.'
-        & $RunnerCliPath @vipcAssertArgs
+        & $RunnerCliPath @vipcAssertArgs | Out-Host
         $vipcAssertExit = $LASTEXITCODE
         if ($vipcAssertExit -ne 0) {
             $vipcApplyArgs = @(
@@ -388,13 +388,13 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             )
             $result.command.vipc_apply = @($vipcApplyArgs)
             Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies.'
-            & $RunnerCliPath @vipcApplyArgs
+            & $RunnerCliPath @vipcApplyArgs | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 throw "runner-cli vipc apply failed with exit code $LASTEXITCODE."
             }
 
             Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-            & $RunnerCliPath @vipcAssertArgs
+            & $RunnerCliPath @vipcAssertArgs | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
             }
@@ -420,7 +420,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vip_build = @($vipBuildArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vip build.'
-        & $RunnerCliPath @vipBuildArgs
+        & $RunnerCliPath @vipBuildArgs | Out-Host
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
             throw "runner-cli vip build failed with exit code $($result.exit_code)."
