@@ -295,6 +295,7 @@ function Invoke-PreVipLabVIEWCloseBestEffort {
     $targets = @(
         @{ year = '2026'; bitness = '32' },
         @{ year = '2026'; bitness = '64' },
+        @{ year = '2020'; bitness = '32' },
         @{ year = '2020'; bitness = '64' }
     )
 
@@ -1359,6 +1360,10 @@ try {
             } else {
                 $allPplPass = $true
                 foreach ($bitness in $requiredPplBitnesses) {
+                    Write-InstallerFeedback -Message ("Running pre-PPL LabVIEW close sweep before {0}-bit gate." -f $bitness)
+                    Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
+                    Start-Sleep -Seconds 3
+
                     Write-InstallerFeedback -Message ("Running runner-cli PPL capability gate ({0}-bit)." -f $bitness)
                     $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
                         -RunnerCliPath $runnerCliExePath `
