@@ -21,17 +21,21 @@ Describe 'Workspace install runtime contract' {
     }
 
     It 'fails fast on missing dependencies and enforces deterministic pinned_sha checks' {
-        $script:scriptContent | Should -Match 'foreach \(\$commandName in @\(''pwsh'', ''git'', ''gh''\)\)'
+        $script:scriptContent | Should -Match 'foreach \(\$commandName in @\(''pwsh'', ''git'', ''gh'', ''g-cli''\)\)'
         $script:scriptContent | Should -Match 'invalid pinned_sha'
         $script:scriptContent | Should -Match 'head_sha_mismatch'
         $script:scriptContent | Should -Match 'remote_mismatch_'
         $script:scriptContent | Should -Match 'branch_identity_mismatch'
     }
 
-    It 'copies governance payload to workspace root and runs governance audit' {
+    It 'copies governance payload to workspace root, validates runner-cli bundle, and runs governance audit' {
         $script:scriptContent | Should -Match 'workspace-governance\.json'
         $script:scriptContent | Should -Match 'AGENTS\.md'
         $script:scriptContent | Should -Match 'Assert-WorkspaceGovernance\.ps1'
+        $script:scriptContent | Should -Match 'runner-cli\.exe'
+        $script:scriptContent | Should -Match 'runner-cli\.metadata\.json'
+        $script:scriptContent | Should -Match 'Invoke-RunnerCliPplCapabilityCheck'
+        $script:scriptContent | Should -Match 'LabVIEW 2026'
         $script:scriptContent | Should -Match 'branch_protection_'
         $script:scriptContent | Should -Match 'branch_only_failure'
     }

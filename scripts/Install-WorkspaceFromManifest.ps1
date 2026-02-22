@@ -42,6 +42,149 @@ function To-Bool {
     return [bool]$Value
 }
 
+function Get-LabVIEWInstallRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VersionYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$Bitness
+    )
+
+    $candidates = @()
+    $regPaths = @()
+    if ($Bitness -eq '32') {
+        $candidates += "C:\Program Files (x86)\National Instruments\LabVIEW $VersionYear"
+        $regPaths += "HKLM:\SOFTWARE\WOW6432Node\National Instruments\LabVIEW $VersionYear"
+    } else {
+        $candidates += "C:\Program Files\National Instruments\LabVIEW $VersionYear"
+        $regPaths += "HKLM:\SOFTWARE\National Instruments\LabVIEW $VersionYear"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            return $candidate
+        }
+    }
+
+    foreach ($regPath in $regPaths) {
+        try {
+            $props = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            foreach ($name in @('Path', 'InstallDir', 'InstallPath')) {
+                $value = [string]$props.$name
+                if (-not [string]::IsNullOrWhiteSpace($value) -and (Test-Path -LiteralPath $value -PathType Container)) {
+                    return $value
+                }
+            }
+        } catch {
+            continue
+        }
+    }
+
+    return $null
+}
+
+function Get-ExpectedShaFromFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ShaFilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $ShaFilePath -PathType Leaf)) {
+        throw "SHA256 file not found: $ShaFilePath"
+    }
+
+    $raw = (Get-Content -LiteralPath $ShaFilePath -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw "SHA256 file is empty: $ShaFilePath"
+    }
+
+    $expected = ($raw.Split(' ')[0]).Trim().ToLowerInvariant()
+    if ($expected -notmatch '^[0-9a-f]{64}$') {
+        throw "SHA256 file has invalid hash format: $ShaFilePath"
+    }
+    return $expected
+}
+
+function Invoke-RunnerCliPplCapabilityCheck {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunnerCliPath,
+        [Parameter(Mandatory = $true)]
+        [string]$IconEditorRepoPath,
+        [Parameter(Mandatory = $true)]
+        [string]$PinnedSha,
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredLabviewYear
+    )
+
+    $result = [ordered]@{
+        status = 'pending'
+        message = ''
+        runner_cli_path = $RunnerCliPath
+        repo_path = $IconEditorRepoPath
+        required_labview_year = $RequiredLabviewYear
+        required_bitness = '64'
+        output_ppl_path = Join-Path $IconEditorRepoPath 'resource\plugins\lv_icon.lvlibp'
+        command = @()
+        exit_code = $null
+        labview_install_root = ''
+    }
+
+    try {
+        if (-not (Test-Path -LiteralPath $RunnerCliPath -PathType Leaf)) {
+            throw "runner-cli executable not found: $RunnerCliPath"
+        }
+        if (-not (Test-Path -LiteralPath $IconEditorRepoPath -PathType Container)) {
+            throw "Icon editor repository path not found: $IconEditorRepoPath"
+        }
+        if ($PinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Pinned SHA is invalid for capability check: $PinnedSha"
+        }
+
+        $labviewRoot = Get-LabVIEWInstallRoot -VersionYear $RequiredLabviewYear -Bitness '64'
+        if ([string]::IsNullOrWhiteSpace($labviewRoot)) {
+            throw "LabVIEW $RequiredLabviewYear (64-bit) is required for runner-cli PPL capability but was not found."
+        }
+        $result.labview_install_root = $labviewRoot
+
+        $commitArg = if ($PinnedSha.Length -gt 12) { $PinnedSha.Substring(0, 12) } else { $PinnedSha }
+        $commandArgs = @(
+            'ppl', 'build',
+            '--repo-root', $IconEditorRepoPath,
+            '--labview-version', $RequiredLabviewYear,
+            '--supported-bitness', '64',
+            '--major', '0',
+            '--minor', '0',
+            '--patch', '0',
+            '--build', '1',
+            '--commit', $commitArg
+        )
+        $result.command = @($commandArgs)
+
+        & $RunnerCliPath @commandArgs
+        $result.exit_code = $LASTEXITCODE
+        if ($result.exit_code -ne 0) {
+            throw "runner-cli ppl build failed with exit code $($result.exit_code)."
+        }
+
+        if (-not (Test-Path -LiteralPath $result.output_ppl_path -PathType Leaf)) {
+            throw "runner-cli reported success, but PPL output was not found: $($result.output_ppl_path)"
+        }
+
+        $result.status = 'pass'
+        $result.message = 'runner-cli PPL capability check passed for LabVIEW 2026 x64.'
+    } catch {
+        if ($null -eq $result.exit_code) {
+            $result.exit_code = 1
+        }
+        $result.status = 'fail'
+        $result.message = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 $resolvedWorkspaceRoot = [System.IO.Path]::GetFullPath($WorkspaceRoot)
 $resolvedManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
 $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
@@ -55,6 +198,28 @@ $payloadSync = [ordered]@{
     status = 'pending'
     files = @()
     message = ''
+}
+$runnerCliBundle = [ordered]@{
+    status = 'not_checked'
+    message = ''
+    root = Join-Path $payloadRoot 'tools\runner-cli\win-x64'
+    exe_path = ''
+    sha_file = ''
+    metadata_file = ''
+    expected_sha256 = ''
+    actual_sha256 = ''
+}
+$pplCapabilityCheck = [ordered]@{
+    status = 'not_run'
+    message = ''
+    runner_cli_path = ''
+    repo_path = ''
+    required_labview_year = '2026'
+    required_bitness = '64'
+    output_ppl_path = ''
+    command = @()
+    exit_code = $null
+    labview_install_root = ''
 }
 $governanceAudit = [ordered]@{
     invoked = $false
@@ -71,7 +236,7 @@ try {
     Ensure-Directory -Path $resolvedWorkspaceRoot
     Ensure-Directory -Path (Split-Path -Parent $resolvedOutputPath)
 
-    foreach ($commandName in @('pwsh', 'git', 'gh')) {
+    foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli')) {
         $cmd = Get-Command $commandName -ErrorAction SilentlyContinue
         $check = [ordered]@{
             command = $commandName
@@ -92,6 +257,30 @@ try {
     if ($null -eq $manifest.managed_repos -or @($manifest.managed_repos).Count -eq 0) {
         throw "Manifest does not contain managed_repos entries: $resolvedManifestPath"
     }
+
+    $requiredLabviewYear = '2026'
+    $requiredLabviewBitness = '64'
+    $runnerCliRelativeRoot = 'tools\runner-cli\win-x64'
+    if ($null -ne $manifest.PSObject.Properties['installer_contract']) {
+        $installerContract = $manifest.installer_contract
+        if ($null -ne $installerContract.PSObject.Properties['labview_gate']) {
+            $labviewGate = $installerContract.labview_gate
+            if (-not [string]::IsNullOrWhiteSpace([string]$labviewGate.required_year)) {
+                $requiredLabviewYear = [string]$labviewGate.required_year
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$labviewGate.required_bitness)) {
+                $requiredLabviewBitness = [string]$labviewGate.required_bitness
+            }
+        }
+        if ($null -ne $installerContract.PSObject.Properties['runner_cli_bundle']) {
+            $runnerCliBundleContract = $installerContract.runner_cli_bundle
+            if (-not [string]::IsNullOrWhiteSpace([string]$runnerCliBundleContract.relative_root)) {
+                $runnerCliRelativeRoot = [string]$runnerCliBundleContract.relative_root
+            }
+        }
+    }
+    $pplCapabilityCheck.required_labview_year = $requiredLabviewYear
+    $pplCapabilityCheck.required_bitness = $requiredLabviewBitness
 
     foreach ($repo in @($manifest.managed_repos)) {
         $repoPath = [string]$repo.path
@@ -276,7 +465,10 @@ try {
         @{ source = (Join-Path $payloadRoot 'AGENTS.md'); destination = (Join-Path $resolvedWorkspaceRoot 'AGENTS.md') },
         @{ source = (Join-Path $payloadRoot 'workspace-governance.json'); destination = (Join-Path $resolvedWorkspaceRoot 'workspace-governance.json') },
         @{ source = (Join-Path $payloadRoot 'scripts\Assert-WorkspaceGovernance.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Assert-WorkspaceGovernance.ps1') },
-        @{ source = (Join-Path $payloadRoot 'scripts\Test-PolicyContracts.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Test-PolicyContracts.ps1') }
+        @{ source = (Join-Path $payloadRoot 'scripts\Test-PolicyContracts.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Test-PolicyContracts.ps1') },
+        @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe') },
+        @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256') },
+        @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json') }
     )
 
     try {
@@ -288,6 +480,7 @@ try {
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
                 throw "Payload file is missing: $sourcePath"
             }
+            Ensure-Directory -Path (Split-Path -Parent $destinationPath)
             Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
             $payloadSync.files += [pscustomobject]@{
                 source = $sourcePath
@@ -302,6 +495,92 @@ try {
         $payloadSync.status = 'failed'
         $payloadSync.message = $_.Exception.Message
         $errors += "Payload sync failed. $($payloadSync.message)"
+    }
+
+    $runnerCliBundleRoot = Join-Path $resolvedWorkspaceRoot $runnerCliRelativeRoot
+    $runnerCliExePath = Join-Path $runnerCliBundleRoot 'runner-cli.exe'
+    $runnerCliShaPath = Join-Path $runnerCliBundleRoot 'runner-cli.exe.sha256'
+    $runnerCliMetadataPath = Join-Path $runnerCliBundleRoot 'runner-cli.metadata.json'
+    $runnerCliBundle.root = $runnerCliBundleRoot
+    $runnerCliBundle.exe_path = $runnerCliExePath
+    $runnerCliBundle.sha_file = $runnerCliShaPath
+    $runnerCliBundle.metadata_file = $runnerCliMetadataPath
+
+    $iconEditorRepoEntry = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
+    $iconEditorRepoPath = if ($null -ne $iconEditorRepoEntry) { [string]$iconEditorRepoEntry.path } else { '' }
+    $iconEditorPinnedSha = if ($null -ne $iconEditorRepoEntry) { ([string]$iconEditorRepoEntry.pinned_sha).ToLowerInvariant() } else { '' }
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($iconEditorRepoPath)) {
+            throw "Manifest does not define managed repo entry 'labview-icon-editor'."
+        }
+        if ([string]::IsNullOrWhiteSpace($iconEditorPinnedSha) -or $iconEditorPinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Manifest entry 'labview-icon-editor' has invalid pinned_sha '$iconEditorPinnedSha'."
+        }
+        if (-not (Test-Path -LiteralPath $runnerCliExePath -PathType Leaf)) {
+            throw "Bundled runner-cli executable was not found: $runnerCliExePath"
+        }
+        $expectedSha = Get-ExpectedShaFromFile -ShaFilePath $runnerCliShaPath
+        $actualSha = (Get-FileHash -LiteralPath $runnerCliExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $runnerCliBundle.expected_sha256 = $expectedSha
+        $runnerCliBundle.actual_sha256 = $actualSha
+        if ($expectedSha -ne $actualSha) {
+            throw "Bundled runner-cli SHA256 mismatch. expected=$expectedSha actual=$actualSha"
+        }
+
+        if (-not (Test-Path -LiteralPath $runnerCliMetadataPath -PathType Leaf)) {
+            throw "Bundled runner-cli metadata was not found: $runnerCliMetadataPath"
+        }
+
+        $runnerCliMetadata = Get-Content -LiteralPath $runnerCliMetadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $metadataSourceCommit = ([string]$runnerCliMetadata.source_commit).ToLowerInvariant()
+        if ($metadataSourceCommit -notmatch '^[0-9a-f]{40}$') {
+            throw "runner-cli metadata source_commit is invalid: $metadataSourceCommit"
+        }
+        if ($metadataSourceCommit -ne $iconEditorPinnedSha) {
+            throw "runner-cli metadata source_commit does not match manifest pin for labview-icon-editor."
+        }
+
+        $runnerCliBundle.status = 'pass'
+        $runnerCliBundle.message = 'Bundled runner-cli payload integrity checks passed.'
+    } catch {
+        $runnerCliBundle.status = 'fail'
+        $runnerCliBundle.message = $_.Exception.Message
+        $errors += "Runner CLI bundle verification failed. $($runnerCliBundle.message)"
+    }
+
+    if ($runnerCliBundle.status -eq 'pass') {
+        $repoContractStatus = @($repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1)
+        if ($null -eq $repoContractStatus -or [string]$repoContractStatus.status -ne 'pass') {
+            $pplCapabilityCheck.status = 'fail'
+            $pplCapabilityCheck.message = "Cannot run runner-cli PPL capability check because icon-editor repo contract failed at '$iconEditorRepoPath'."
+            $errors += $pplCapabilityCheck.message
+        } else {
+            if ($requiredLabviewBitness -ne '64') {
+                throw "Unsupported installer contract bitness '$requiredLabviewBitness'. Current runtime gate supports 64 only."
+            }
+
+            $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
+                -RunnerCliPath $runnerCliExePath `
+                -IconEditorRepoPath $iconEditorRepoPath `
+                -PinnedSha $iconEditorPinnedSha `
+                -RequiredLabviewYear ([string]$requiredLabviewYear)
+            $pplCapabilityCheck = [ordered]@{
+                status = [string]$capabilityResult.status
+                message = [string]$capabilityResult.message
+                runner_cli_path = [string]$capabilityResult.runner_cli_path
+                repo_path = [string]$capabilityResult.repo_path
+                required_labview_year = [string]$capabilityResult.required_labview_year
+                required_bitness = [string]$capabilityResult.required_bitness
+                output_ppl_path = [string]$capabilityResult.output_ppl_path
+                command = @($capabilityResult.command)
+                exit_code = $capabilityResult.exit_code
+                labview_install_root = [string]$capabilityResult.labview_install_root
+            }
+            if ($pplCapabilityCheck.status -ne 'pass') {
+                $errors += "Runner CLI PPL capability check failed. $($pplCapabilityCheck.message)"
+            }
+        }
     }
 
     $assertScriptPath = Join-Path $resolvedWorkspaceRoot 'scripts\Assert-WorkspaceGovernance.ps1'
@@ -378,6 +657,8 @@ $report = [ordered]@{
     dependency_checks = $dependencyChecks
     payload_sync = $payloadSync
     repositories = $repositoryResults
+    runner_cli_bundle = $runnerCliBundle
+    ppl_capability_check = $pplCapabilityCheck
     governance_audit = $governanceAudit
     warnings = $warnings
     errors = $errors

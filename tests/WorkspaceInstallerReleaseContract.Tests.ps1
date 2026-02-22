@@ -28,7 +28,11 @@ Describe 'Workspace installer release workflow contract' {
     It 'defines package and publish jobs with release asset upload' {
         $script:workflowContent | Should -Match 'name:\s*Package Workspace Installer'
         $script:workflowContent | Should -Match 'name:\s*Publish GitHub Release Asset'
-        $script:workflowContent | Should -Match 'Build-WorkspaceBootstrapInstaller\.ps1'
+        $script:workflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
+        $script:workflowContent | Should -Match 'Test-RunnerCliBundleDeterminism\.ps1'
+        $script:workflowContent | Should -Match 'Test-WorkspaceInstallerDeterminism\.ps1'
+        $script:workflowContent | Should -Match 'Write-ReleaseProvenance\.ps1'
+        $script:workflowContent | Should -Match 'Test-ProvenanceContracts\.ps1'
         $script:workflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match '''release'',\s*''create'''
         $script:workflowContent | Should -Match 'gh release upload'
@@ -39,5 +43,8 @@ Describe 'Workspace installer release workflow contract' {
         $script:workflowContent | Should -Match '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'
         $script:workflowContent | Should -Match 'SHA256'
         $script:workflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe /S'
+        $script:workflowContent | Should -Match 'workspace-installer\.spdx\.json'
+        $script:workflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:workflowContent | Should -Match 'reproducibility-report\.json'
     }
 }

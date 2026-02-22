@@ -38,4 +38,13 @@ Describe 'Build-WorkspaceBootstrapInstaller script' {
         (Test-Path -Path $outputPath -PathType Leaf) | Should -BeTrue
         ([string]($result | Out-String)) | Should -Match ([regex]::Escape($outputPath))
     }
+
+    It 'supports deterministic compare mode parameters' {
+        $scriptContent = Get-Content -Path $script:scriptPath -Raw
+        $scriptContent | Should -Match '\[bool\]\$Deterministic = \$true'
+        $scriptContent | Should -Match '\[long\]\$SourceDateEpoch'
+        $scriptContent | Should -Match '\[switch\]\$VerifyDeterminism'
+        $scriptContent | Should -Match 'Normalize-PeTimestamp'
+        $scriptContent | Should -Match 'DeterminismReportPath'
+    }
 }
