@@ -55,12 +55,16 @@ jobs:
 
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
-          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1') `
+          $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
+          if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
+            throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+          }
+          & $bundleRunnerCliScript `
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
             -Runtime 'win-x64' `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) { throw "Build-RunnerCliBundleFromManifest.ps1 failed." }
 
           & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-RunnerCliBundleDeterminism.ps1') `

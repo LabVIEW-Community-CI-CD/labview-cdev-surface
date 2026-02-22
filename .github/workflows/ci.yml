@@ -94,7 +94,7 @@ jobs:
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
             -Runtime 'win-x64' `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) {
             throw "Build-RunnerCliBundleFromManifest.ps1 failed with exit code $LASTEXITCODE"
           }
@@ -118,7 +118,7 @@ jobs:
             throw "makensis version probe failed with exit code $LASTEXITCODE"
           }
 
-          & $buildScript -PayloadRoot $payloadRoot -OutputPath $assetPath -WorkspaceRootDefault 'C:\dev' -NsisRoot $nsisRoot -Deterministic $true
+          & $buildScript -PayloadRoot $payloadRoot -OutputPath $assetPath -WorkspaceRootDefault 'C:\dev' -NsisRoot $nsisRoot -Deterministic:$true
           if ($LASTEXITCODE -ne 0) {
             throw "Build-WorkspaceBootstrapInstaller.ps1 failed with exit code $LASTEXITCODE"
           }
@@ -164,12 +164,16 @@ jobs:
 
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
-          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1') `
+          $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
+          if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
+            throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+          }
+          & $bundleRunnerCliScript `
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
             -Runtime 'win-x64' `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build deterministic runner-cli payload bundle."
           }
@@ -245,12 +249,16 @@ jobs:
 
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
-          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1') `
+          $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
+          if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
+            throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+          }
+          & $bundleRunnerCliScript `
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
             -Runtime 'win-x64' `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build runner-cli bundle.' }
 
           $installerPath = Join-Path $env:RUNNER_TEMP 'lvie-cdev-workspace-installer.exe'
@@ -263,7 +271,7 @@ jobs:
             -OutputPath $installerPath `
             -WorkspaceRootDefault 'C:\dev' `
             -NsisRoot $nsisRoot `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build workspace installer for provenance.' }
 
           $provRoot = Join-Path $env:RUNNER_TEMP 'provenance'
