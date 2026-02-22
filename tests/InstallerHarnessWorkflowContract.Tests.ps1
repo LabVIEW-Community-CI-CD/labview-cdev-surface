@@ -21,14 +21,15 @@ Describe 'Installer harness workflow contract' {
         $script:workflowContent | Should -Match 'ref:'
     }
 
-    It 'uses self-hosted windows LV label with deterministic concurrency' {
-        $script:workflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
+    It 'uses self-hosted windows LV + installer harness labels with deterministic concurrency' {
+        $script:workflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*installer-harness\]'
         $script:workflowContent | Should -Match 'group:\s*installer-harness-\$\{\{\s*github\.ref\s*\}\}'
         $script:workflowContent | Should -Match 'cancel-in-progress:\s*false'
     }
 
     It 'executes baseline lock, machine preflight, and installer iteration flow' {
         $script:workflowContent | Should -Match 'Assert-InstallerHarnessRunnerBaseline\.ps1'
+        $script:workflowContent | Should -Match '-AllowInteractiveRunner'
         $script:workflowContent | Should -Match 'Assert-InstallerHarnessMachinePreflight\.ps1'
         $script:workflowContent | Should -Match 'Invoke-WorkspaceInstallerIteration\.ps1'
         $script:workflowContent | Should -Match '-Mode full'

@@ -125,6 +125,7 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.harness.runner_labels) -contains 'self-hosted') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.runner_labels) -contains 'windows') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.runner_labels) -contains 'self-hosted-windows-lv') | Should -BeTrue
+        (@($script:manifest.installer_contract.harness.runner_labels) -contains 'installer-harness') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_reports) -contains 'iteration-summary.json') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_reports) -contains 'exercise-report.json') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_reports) -contains 'C:\dev-smoke-lvie\artifacts\workspace-install-latest.json') | Should -BeTrue
@@ -179,8 +180,10 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'Installer Harness Execution Contract'
         $script:agentsContent | Should -Match 'integration/\*'
         $script:agentsContent | Should -Match 'self-hosted-windows-lv'
+        $script:agentsContent | Should -Match 'installer-harness'
         $script:agentsContent | Should -Match 'C:\\actions-runner-cdev'
         $script:agentsContent | Should -Match 'C:\\actions-runner-cdev-2'
+        $script:agentsContent | Should -Match 'C:\\actions-runner-cdev-harness2'
         $script:agentsContent | Should -Match 'iteration-summary\.json'
         $script:agentsContent | Should -Match 'exercise-report\.json'
         $script:agentsContent | Should -Match 'workspace-install-latest\.json'
@@ -193,6 +196,7 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'Installer Harness'
         $script:readmeContent | Should -Match 'integration/'
         $script:readmeContent | Should -Match 'self-hosted-windows-lv'
+        $script:readmeContent | Should -Match 'installer-harness'
     }
 
     It 'defines CI pipeline workflow' {

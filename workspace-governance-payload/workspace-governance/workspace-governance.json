@@ -75,7 +75,8 @@
       "runner_labels": [
         "self-hosted",
         "windows",
-        "self-hosted-windows-lv"
+        "self-hosted-windows-lv",
+        "installer-harness"
       ],
       "required_reports": [
         "iteration-summary.json",

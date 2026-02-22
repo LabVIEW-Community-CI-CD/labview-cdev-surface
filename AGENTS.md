@@ -98,11 +98,12 @@ This repository is the canonical policy and manifest surface for deterministic `
 ## Installer Harness Execution Contract
 - `.github/workflows/installer-harness-self-hosted.yml` is the authoritative self-hosted installer harness workflow.
 - Trigger path is `integration/*` branch push with `workflow_dispatch` fallback for targeted refs.
-- Required runner labels: `self-hosted`, `windows`, `self-hosted-windows-lv`.
+- Required runner labels: `self-hosted`, `windows`, `self-hosted-windows-lv`, `installer-harness`.
 - Canonical runner roots for this machine:
   - `C:\actions-runner-cdev`
   - `C:\actions-runner-cdev-2`
-- Expected runner service account in this cycle: `NT AUTHORITY\NETWORK SERVICE`.
+  - `C:\actions-runner-cdev-harness2`
+- Service-runner account remains `NT AUTHORITY\NETWORK SERVICE`; harness jobs may run on the interactive runner label and are validated via `-AllowInteractiveRunner`.
 - The workflow must run baseline + machine preflight before executing the installer harness iteration:
   - `scripts/Assert-InstallerHarnessRunnerBaseline.ps1`
   - `scripts/Assert-InstallerHarnessMachinePreflight.ps1`

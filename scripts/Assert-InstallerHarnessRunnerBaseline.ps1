@@ -14,6 +14,9 @@ param(
     [string]$ExpectedServiceAccount = 'NT AUTHORITY\NETWORK SERVICE',
 
     [Parameter()]
+    [switch]$AllowInteractiveRunner,
+
+    [Parameter()]
     [string[]]$RequiredLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv'),
 
     [Parameter()]
@@ -101,7 +104,8 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 $expectedGitHubUrl = "https://github.com/$Repository"
 
 $serviceInventory = @(Get-CimInstance Win32_Service | Where-Object { $_.Name -like 'actions.runner.LabVIEW-Community-CI-CD-labview-cdev-surface*' })
-Add-Check -Scope 'services' -Name 'service_count' -Passed ($serviceInventory.Count -ge $RunnerRoots.Count) -Detail ("count={0}" -f $serviceInventory.Count)
+$requiredServiceCount = if ($AllowInteractiveRunner.IsPresent) { 0 } else { $RunnerRoots.Count }
+Add-Check -Scope 'services' -Name 'service_count' -Passed ($serviceInventory.Count -ge $requiredServiceCount) -Detail ("count={0}; required_minimum={1}" -f $serviceInventory.Count, $requiredServiceCount)
 
 foreach ($runnerRoot in $RunnerRoots) {
     $scope = "runner-root:$runnerRoot"
@@ -140,7 +144,23 @@ foreach ($runnerRoot in $RunnerRoots) {
             Select-Object -First 1
         )
         if ($null -eq $serviceMatch) {
-            Add-Check -Scope $scope -Name 'service_mapping' -Passed $false -Detail ("No service mapped to {0}" -f $serviceExe)
+            if ($AllowInteractiveRunner.IsPresent) {
+                $listenerExe = Join-Path $resolvedRoot 'bin\Runner.Listener.exe'
+                Add-Check -Scope $scope -Name 'interactive_listener_exists' -Passed (Test-Path -LiteralPath $listenerExe -PathType Leaf) -Detail $listenerExe
+
+                $listenerProcesses = @()
+                try {
+                    $listenerProcesses = @(
+                        Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" |
+                        Where-Object { ([string]$_.ExecutablePath) -ieq $listenerExe }
+                    )
+                } catch {
+                    Add-Check -Scope $scope -Name 'interactive_runner_process_query' -Passed $false -Detail $_.Exception.Message -Severity warning
+                }
+                Add-Check -Scope $scope -Name 'interactive_runner_process' -Passed ($listenerProcesses.Count -ge 1) -Detail ("count={0}; listener={1}" -f $listenerProcesses.Count, $listenerExe)
+            } else {
+                Add-Check -Scope $scope -Name 'service_mapping' -Passed $false -Detail ("No service mapped to {0}" -f $serviceExe)
+            }
         } else {
             $serviceResults += [pscustomobject]@{
                 root = $resolvedRoot

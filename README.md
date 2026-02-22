@@ -119,7 +119,7 @@ It polls commit statuses and only passes when these contexts are successful:
 
 ## Installer harness (self-hosted)
 
-`installer-harness-self-hosted.yml` runs deterministic installer qualification on `self-hosted-windows-lv` for:
+`installer-harness-self-hosted.yml` runs deterministic installer qualification on `self-hosted-windows-lv` with dedicated label `installer-harness` for:
 - `push` to `integration/*`
 - `workflow_dispatch` (optional `ref` override)
 
@@ -153,6 +153,10 @@ Set-Location C:\actions-runner-cdev
 
 Set-Location C:\actions-runner-cdev-2
 .\config.cmd --url https://github.com/LabVIEW-Community-CI-CD/labview-cdev-surface --token $token --name DESKTOP-6Q81H4O-cdev-surface-2 --labels self-hosted,windows,self-hosted-windows-lv,windows-containers --work _work --unattended --replace --runasservice
+
+Set-Location C:\actions-runner-cdev-harness2
+.\config.cmd --url https://github.com/LabVIEW-Community-CI-CD/labview-cdev-surface --token $token --name DESKTOP-6Q81H4O-cdev-surface-harness --labels self-hosted,windows,self-hosted-windows-lv,installer-harness --work _work --unattended --replace
+Start-Process -FilePath cmd.exe -ArgumentList '/c run.cmd' -WorkingDirectory C:\actions-runner-cdev-harness2 -WindowStyle Minimized
 ```
 
 ## Post-gate extension (Docker Desktop Windows image)

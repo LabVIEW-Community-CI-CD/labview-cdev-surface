@@ -22,7 +22,7 @@ concurrency:
 jobs:
   installer-harness:
     name: Installer Harness
-    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, installer-harness]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,6 +61,7 @@ jobs:
           & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessRunnerBaseline.ps1 `
             -Repository 'LabVIEW-Community-CI-CD/labview-cdev-surface' `
             -RunnerRoots @($activeRunnerRoot) `
+            -AllowInteractiveRunner `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
