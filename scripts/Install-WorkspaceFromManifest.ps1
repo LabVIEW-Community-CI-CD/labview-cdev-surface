@@ -617,7 +617,7 @@ try {
             if (-not [string]::IsNullOrWhiteSpace([string]$labviewGate.required_vip_bitness)) {
                 $requiredVipBitness = [string]$labviewGate.required_vip_bitness
             }
-            if (-not [string]::IsNullOrWhiteSpace([string]$labviewGate.required_bitness)) {
+            if (($null -ne $labviewGate.PSObject.Properties['required_bitness']) -and (-not [string]::IsNullOrWhiteSpace([string]$labviewGate.required_bitness))) {
                 $requiredVipBitness = [string]$labviewGate.required_bitness
             }
         }
