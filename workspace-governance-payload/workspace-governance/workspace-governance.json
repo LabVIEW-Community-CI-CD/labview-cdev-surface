@@ -90,7 +90,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+      "pinned_sha": "650b40ba678898c753ea0857e8ceff5f86fdb64c"
     },
     {
       "path": "C:\\dev\\labview-icon-editor-org",
@@ -123,7 +123,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+      "pinned_sha": "650b40ba678898c753ea0857e8ceff5f86fdb64c"
     },
     {
       "path": "C:\\dev\\labview-icon-editor-upstream",
@@ -154,7 +154,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+      "pinned_sha": "650b40ba678898c753ea0857e8ceff5f86fdb64c"
     },
     {
       "path": "C:\\dev\\labview-for-containers",
@@ -356,3 +356,4 @@
     }
   ]
 }
+
