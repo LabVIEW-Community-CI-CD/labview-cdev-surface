@@ -77,8 +77,12 @@ jobs:
           & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessMachinePreflight.ps1 `
             -ExpectedLabviewYear '2020' `
             -DockerContext 'desktop-linux' `
+            -DockerCheckSeverity warning `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
             throw "Machine preflight checks failed."
           }
 

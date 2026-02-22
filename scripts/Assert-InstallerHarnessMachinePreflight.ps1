@@ -14,6 +14,10 @@ param(
     [string]$OutputPath = '',
 
     [Parameter()]
+    [ValidateSet('error', 'warning')]
+    [string]$DockerCheckSeverity = 'error',
+
+    [Parameter()]
     [switch]$FailOnWarning
 )
 
@@ -23,6 +27,29 @@ $ErrorActionPreference = 'Stop'
 $checks = @()
 $errors = @()
 $warnings = @()
+$resolvedTools = @{}
+
+$toolFallbackMap = @{
+    'pwsh' = @(
+        (Join-Path $PSHOME 'pwsh.exe'),
+        'C:\Program Files\PowerShell\7\pwsh.exe'
+    )
+    'git' = @(
+        'C:\Program Files\Git\cmd\git.exe'
+    )
+    'gh' = @(
+        'C:\Program Files\GitHub CLI\gh.exe'
+    )
+    'g-cli' = @(
+        'C:\Program Files\G-CLI\bin\g-cli.exe'
+    )
+    'vipm' = @(
+        'C:\Program Files\JKI\VI Package Manager\support\vipm.exe'
+    )
+    'docker' = @(
+        'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+    )
+}
 
 function Add-Check {
     param(
@@ -49,13 +76,48 @@ function Add-Check {
     }
 }
 
+function Resolve-Tool {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter()][string[]]$FallbackPaths = @()
+    )
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command) {
+        return [pscustomobject]@{
+            found = $true
+            path = [string]$command.Source
+            source = 'PATH'
+        }
+    }
+
+    foreach ($fallbackPath in @($FallbackPaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($fallbackPath) -and (Test-Path -LiteralPath $fallbackPath -PathType Leaf)) {
+            return [pscustomobject]@{
+                found = $true
+                path = [string]$fallbackPath
+                source = 'fallback'
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        found = $false
+        path = 'missing'
+        source = 'missing'
+    }
+}
+
 foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli', 'vipm', 'docker')) {
-    $command = Get-Command $commandName -ErrorAction SilentlyContinue
-    $commandDetail = if ($null -ne $command) { [string]$command.Source } else { 'missing on PATH' }
+    $resolved = Resolve-Tool -Name $commandName -FallbackPaths @($toolFallbackMap[$commandName])
+    $resolvedTools[$commandName] = $resolved
+    $commandDetail = "{0} [{1}]" -f $resolved.path, $resolved.source
+    $severity = if ($commandName -eq 'docker') { $DockerCheckSeverity } else { 'error' }
     Add-Check `
         -Name ("command:{0}" -f $commandName) `
-        -Passed ($null -ne $command) `
-        -Detail $commandDetail
+        -Passed ([bool]$resolved.found) `
+        -Detail $commandDetail `
+        -Severity $severity
 }
 
 $nsisResolved = $NsisPath
@@ -77,8 +139,9 @@ Add-Check -Name 'labview:x86' -Passed (Test-Path -LiteralPath $labview32 -PathTy
 
 $dockerContextExists = $false
 $dockerContextInspectOutput = ''
-if (Get-Command docker -ErrorAction SilentlyContinue) {
-    $dockerContextInspectOutput = (& docker context inspect $DockerContext 2>&1 | Out-String)
+$dockerTool = $resolvedTools['docker']
+if ($null -ne $dockerTool -and [bool]$dockerTool.found) {
+    $dockerContextInspectOutput = (& $dockerTool.path context inspect $DockerContext 2>&1 | Out-String)
     if ($LASTEXITCODE -eq 0) {
         $dockerContextExists = $true
     }
@@ -86,12 +149,13 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 Add-Check `
     -Name 'docker:context_exists' `
     -Passed $dockerContextExists `
-    -Detail ("context={0}" -f $DockerContext)
+    -Detail ("context={0}" -f $DockerContext) `
+    -Severity $DockerCheckSeverity
 
 $dockerContextReachable = $false
 $dockerInfoDetail = ''
 if ($dockerContextExists) {
-    $dockerInfoOutput = (& docker --context $DockerContext info --format '{{.ServerVersion}}|{{.OSType}}' 2>&1 | Out-String).Trim()
+    $dockerInfoOutput = (& $dockerTool.path --context $DockerContext info --format '{{.ServerVersion}}|{{.OSType}}' 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -eq 0) {
         $dockerContextReachable = $true
         $dockerInfoDetail = $dockerInfoOutput
@@ -104,7 +168,8 @@ if ($dockerContextExists) {
 Add-Check `
     -Name 'docker:context_reachable' `
     -Passed $dockerContextReachable `
-    -Detail ("context={0}; detail={1}" -f $DockerContext, $dockerInfoDetail)
+    -Detail ("context={0}; detail={1}" -f $DockerContext, $dockerInfoDetail) `
+    -Severity $DockerCheckSeverity
 
 $status = if ($errors.Count -gt 0) { 'failed' } else { 'succeeded' }
 $report = [ordered]@{
