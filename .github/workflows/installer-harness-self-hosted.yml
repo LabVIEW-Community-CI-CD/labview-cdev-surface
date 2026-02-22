@@ -88,14 +88,39 @@ jobs:
 
       - name: Run full installer harness iteration
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $toolDirs = @(
+            'C:\Program Files\PowerShell\7',
+            'C:\Program Files\Git\cmd',
+            'C:\Program Files\GitHub CLI',
+            'C:\Program Files\G-CLI\bin',
+            'C:\Program Files\JKI\VI Package Manager\support'
+          )
+          foreach ($toolDir in $toolDirs) {
+            if (-not (Test-Path -LiteralPath $toolDir -PathType Container)) {
+              continue
+            }
+            if ($env:PATH -notlike "*$toolDir*") {
+              $env:PATH = "$toolDir;$env:PATH"
+            }
+          }
+
           $outputRoot = Join-Path $env:RUNNER_TEMP 'installer-harness'
+          $smokeWorkspaceRoot = Join-Path $env:RUNNER_TEMP 'dev-smoke-lvie'
           & pwsh -NoProfile -File ./scripts/Invoke-WorkspaceInstallerIteration.ps1 `
             -Mode full `
             -Iterations 1 `
-            -OutputRoot $outputRoot
+            -OutputRoot $outputRoot `
+            -SmokeWorkspaceRoot $smokeWorkspaceRoot
           if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $outputRoot -PathType Container) {
+              Get-ChildItem -LiteralPath $outputRoot -Recurse -File -ErrorAction SilentlyContinue |
+                Select-Object -First 200 FullName, Length, LastWriteTime |
+                Format-Table -AutoSize | Out-String | Write-Host
+            }
             throw "Installer harness iteration failed."
           }
 
@@ -174,6 +199,7 @@ jobs:
           Write-Host "Harness validation report: $validationReportPath"
 
       - name: Upload installer harness artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: installer-harness-${{ github.run_id }}
@@ -185,5 +211,5 @@ jobs:
             ${{ runner.temp }}/installer-harness/run-001/exercise-report.json
             ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer-bundle.zip
             ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer.exe.sha256
-            C:/dev-smoke-lvie/artifacts/workspace-install-latest.json
+            ${{ runner.temp }}/dev-smoke-lvie/artifacts/workspace-install-latest.json
           if-no-files-found: warn
