@@ -47,6 +47,8 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'Invoke-RunnerCliVipPackageHarnessCheck'
         $script:scriptContent | Should -Match 'Invoke-VipcApplyWithVipmCli'
         $script:scriptContent | Should -Match 'Get-VipcMismatchAssessment'
+        $script:scriptContent | Should -Match 'Invoke-PreVipLabVIEWCloseBestEffort'
+        $script:scriptContent | Should -Match 'Pre-VIP LabVIEW close \(best-effort\)'
         $script:scriptContent | Should -Match 'Executing native VIPM CLI apply'
         $script:scriptContent | Should -Match 'skipped_non_blocking_roots'
         $script:scriptContent | Should -Match 'sas_workshops_lib_lunit_for_g_cli'

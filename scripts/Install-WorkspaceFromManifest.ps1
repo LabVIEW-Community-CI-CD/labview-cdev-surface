@@ -286,6 +286,40 @@ function Get-VipcMismatchAssessment {
     return [pscustomobject]$assessment
 }
 
+function Invoke-PreVipLabVIEWCloseBestEffort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$IconEditorRepoPath
+    )
+
+    $closeScriptPath = Join-Path -Path $IconEditorRepoPath -ChildPath '.github\actions\close-labview\Close_LabVIEW.ps1'
+    if (-not (Test-Path -LiteralPath $closeScriptPath -PathType Leaf)) {
+        Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close script not found; skipping best-effort cleanup: {0}" -f $closeScriptPath)
+        return
+    }
+
+    $targets = @(
+        @{ year = '2026'; bitness = '32' },
+        @{ year = '2026'; bitness = '64' },
+        @{ year = '2020'; bitness = '64' }
+    )
+
+    foreach ($target in $targets) {
+        $year = [string]$target.year
+        $bitness = [string]$target.bitness
+        try {
+            Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close (best-effort): year={0} bitness={1}" -f $year, $bitness)
+            & pwsh -NoProfile -File $closeScriptPath -LabVIEWVersion $year -SupportedBitness $bitness -TimeoutSeconds 90
+            $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+            if ($exitCode -ne 0) {
+                Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close returned exit code {0} for year={1} bitness={2}; continuing." -f $exitCode, $year, $bitness)
+            }
+        } catch {
+            Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close warning for year={0} bitness={1}: {2}" -f $year, $bitness, $_.Exception.Message)
+        }
+    }
+}
+
 function Invoke-RunnerCliPplCapabilityCheck {
     param(
         [Parameter(Mandatory = $true)]
@@ -467,6 +501,8 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             }
         }
         $displayPayload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $displayInfoPath -Encoding UTF8
+
+        Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $IconEditorRepoPath
 
         $vipcAssertArgs = @(
             'vipc', 'assert',
