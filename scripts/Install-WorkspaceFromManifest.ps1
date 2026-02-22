@@ -292,12 +292,6 @@ function Invoke-PreVipLabVIEWCloseBestEffort {
         [string]$IconEditorRepoPath
     )
 
-    $closeScriptPath = Join-Path -Path $IconEditorRepoPath -ChildPath '.github\actions\close-labview\Close_LabVIEW.ps1'
-    if (-not (Test-Path -LiteralPath $closeScriptPath -PathType Leaf)) {
-        Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close script not found; skipping best-effort cleanup: {0}" -f $closeScriptPath)
-        return
-    }
-
     $targets = @(
         @{ year = '2026'; bitness = '32' },
         @{ year = '2026'; bitness = '64' },
@@ -307,15 +301,40 @@ function Invoke-PreVipLabVIEWCloseBestEffort {
     foreach ($target in $targets) {
         $year = [string]$target.year
         $bitness = [string]$target.bitness
+
+        $installRoot = if ($bitness -eq '32') {
+            "C:\Program Files (x86)\National Instruments\LabVIEW $year"
+        } else {
+            "C:\Program Files\National Instruments\LabVIEW $year"
+        }
+        $normalizedInstallRoot = $installRoot.TrimEnd('\')
+
+        Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close (best-effort): year={0} bitness={1} root={2}" -f $year, $bitness, $normalizedInstallRoot)
+
+        $candidateProcesses = @()
         try {
-            Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close (best-effort): year={0} bitness={1}" -f $year, $bitness)
-            & pwsh -NoProfile -File $closeScriptPath -LabVIEWVersion $year -SupportedBitness $bitness -TimeoutSeconds 90
-            $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-            if ($exitCode -ne 0) {
-                Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close returned exit code {0} for year={1} bitness={2}; continuing." -f $exitCode, $year, $bitness)
-            }
+            $candidateProcesses = @(Get-CimInstance Win32_Process -Filter "Name='LabVIEW.exe'" -ErrorAction Stop | Where-Object {
+                    -not [string]::IsNullOrWhiteSpace([string]$_.ExecutablePath) -and
+                    [string]$_.ExecutablePath -like "$normalizedInstallRoot*"
+                })
         } catch {
-            Write-InstallerFeedback -Message ("Pre-VIP LabVIEW close warning for year={0} bitness={1}: {2}" -f $year, $bitness, $_.Exception.Message)
+            Write-InstallerFeedback -Message ("Pre-VIP process query warning for year={0} bitness={1}: {2}" -f $year, $bitness, $_.Exception.Message)
+            continue
+        }
+
+        if (@($candidateProcesses).Count -eq 0) {
+            Write-InstallerFeedback -Message ("No running LabVIEW processes found for year={0} bitness={1}." -f $year, $bitness)
+            continue
+        }
+
+        foreach ($processInfo in $candidateProcesses) {
+            $processId = [int]$processInfo.ProcessId
+            try {
+                Stop-Process -Id $processId -Force -ErrorAction Stop
+                Write-InstallerFeedback -Message ("Stopped LabVIEW process id={0} for year={1} bitness={2}." -f $processId, $year, $bitness)
+            } catch {
+                Write-InstallerFeedback -Message ("Pre-VIP close warning for process id={0} year={1} bitness={2}: {3}" -f $processId, $year, $bitness, $_.Exception.Message)
+            }
         }
     }
 }
