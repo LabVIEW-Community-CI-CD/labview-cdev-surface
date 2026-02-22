@@ -17,7 +17,7 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match '\[string\]\$WorkspaceRoot = ''C:\\dev'''
         $script:scriptContent | Should -Match '\[Parameter\(Mandatory = \$true\)\]\s*\[string\]\$ManifestPath'
         $script:scriptContent | Should -Match '\[ValidateSet\(''Install'', ''Verify''\)\]'
-        $script:scriptContent | Should -Match '\$ExecutionContext = '''''
+        $script:scriptContent | Should -Match '\$InstallerExecutionContext = '''''
         $script:scriptContent | Should -Match '\[Parameter\(Mandatory = \$true\)\]\s*\[string\]\$OutputPath'
     }
 
@@ -42,7 +42,7 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'cli-bundle'
         $script:scriptContent | Should -Match 'required_ppl_bitnesses'
         $script:scriptContent | Should -Match 'required_vip_bitness'
-        $script:scriptContent | Should -Match 'NsisInstall'
+        $script:scriptContent | Should -Match '-InstallerExecutionContext NsisInstall'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliPplCapabilityCheck'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliVipPackageHarnessCheck'
         $script:scriptContent | Should -Match 'vipc assert'
