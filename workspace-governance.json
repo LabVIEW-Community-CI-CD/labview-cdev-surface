@@ -1,0 +1,233 @@
+{
+  "workspace_root": "C:\\dev",
+  "managed_repos": [
+    {
+      "path": "C:\\dev\\labview-icon-editor",
+      "repo_name": "labview-icon-editor",
+      "mode": "fork",
+      "required_remotes": {
+        "origin": "https://github.com/svelderrainruiz/labview-icon-editor-org.git",
+        "upstream": "https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "svelderrainruiz/labview-icon-editor-org",
+      "forbidden_targets": [
+        "ni/labview-icon-editor",
+        "LabVIEW-Community-CI-CD/labview-icon-editor (for mutation)"
+      ],
+      "default_branch": "develop",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "Pipeline Contract",
+        "Governance Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+    },
+    {
+      "path": "C:\\dev\\labview-icon-editor-org",
+      "repo_name": "labview-icon-editor-org",
+      "mode": "fork",
+      "required_remotes": {
+        "origin": "https://github.com/svelderrainruiz/labview-icon-editor-org.git",
+        "upstream": "https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "svelderrainruiz/labview-icon-editor-org",
+      "forbidden_targets": [
+        "ni/labview-icon-editor",
+        "LabVIEW-Community-CI-CD/labview-icon-editor (for mutation)"
+      ],
+      "default_branch": "develop",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "Pipeline Contract",
+        "Governance Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+    },
+    {
+      "path": "C:\\dev\\labview-icon-editor-upstream",
+      "repo_name": "labview-icon-editor-upstream",
+      "mode": "org",
+      "required_remotes": {
+        "origin": "https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "LabVIEW-Community-CI-CD/labview-icon-editor",
+      "forbidden_targets": [
+        "ni/labview-icon-editor"
+      ],
+      "default_branch": "develop",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "Pipeline Contract",
+        "Governance Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "d17fc26531f64377e02e8effc5a8f20d31c5a11b"
+    },
+    {
+      "path": "C:\\dev\\labview-for-containers",
+      "repo_name": "labview-for-containers",
+      "mode": "org",
+      "required_remotes": {
+        "origin": "https://github.com/LabVIEW-Community-CI-CD/labview-for-containers.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "LabVIEW-Community-CI-CD/labview-for-containers",
+      "forbidden_targets": [
+        "ni/labview-for-containers"
+      ],
+      "default_branch": "main",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "run-labview-cli",
+        "run-labview-cli-windows",
+        "stabilization-2026-certification-gate"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "8ef6e33155b5fc3af382fea03f5e08d0bc04e217"
+    },
+    {
+      "path": "C:\\dev\\labview-for-containers-org",
+      "repo_name": "labview-for-containers-org",
+      "mode": "fork",
+      "required_remotes": {
+        "origin": "https://github.com/svelderrainruiz/labview-for-containers-org.git",
+        "upstream": "https://github.com/LabVIEW-Community-CI-CD/labview-for-containers.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "svelderrainruiz/labview-for-containers-org",
+      "forbidden_targets": [
+        "ni/labview-for-containers",
+        "LabVIEW-Community-CI-CD/labview-for-containers (for mutation)"
+      ],
+      "default_branch": "main",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "run-labview-cli",
+        "run-labview-cli-windows",
+        "Governance Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "8ef6e33155b5fc3af382fea03f5e08d0bc04e217"
+    },
+    {
+      "path": "C:\\dev\\labview-icon-editor-codex-skills",
+      "repo_name": "labview-icon-editor-codex-skills",
+      "mode": "fork",
+      "required_remotes": {
+        "origin": "https://github.com/svelderrainruiz/labview-icon-editor-codex-skills.git",
+        "upstream": "https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "svelderrainruiz/labview-icon-editor-codex-skills",
+      "forbidden_targets": [
+        "ni/labview-icon-editor-codex-skills",
+        "LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills (for mutation)"
+      ],
+      "default_branch": "main",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "CI Pipeline",
+        "Workspace Installer Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "09e708dae4c8ed45c69ec03d9e49654c3ded39a4"
+    },
+    {
+      "path": "C:\\dev\\labview-icon-editor-codex-skills-upstream",
+      "repo_name": "labview-icon-editor-codex-skills-upstream",
+      "mode": "org",
+      "required_remotes": {
+        "origin": "https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills.git"
+      },
+      "allowed_mutation_remotes": [
+        "origin"
+      ],
+      "required_gh_repo": "LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills",
+      "forbidden_targets": [
+        "ni/labview-icon-editor-codex-skills"
+      ],
+      "default_branch": "main",
+      "branch_protection_required": true,
+      "default_branch_mutation_policy": "block_when_contract_missing",
+      "required_status_checks": [
+        "CI Pipeline",
+        "Workspace Installer Contract"
+      ],
+      "strict_status_checks": true,
+      "required_review_policy": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews": true
+      },
+      "forbid_force_push": true,
+      "forbid_deletion": true,
+      "pinned_sha": "09e708dae4c8ed45c69ec03d9e49654c3ded39a4"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+name: Workspace SHA Drift Signal
+
+on:
+  schedule:
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-sha-drift-signal:
+    name: Workspace SHA Drift Signal
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run manifest drift signal
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'workspace-sha-drift-report.json'
+          pwsh -NoProfile -File ./scripts/Test-WorkspaceManifestBranchDrift.ps1 `
+            -ManifestPath ./workspace-governance.json `
+            -OutputPath $reportPath
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-sha-drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/workspace-sha-drift-report.json
+          if-no-files-found: warn
