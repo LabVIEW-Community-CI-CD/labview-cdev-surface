@@ -117,6 +117,44 @@ It polls commit statuses and only passes when these contexts are successful:
 - `Reproducibility Contract`
 - `Provenance Contract`
 
+## Installer harness (self-hosted)
+
+`installer-harness-self-hosted.yml` runs deterministic installer qualification on `self-hosted-windows-lv` for:
+- `push` to `integration/*`
+- `workflow_dispatch` (optional `ref` override)
+
+The harness run sequence:
+1. Runner baseline lock (`Assert-InstallerHarnessRunnerBaseline.ps1`)
+2. Machine preflight pack (`Assert-InstallerHarnessMachinePreflight.ps1`)
+3. Full local iteration (`Invoke-WorkspaceInstallerIteration.ps1 -Mode full -Iterations 1`)
+4. Report validation for smoke post-actions:
+   - `ppl_capability_checks.32 == pass`
+   - `ppl_capability_checks.64 == pass`
+   - `vip_package_build_check == pass`
+
+Published evidence artifacts include:
+- `iteration-summary.json`
+- `exercise-report.json`
+- `workspace-install-latest.json` (smoke)
+- `lvie-cdev-workspace-installer-bundle.zip`
+- `harness-validation-report.json`
+
+Promotion policy:
+1. Keep `Installer Harness` non-required initially.
+2. Promote to required check after 3 consecutive green integration runs and at least 1 green manual dispatch run.
+
+Runner drift recovery (only when baseline lock fails):
+
+```powershell
+$token = gh api -X POST repos/LabVIEW-Community-CI-CD/labview-cdev-surface/actions/runners/registration-token --jq .token
+
+Set-Location C:\actions-runner-cdev
+.\config.cmd --url https://github.com/LabVIEW-Community-CI-CD/labview-cdev-surface --token $token --name DESKTOP-6Q81H4O-cdev-surface --labels self-hosted,windows,self-hosted-windows-lv --work _work --unattended --replace --runasservice
+
+Set-Location C:\actions-runner-cdev-2
+.\config.cmd --url https://github.com/LabVIEW-Community-CI-CD/labview-cdev-surface --token $token --name DESKTOP-6Q81H4O-cdev-surface-2 --labels self-hosted,windows,self-hosted-windows-lv,windows-containers --work _work --unattended --replace --runasservice
+```
+
 ## Post-gate extension (Docker Desktop Windows image)
 
 After the installer hard gate is consistently green, extend CI with a Docker Desktop Windows-image lane that:

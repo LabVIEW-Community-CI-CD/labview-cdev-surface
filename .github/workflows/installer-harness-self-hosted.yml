@@ -1,0 +1,172 @@
+name: Installer Harness
+
+on:
+  push:
+    branches:
+      - integration/**
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional branch or SHA to evaluate. Defaults to current workflow ref.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-harness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installer-harness:
+    name: Installer Harness
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow_dispatch ref override
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ref != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & git fetch --prune origin "${{ inputs.ref }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch requested ref '${{ inputs.ref }}'."
+          }
+
+          & git checkout --force FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout requested ref '${{ inputs.ref }}'."
+          }
+
+      - name: Assert runner baseline lock
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'installer-harness/runner-baseline-report.json'
+          & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessRunnerBaseline.ps1 `
+            -Repository 'LabVIEW-Community-CI-CD/labview-cdev-surface' `
+            -RunnerRoots @('C:\actions-runner-cdev', 'C:\actions-runner-cdev-2') `
+            -OutputPath $reportPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Runner baseline lock failed."
+          }
+
+      - name: Assert machine preflight pack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'installer-harness/machine-preflight-report.json'
+          & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessMachinePreflight.ps1 `
+            -ExpectedLabviewYear '2020' `
+            -DockerContext 'desktop-linux' `
+            -OutputPath $reportPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Machine preflight checks failed."
+          }
+
+      - name: Run full installer harness iteration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'installer-harness'
+          & pwsh -NoProfile -File ./scripts/Invoke-WorkspaceInstallerIteration.ps1 `
+            -Mode full `
+            -Iterations 1 `
+            -OutputRoot $outputRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installer harness iteration failed."
+          }
+
+      - name: Validate harness reports and post-action gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'installer-harness'
+          $summaryPath = Join-Path $outputRoot 'iteration-summary.json'
+          if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) {
+            throw "Missing iteration summary: $summaryPath"
+          }
+
+          $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([int]$summary.executed_runs -lt 1) {
+            throw "Installer harness executed_runs is < 1."
+          }
+
+          $latestRun = $summary.latest
+          $runOutputRoot = [string]$latestRun.output_root
+          if ([string]::IsNullOrWhiteSpace($runOutputRoot) -or -not (Test-Path -LiteralPath $runOutputRoot -PathType Container)) {
+            throw "Latest run output root is missing: $runOutputRoot"
+          }
+
+          $exerciseReportPath = Join-Path $runOutputRoot 'exercise-report.json'
+          if (-not (Test-Path -LiteralPath $exerciseReportPath -PathType Leaf)) {
+            throw "Missing exercise report: $exerciseReportPath"
+          }
+          $exerciseReport = Get-Content -LiteralPath $exerciseReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$exerciseReport.release_installer.path -eq '') {
+            throw "Exercise report is missing release installer path."
+          }
+
+          $smokeReportPath = [string]$exerciseReport.smoke_installer.report_path
+          if ([string]::IsNullOrWhiteSpace($smokeReportPath)) {
+            $smokeReportPath = 'C:\dev-smoke-lvie\artifacts\workspace-install-latest.json'
+          }
+          if (-not (Test-Path -LiteralPath $smokeReportPath -PathType Leaf)) {
+            throw "Missing smoke install report: $smokeReportPath"
+          }
+
+          $smokeReport = Get-Content -LiteralPath $smokeReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$smokeReport.status -ne 'succeeded') {
+            throw "Smoke installer report status was '$($smokeReport.status)'."
+          }
+          if ([string]$smokeReport.ppl_capability_checks.'32'.status -ne 'pass') {
+            throw "PPL 32-bit gate did not pass."
+          }
+          if ([string]$smokeReport.ppl_capability_checks.'64'.status -ne 'pass') {
+            throw "PPL 64-bit gate did not pass."
+          }
+          if ([string]$smokeReport.vip_package_build_check.status -ne 'pass') {
+            throw "VIP package build gate did not pass."
+          }
+
+          $bundleZip = [string]$exerciseReport.bundle.zip_path
+          if ([string]::IsNullOrWhiteSpace($bundleZip) -or -not (Test-Path -LiteralPath $bundleZip -PathType Leaf)) {
+            throw "Installer bundle zip not found: $bundleZip"
+          }
+
+          $validationReportPath = Join-Path $outputRoot 'harness-validation-report.json'
+          [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            summary_path = $summaryPath
+            exercise_report_path = $exerciseReportPath
+            smoke_report_path = $smokeReportPath
+            bundle_zip = $bundleZip
+            checks = [ordered]@{
+              executed_runs = [int]$summary.executed_runs
+              smoke_status = [string]$smokeReport.status
+              ppl_32 = [string]$smokeReport.ppl_capability_checks.'32'.status
+              ppl_64 = [string]$smokeReport.ppl_capability_checks.'64'.status
+              vip = [string]$smokeReport.vip_package_build_check.status
+            }
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $validationReportPath -Encoding utf8
+          Write-Host "Harness validation report: $validationReportPath"
+
+      - name: Upload installer harness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-harness-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/installer-harness/iteration-summary.json
+            ${{ runner.temp }}/installer-harness/runner-baseline-report.json
+            ${{ runner.temp }}/installer-harness/machine-preflight-report.json
+            ${{ runner.temp }}/installer-harness/harness-validation-report.json
+            ${{ runner.temp }}/installer-harness/run-001/exercise-report.json
+            ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer-bundle.zip
+            ${{ runner.temp }}/installer-harness/run-001/lvie-cdev-workspace-installer.exe.sha256
+            C:/dev-smoke-lvie/artifacts/workspace-install-latest.json
+          if-no-files-found: warn

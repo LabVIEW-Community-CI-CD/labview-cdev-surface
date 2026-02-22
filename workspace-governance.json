@@ -68,6 +68,27 @@
       "payload_root": "tools\\cdev-cli",
       "entrypoint_win": "tools\\cdev-cli\\win-x64\\cdev-cli\\scripts\\Invoke-CdevCli.ps1",
       "entrypoint_linux": "tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1"
+    },
+    "harness": {
+      "workflow_name": "installer-harness-self-hosted.yml",
+      "trigger_mode": "integration_branch_push_and_dispatch",
+      "runner_labels": [
+        "self-hosted",
+        "windows",
+        "self-hosted-windows-lv"
+      ],
+      "required_reports": [
+        "iteration-summary.json",
+        "exercise-report.json",
+        "C:\\dev-smoke-lvie\\artifacts\\workspace-install-latest.json",
+        "lvie-cdev-workspace-installer-bundle.zip",
+        "harness-validation-report.json"
+      ],
+      "required_postactions": [
+        "ppl_capability_checks.32",
+        "ppl_capability_checks.64",
+        "vip_package_build_check"
+      ]
     }
   },
   "managed_repos": [

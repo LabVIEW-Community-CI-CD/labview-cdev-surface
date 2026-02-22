@@ -97,6 +97,7 @@ Add-Check -Scope 'manifest' -Name 'has_installer_contract_reproducibility' -Pass
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_provenance' -Passed ($installerContractMembers -contains 'provenance') -Detail 'installer_contract.provenance'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_canary' -Passed ($installerContractMembers -contains 'canary') -Detail 'installer_contract.canary'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_cli_bundle' -Passed ($installerContractMembers -contains 'cli_bundle') -Detail 'installer_contract.cli_bundle'
+Add-Check -Scope 'manifest' -Name 'has_installer_contract_harness' -Passed ($installerContractMembers -contains 'harness') -Detail 'installer_contract.harness'
 if ($installerContractMembers -contains 'reproducibility') {
     Add-Check -Scope 'manifest' -Name 'reproducibility_required_true' -Passed ([bool]$manifest.installer_contract.reproducibility.required) -Detail "required=$($manifest.installer_contract.reproducibility.required)"
     Add-Check -Scope 'manifest' -Name 'reproducibility_strict_hash_match_true' -Passed ([bool]$manifest.installer_contract.reproducibility.strict_hash_match) -Detail "strict_hash_match=$($manifest.installer_contract.reproducibility.strict_hash_match)"
@@ -119,6 +120,20 @@ if ($installerContractMembers -contains 'cli_bundle') {
     Add-Check -Scope 'manifest' -Name 'cli_bundle_asset_linux_sha256' -Passed ([regex]::IsMatch(([string]$cliBundle.asset_linux_sha256).ToLowerInvariant(), '^[0-9a-f]{64}$')) -Detail ([string]$cliBundle.asset_linux_sha256)
     Add-Check -Scope 'manifest' -Name 'cli_bundle_entrypoint_win' -Passed ([string]$cliBundle.entrypoint_win -eq 'tools\cdev-cli\win-x64\cdev-cli\scripts\Invoke-CdevCli.ps1') -Detail ([string]$cliBundle.entrypoint_win)
     Add-Check -Scope 'manifest' -Name 'cli_bundle_entrypoint_linux' -Passed ([string]$cliBundle.entrypoint_linux -eq 'tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1') -Detail ([string]$cliBundle.entrypoint_linux)
+}
+if ($installerContractMembers -contains 'harness') {
+    $harness = $manifest.installer_contract.harness
+    Add-Check -Scope 'manifest' -Name 'harness_workflow_name' -Passed ([string]$harness.workflow_name -eq 'installer-harness-self-hosted.yml') -Detail ([string]$harness.workflow_name)
+    Add-Check -Scope 'manifest' -Name 'harness_trigger_mode' -Passed ([string]$harness.trigger_mode -eq 'integration_branch_push_and_dispatch') -Detail ([string]$harness.trigger_mode)
+    foreach ($label in @('self-hosted', 'windows', 'self-hosted-windows-lv')) {
+        Add-Check -Scope 'manifest' -Name "harness_runner_label:$label" -Passed (@($harness.runner_labels) -contains $label) -Detail ([string]::Join(',', @($harness.runner_labels)))
+    }
+    foreach ($requiredReport in @('iteration-summary.json', 'exercise-report.json', 'C:\dev-smoke-lvie\artifacts\workspace-install-latest.json', 'lvie-cdev-workspace-installer-bundle.zip', 'harness-validation-report.json')) {
+        Add-Check -Scope 'manifest' -Name "harness_required_report:$requiredReport" -Passed (@($harness.required_reports) -contains $requiredReport) -Detail ([string]::Join(',', @($harness.required_reports)))
+    }
+    foreach ($requiredPostaction in @('ppl_capability_checks.32', 'ppl_capability_checks.64', 'vip_package_build_check')) {
+        Add-Check -Scope 'manifest' -Name "harness_required_postaction:$requiredPostaction" -Passed (@($harness.required_postactions) -contains $requiredPostaction) -Detail ([string]::Join(',', @($harness.required_postactions)))
+    }
 }
 
 $requiredSchemaFields = @(
