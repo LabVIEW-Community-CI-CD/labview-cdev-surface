@@ -570,7 +570,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         if (-not (Test-Path -LiteralPath $invokeVipBuildScriptPath -PathType Leaf)) {
             throw "Invoke-VipBuild.ps1 was not found: $invokeVipBuildScriptPath"
         }
-        $nativeVipBuildArgs = @(
+        $baseVipBuildArgs = @(
             '-NoProfile',
             '-File', $invokeVipBuildScriptPath,
             '-SupportedBitness', $RequiredBitness,
@@ -586,14 +586,49 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             '-Build', '1',
             '-Commit', $commitArg,
             '-ReleaseNotesFile', $releaseNotesPath,
-            '-VipmTimeoutSeconds', '1200',
             '-StatusPath', $vipBuildStatusPath
         )
-        $result.command.vip_build = @('pwsh', @($nativeVipBuildArgs))
-        Write-InstallerFeedback -Message 'Running native VIP build harness via Invoke-VipBuild.ps1 (ExecutionLabVIEWYear=2020 contract).'
-        & pwsh @nativeVipBuildArgs | Out-Host
-        $result.exit_code = $LASTEXITCODE
-        if ($result.exit_code -ne 0) {
+
+        $maxVipBuildAttempts = 2
+        $vipBuildSucceeded = $false
+        $result.command.vip_build = @()
+        for ($vipBuildAttempt = 1; $vipBuildAttempt -le $maxVipBuildAttempts; $vipBuildAttempt++) {
+            $attemptTimeoutSeconds = if ($vipBuildAttempt -eq 1) { '1200' } else { '1800' }
+            $nativeVipBuildArgs = @($baseVipBuildArgs + @('-VipmTimeoutSeconds', $attemptTimeoutSeconds))
+            $result.command.vip_build = @('pwsh', @($nativeVipBuildArgs))
+
+            Write-InstallerFeedback -Message ("Running native VIP build harness via Invoke-VipBuild.ps1 (ExecutionLabVIEWYear=2020 contract). attempt={0}/{1} vipm_timeout_seconds={2}" -f $vipBuildAttempt, $maxVipBuildAttempts, $attemptTimeoutSeconds)
+            & pwsh @nativeVipBuildArgs | Out-Host
+            $result.exit_code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+
+            if ($result.exit_code -eq 0) {
+                $vipBuildSucceeded = $true
+                break
+            }
+
+            $timeoutReasonDetected = $false
+            if (Test-Path -LiteralPath $vipBuildStatusPath -PathType Leaf) {
+                try {
+                    $vipBuildStatus = Get-Content -LiteralPath $vipBuildStatusPath -Raw | ConvertFrom-Json -ErrorAction Stop
+                    if ([string]$vipBuildStatus.reason -eq 'vipm_timeout') {
+                        $timeoutReasonDetected = $true
+                    }
+                } catch {
+                    # If status parsing fails, fall through to non-retry path.
+                }
+            }
+
+            if ($vipBuildAttempt -lt $maxVipBuildAttempts -and $timeoutReasonDetected) {
+                Write-InstallerFeedback -Message ("Native VIP build attempt {0} timed out; retrying once after best-effort LabVIEW cleanup." -f $vipBuildAttempt)
+                Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $IconEditorRepoPath
+                Start-Sleep -Seconds 10
+                continue
+            }
+
+            break
+        }
+
+        if (-not $vipBuildSucceeded) {
             throw "native VIP build failed with exit code $($result.exit_code)."
         }
 
