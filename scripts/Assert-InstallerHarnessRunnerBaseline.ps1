@@ -158,7 +158,14 @@ foreach ($runnerRoot in $RunnerRoots) {
 
 $apiOutput = & gh api "repos/$Repository/actions/runners" 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Add-Check -Scope 'github-api' -Name 'runners_query' -Passed $false -Detail ($apiOutput | Out-String)
+    $apiErrorText = ($apiOutput | Out-String).Trim()
+    $apiPermissionDenied = (
+        $apiErrorText -match 'Must have admin rights to Repository' -or
+        $apiErrorText -match 'HTTP 403' -or
+        $apiErrorText -match 'Resource not accessible'
+    )
+    $severity = if ($apiPermissionDenied) { 'warning' } else { 'error' }
+    Add-Check -Scope 'github-api' -Name 'runners_query' -Passed $false -Detail $apiErrorText -Severity $severity
 } else {
     $apiResponse = $apiOutput | ConvertFrom-Json -ErrorAction Stop
     foreach ($runner in @($apiResponse.runners)) {
