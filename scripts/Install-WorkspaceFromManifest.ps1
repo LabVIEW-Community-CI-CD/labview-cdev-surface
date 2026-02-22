@@ -1372,6 +1372,28 @@ try {
                         -RequiredLabviewYear ([string]$requiredLabviewYear) `
                         -RequiredBitness $bitness
 
+                    if ([string]$capabilityResult.status -ne 'pass') {
+                        $firstAttemptMessage = [string]$capabilityResult.message
+                        Write-InstallerFeedback -Message ("runner-cli PPL capability gate ({0}-bit) failed on first attempt; retrying once after additional LabVIEW cleanup." -f $bitness)
+                        Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
+                        Start-Sleep -Seconds 5
+
+                        $retryCapabilityResult = Invoke-RunnerCliPplCapabilityCheck `
+                            -RunnerCliPath $runnerCliExePath `
+                            -IconEditorRepoPath $iconEditorRepoPath `
+                            -PinnedSha $iconEditorPinnedSha `
+                            -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                            -RequiredBitness $bitness
+
+                        if ([string]$retryCapabilityResult.status -eq 'pass') {
+                            $retryCapabilityResult.message = ("{0} (passed on retry after additional cleanup)." -f [string]$retryCapabilityResult.message)
+                            $capabilityResult = $retryCapabilityResult
+                        } else {
+                            $retryCapabilityResult.message = ("First attempt: {0} Retry attempt: {1}" -f $firstAttemptMessage, [string]$retryCapabilityResult.message)
+                            $capabilityResult = $retryCapabilityResult
+                        }
+                    }
+
                     $pplCapabilityChecks[$bitness] = [ordered]@{
                         status = [string]$capabilityResult.status
                         message = [string]$capabilityResult.message
