@@ -293,7 +293,10 @@
       "branch_protection_required": true,
       "default_branch_mutation_policy": "block_when_contract_missing",
       "required_status_checks": [
-        "CI Pipeline"
+        "CI Pipeline",
+        "Workspace Installer Contract",
+        "Reproducibility Contract",
+        "Provenance Contract"
       ],
       "strict_status_checks": true,
       "required_review_policy": {
@@ -323,7 +326,10 @@
       "branch_protection_required": true,
       "default_branch_mutation_policy": "block_when_contract_missing",
       "required_status_checks": [
-        "CI Pipeline"
+        "CI Pipeline",
+        "Workspace Installer Contract",
+        "Reproducibility Contract",
+        "Provenance Contract"
       ],
       "strict_status_checks": true,
       "required_review_policy": {
