@@ -543,8 +543,36 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
 
             if ([bool]$mismatchAssessment.all_non_blocking -and @($mismatchAssessment.mismatched_roots).Count -gt 0) {
                 $rootsLabel = [string]::Join(', ', @($mismatchAssessment.mismatched_roots))
-                Write-InstallerFeedback -Message ("VIPC assert mismatch is non-blocking for harness mode (roots: {0}); skipping VIPC apply." -f $rootsLabel)
-                $result.command.vipc_apply = @('skipped_non_blocking_roots', @($mismatchAssessment.mismatched_roots))
+                Write-InstallerFeedback -Message ("VIPC assert mismatch is non-blocking for harness mode (roots: {0}); attempting best-effort native VIPC apply before VIP build." -f $rootsLabel)
+                $nonBlockingApplyWarning = $null
+                try {
+                    $nativeApply = Invoke-VipcApplyWithVipmCli `
+                        -IconEditorRepoPath $IconEditorRepoPath `
+                        -VipcPath $vipcPath `
+                        -RequiredLabviewYear ([string]$RequiredLabviewYear) `
+                        -RequiredBitness ([string]$RequiredBitness)
+                    $result.command.vipc_apply = @('vipm_best_effort', @($nativeApply.command))
+                    if ([string]$nativeApply.status -ne 'pass') {
+                        throw $nativeApply.message
+                    }
+                } catch {
+                    $nonBlockingApplyWarning = $_.Exception.Message
+                    Write-Warning ("Non-blocking VIPC apply attempt failed; continuing to post-action gates. {0}" -f $nonBlockingApplyWarning)
+                    $result.command.vipc_apply = @('vipm_best_effort_failed', $nonBlockingApplyWarning, @($mismatchAssessment.mismatched_roots))
+                }
+
+                Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after non-blocking remediation attempt.'
+                & $RunnerCliPath @vipcAssertArgs | Out-Host
+                if ($LASTEXITCODE -ne 0) {
+                    $postApplyAssessment = Get-VipcMismatchAssessment `
+                        -VipcAuditPath $vipcAuditPath `
+                        -NonBlockingRoots $nonBlockingVipcMismatchRoots
+                    if (-not [bool]$postApplyAssessment.all_non_blocking) {
+                        throw "runner-cli vipc assert failed after non-blocking remediation and introduced blocking mismatches."
+                    }
+                    $postRootsLabel = [string]::Join(', ', @($postApplyAssessment.mismatched_roots))
+                    Write-InstallerFeedback -Message ("VIPC assert still reports non-blocking mismatch roots after remediation (roots: {0}); continuing." -f $postRootsLabel)
+                }
             } else {
                 Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies via native VIPM CLI.'
                 $nativeApply = Invoke-VipcApplyWithVipmCli `
