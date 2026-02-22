@@ -108,6 +108,15 @@ Additional supply-chain contract jobs:
 - `Reproducibility Contract`: validates bit-for-bit determinism for `runner-cli` bundles (`win-x64`, `linux-x64`) and installer output.
 - `Provenance Contract`: generates and validates SPDX + SLSA provenance artifacts linked to installer/bundle/manifest hashes.
 
+## Integration gate
+
+`integration-gate.yml` provides a single `Integration Gate` context for `integration/*` branches (and manual dispatch).  
+It polls commit statuses and only passes when these contexts are successful:
+- `CI Pipeline`
+- `Workspace Installer Contract`
+- `Reproducibility Contract`
+- `Provenance Contract`
+
 ## Post-gate extension (Docker Desktop Windows image)
 
 After the installer hard gate is consistently green, extend CI with a Docker Desktop Windows-image lane that:

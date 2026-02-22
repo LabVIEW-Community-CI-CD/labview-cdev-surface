@@ -90,6 +90,11 @@ This repository is the canonical policy and manifest surface for deterministic `
 - `nightly-supplychain-canary.yml` is the scheduled drift and reproducibility signal.
 - Canary failures must update a single tracking issue; do not disable canary to bypass failures.
 
+## Integration Gate Policy
+- `.github/workflows/integration-gate.yml` is the integration-branch aggregator workflow.
+- It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`.
+- Keep this as a distinct check context (`Integration Gate`) for branch-protection phase-in after promotion criteria are met.
+
 ## Local Iteration Contract
 - Refine NSIS flow locally first on machines with NSIS installed.
 - Use `scripts/Invoke-WorkspaceInstallerIteration.ps1` for repeatable agent runs:

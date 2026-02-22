@@ -26,6 +26,7 @@ Describe 'Workspace surface contract' {
         $script:driftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-drift-signal.yml'
         $script:shaRefreshWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-refresh-pr.yml'
         $script:releaseWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
+        $script:integrationGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/integration-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
         $script:globalJsonPath = Join-Path $script:repoRoot 'global.json'
@@ -61,6 +62,7 @@ Describe 'Workspace surface contract' {
             $script:driftWorkflowPath,
             $script:shaRefreshWorkflowPath,
             $script:releaseWorkflowPath,
+            $script:integrationGateWorkflowPath,
             $script:canaryWorkflowPath,
             $script:windowsImageGateWorkflowPath,
             $script:globalJsonPath,
@@ -175,6 +177,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'DockerDesktopLinuxIterationContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'RunnerCliBundleDeterminismContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ProvenanceContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'IntegrationGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceShaRefreshPrContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ENABLE_SELF_HOSTED_CONTRACTS'

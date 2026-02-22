@@ -1,0 +1,112 @@
+name: Integration Gate
+
+on:
+  push:
+    branches:
+      - integration/**
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or SHA to evaluate. Defaults to the triggering SHA.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integration-gate:
+    name: Integration Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate required status contexts for integration SHA
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          INPUT_REF: ${{ inputs.ref }}
+          TRIGGER_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $repo = [string]$env:TARGET_REPOSITORY
+          if ([string]::IsNullOrWhiteSpace($repo)) {
+            throw 'TARGET_REPOSITORY was not provided.'
+          }
+
+          $targetRef = [string]$env:INPUT_REF
+          $sha = ''
+          if ([string]::IsNullOrWhiteSpace($targetRef)) {
+            $sha = ([string]$env:TRIGGER_SHA).Trim().ToLowerInvariant()
+          } else {
+            $sha = (& gh api "repos/$repo/commits/$targetRef" --jq '.sha').Trim().ToLowerInvariant()
+          }
+
+          if ($sha -notmatch '^[0-9a-f]{40}$') {
+            throw "Unable to resolve target SHA. ref='$targetRef' resolved='$sha'"
+          }
+
+          $requiredContexts = @(
+            'CI Pipeline',
+            'Workspace Installer Contract',
+            'Reproducibility Contract',
+            'Provenance Contract'
+          )
+
+          $pollSeconds = 20
+          $timeoutSeconds = 3600
+          $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
+
+          while ((Get-Date).ToUniversalTime() -lt $deadline) {
+            $statusJson = & gh api "repos/$repo/commits/$sha/status"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to read commit status for '$repo' @ '$sha'."
+            }
+
+            $statusObject = $statusJson | ConvertFrom-Json -ErrorAction Stop
+            $latestByContext = @{}
+            foreach ($status in @($statusObject.statuses)) {
+              $context = [string]$status.context
+              if ([string]::IsNullOrWhiteSpace($context)) {
+                continue
+              }
+              if (-not $latestByContext.ContainsKey($context)) {
+                $latestByContext[$context] = $status
+              }
+            }
+
+            $allResolved = $true
+            $hasFailure = $false
+            $stateSummary = @()
+            foreach ($context in $requiredContexts) {
+              if (-not $latestByContext.ContainsKey($context)) {
+                $stateSummary += "$context=missing"
+                $allResolved = $false
+                continue
+              }
+
+              $state = [string]$latestByContext[$context].state
+              $stateSummary += "$context=$state"
+              switch ($state) {
+                'success' {}
+                'failure' { $hasFailure = $true }
+                'error' { $hasFailure = $true }
+                'pending' { $allResolved = $false }
+                default { $allResolved = $false }
+              }
+            }
+
+            Write-Host ("Required context states for {0}: {1}" -f $sha, ($stateSummary -join ', '))
+
+            if ($hasFailure) {
+              throw ("Integration gate failed for {0}. {1}" -f $sha, ($stateSummary -join ', '))
+            }
+            if ($allResolved) {
+              Write-Host ("Integration gate passed for {0}." -f $sha)
+              exit 0
+            }
+
+            Start-Sleep -Seconds $pollSeconds
+          }
+
+          throw ("Integration gate timed out after {0} seconds waiting for required contexts on {1}." -f $timeoutSeconds, $sha)
