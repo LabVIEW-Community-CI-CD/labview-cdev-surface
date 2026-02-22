@@ -607,11 +607,13 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             }
 
             $timeoutReasonDetected = $false
+            $retryDiagnosticReason = 'first_attempt_failure'
             if (Test-Path -LiteralPath $vipBuildStatusPath -PathType Leaf) {
                 try {
                     $vipBuildStatus = Get-Content -LiteralPath $vipBuildStatusPath -Raw | ConvertFrom-Json -ErrorAction Stop
                     if ([string]$vipBuildStatus.reason -eq 'vipm_timeout') {
                         $timeoutReasonDetected = $true
+                        $retryDiagnosticReason = 'vipm_timeout_reason'
                     } else {
                         foreach ($timeoutLogPath in @([string]$vipBuildStatus.vipm_log, [string]$vipBuildStatus.gcli_log)) {
                             if ([string]::IsNullOrWhiteSpace($timeoutLogPath) -or -not (Test-Path -LiteralPath $timeoutLogPath -PathType Leaf)) {
@@ -620,17 +622,21 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                             $timeoutPatternMatched = Select-String -Path $timeoutLogPath -Pattern 'timed out after|Timeout waiting on VIPM' -SimpleMatch:$false -Quiet
                             if ($timeoutPatternMatched) {
                                 $timeoutReasonDetected = $true
+                                $retryDiagnosticReason = 'vipm_timeout_log'
                                 break
                             }
                         }
                     }
                 } catch {
-                    # If status parsing fails, fall through to non-retry path.
+                    $retryDiagnosticReason = 'status_parse_failed'
                 }
             }
 
-            if ($vipBuildAttempt -lt $maxVipBuildAttempts -and $timeoutReasonDetected) {
-                Write-InstallerFeedback -Message ("Native VIP build attempt {0} timed out; retrying once after best-effort LabVIEW cleanup." -f $vipBuildAttempt)
+            if ($vipBuildAttempt -lt $maxVipBuildAttempts) {
+                if (-not $timeoutReasonDetected -and $retryDiagnosticReason -eq 'first_attempt_failure') {
+                    $retryDiagnosticReason = 'non_timeout_first_failure'
+                }
+                Write-InstallerFeedback -Message ("Native VIP build attempt {0} failed (reason={1}); retrying once after best-effort LabVIEW cleanup." -f $vipBuildAttempt, $retryDiagnosticReason)
                 Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $IconEditorRepoPath
                 Start-Sleep -Seconds 10
                 continue
