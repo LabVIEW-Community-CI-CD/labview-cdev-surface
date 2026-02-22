@@ -1071,7 +1071,7 @@ try {
         -Message ([string]$cliBundle.message)
 
     if ($runnerCliBundle.status -eq 'pass') {
-        $repoContractStatus = @($repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1)
+        $repoContractStatus = $repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1
         if ($null -eq $repoContractStatus -or [string]$repoContractStatus.status -ne 'pass') {
             $blockingMessage = "Cannot run runner-cli PPL capability checks because icon-editor repo contract failed at '$iconEditorRepoPath'."
             foreach ($bitness in $requiredPplBitnesses) {
