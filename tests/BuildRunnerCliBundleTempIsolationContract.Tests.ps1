@@ -24,9 +24,10 @@ Describe 'Build runner-cli temp isolation contract' {
     It 'builds per-invocation isolated temp roots' {
         $script:scriptContent | Should -Match 'function Get-IsolationToken'
         $script:scriptContent | Should -Match '\$env:GITHUB_RUN_ID'
+        $script:scriptContent | Should -Match '\$env:GITHUB_RUN_ATTEMPT'
         $script:scriptContent | Should -Match '\$env:GITHUB_JOB'
         $script:scriptContent | Should -Match '\$env:RUNNER_NAME'
-        $script:scriptContent | Should -Match '\[guid\]::NewGuid'
+        $script:scriptContent | Should -Match "\$seedParts = @\('local'\)"
         $script:scriptContent | Should -Match 'lvie-runner-cli-bundle-'
     }
 

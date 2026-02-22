@@ -67,16 +67,20 @@ function Get-TempBasePath {
 }
 
 function Get-IsolationToken {
-    $seed = [string]::Join(
-        '|',
-        @(
-            [string]$env:GITHUB_RUN_ID,
-            [string]$env:GITHUB_JOB,
-            [string]$env:RUNNER_NAME,
-            [string]$PID,
-            [guid]::NewGuid().ToString('N')
-        )
-    )
+    $seedParts = @(
+        [string]$env:GITHUB_RUN_ID,
+        [string]$env:GITHUB_RUN_ATTEMPT,
+        [string]$env:GITHUB_JOB,
+        [string]$env:RUNNER_NAME
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    # Keep the isolation token stable within the same run+job so repeated
+    # deterministic builds use the same temp path while still isolating
+    # concurrent jobs across the runner fleet.
+    if (@($seedParts).Count -eq 0) {
+        $seedParts = @('local')
+    }
+    $seed = [string]::Join('|', $seedParts)
 
     $hashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
     try {
