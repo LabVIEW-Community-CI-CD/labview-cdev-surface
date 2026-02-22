@@ -178,7 +178,6 @@
       ],
       "required_gh_repo": "svelderrainruiz/labview-icon-editor-codex-skills",
       "forbidden_targets": [
-        "ni/labview-icon-editor-codex-skills",
         "LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills (for mutation)"
       ],
       "default_branch": "main",
@@ -210,7 +209,7 @@
       ],
       "required_gh_repo": "LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills",
       "forbidden_targets": [
-        "ni/labview-icon-editor-codex-skills"
+        "svelderrainruiz/labview-icon-editor-codex-skills (for org mutation workflow)"
       ],
       "default_branch": "main",
       "branch_protection_required": true,
