@@ -33,3 +33,30 @@ pwsh -NoProfile -File .\scripts\Test-PolicyContracts.ps1 `
   -WorkspaceRoot C:\dev `
   -FailOnWarning
 ```
+
+## Build in CI
+
+`CI Pipeline` includes the `Workspace Installer Contract` job, which compiles:
+- `lvie-cdev-workspace-installer.exe`
+
+The job stages a deterministic workspace payload and validates that NSIS build tooling can produce the installer on the self-hosted Windows lane.
+
+## Publish release asset
+
+Use manual workflow dispatch for release publication:
+1. Run `.github/workflows/release-workspace-installer.yml`.
+2. Provide `release_tag` in semantic format (for example, `v0.1.0`).
+3. Set `prerelease` as needed.
+
+The workflow:
+- Builds `lvie-cdev-workspace-installer.exe`
+- Computes SHA256
+- Creates the GitHub release if missing
+- Uploads installer asset to the release
+- Writes release notes including SHA256 and the install command:
+
+```powershell
+lvie-cdev-workspace-installer.exe /S
+```
+
+Verify downloaded asset integrity by matching the local hash against the SHA256 value published in the release notes.

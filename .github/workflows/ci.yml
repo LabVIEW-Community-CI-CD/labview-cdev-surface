@@ -32,5 +32,77 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Invoke-Pester -Path @(
             './tests/WorkspaceSurfaceContract.Tests.ps1',
-            './tests/WorkspaceShaDriftSignalContract.Tests.ps1'
+            './tests/WorkspaceShaDriftSignalContract.Tests.ps1',
+            './tests/WorkspaceInstallerReleaseContract.Tests.ps1',
+            './tests/WorkspaceInstallRuntimeContract.Tests.ps1',
+            './tests/Build-WorkspaceBootstrapInstaller.Tests.ps1'
           ) -CI -Output Detailed
+
+  workspace-installer-contract:
+    name: Workspace Installer Contract
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    needs: [ci-pipeline]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: build-workspace-installer
+        name: Build deterministic Cdev workspace installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetName = 'lvie-cdev-workspace-installer.exe'
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+          if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+            Remove-Item -LiteralPath $assetPath -Force
+          }
+
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-bootstrap-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'workspace-governance\scripts') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/AGENTS.md" -Destination (Join-Path $payloadRoot 'workspace-governance/AGENTS.md') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/workspace-governance.json" -Destination (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Assert-WorkspaceGovernance.ps1" -Destination (Join-Path $payloadRoot 'workspace-governance/scripts/Assert-WorkspaceGovernance.ps1') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Test-PolicyContracts.ps1" -Destination (Join-Path $payloadRoot 'workspace-governance/scripts/Test-PolicyContracts.ps1') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          $buildScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-WorkspaceBootstrapInstaller.ps1'
+          if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
+            throw "Workspace installer build script not found: $buildScript"
+          }
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) {
+            $nsisRoot = 'C:\Program Files (x86)\NSIS'
+          }
+          $makensis = Join-Path $nsisRoot 'makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw "Required NSIS binary not found at '$makensis'. Set repository variable NSIS_ROOT or install NSIS at C:\Program Files (x86)\NSIS."
+          }
+
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version probe failed with exit code $LASTEXITCODE"
+          }
+
+          & $buildScript -PayloadRoot $payloadRoot -OutputPath $assetPath -WorkspaceRootDefault 'C:\dev' -NsisRoot $nsisRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build-WorkspaceBootstrapInstaller.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload workspace bootstrap installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-bootstrap-installer-${{ github.run_id }}
+          path: ${{ steps.build-workspace-installer.outputs.asset_path }}
+          if-no-files-found: error

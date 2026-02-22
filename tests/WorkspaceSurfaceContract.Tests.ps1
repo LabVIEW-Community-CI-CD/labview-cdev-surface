@@ -12,8 +12,12 @@ Describe 'Workspace surface contract' {
         $script:assertScriptPath = Join-Path $script:repoRoot 'scripts/Assert-WorkspaceGovernance.ps1'
         $script:policyScriptPath = Join-Path $script:repoRoot 'scripts/Test-PolicyContracts.ps1'
         $script:driftScriptPath = Join-Path $script:repoRoot 'scripts/Test-WorkspaceManifestBranchDrift.ps1'
+        $script:installScriptPath = Join-Path $script:repoRoot 'scripts/Install-WorkspaceFromManifest.ps1'
+        $script:buildInstallerScriptPath = Join-Path $script:repoRoot 'scripts/Build-WorkspaceBootstrapInstaller.ps1'
+        $script:nsisInstallerPath = Join-Path $script:repoRoot 'nsis/workspace-bootstrap-installer.nsi'
         $script:ciWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ci.yml'
         $script:driftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-drift-signal.yml'
+        $script:releaseWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
 
         $requiredPaths = @(
             $script:manifestPath,
@@ -22,8 +26,12 @@ Describe 'Workspace surface contract' {
             $script:assertScriptPath,
             $script:policyScriptPath,
             $script:driftScriptPath,
+            $script:installScriptPath,
+            $script:buildInstallerScriptPath,
+            $script:nsisInstallerPath,
             $script:ciWorkflowPath,
-            $script:driftWorkflowPath
+            $script:driftWorkflowPath,
+            $script:releaseWorkflowPath
         )
 
         foreach ($path in $requiredPaths) {
@@ -36,6 +44,7 @@ Describe 'Workspace surface contract' {
         $script:agentsContent = Get-Content -LiteralPath $script:agentsPath -Raw
         $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
         $script:ciWorkflowContent = Get-Content -LiteralPath $script:ciWorkflowPath -Raw
+        $script:releaseWorkflowContent = Get-Content -LiteralPath $script:releaseWorkflowPath -Raw
     }
 
     It 'tracks a deterministic managed repo set with pinned SHA lock' {
@@ -66,5 +75,13 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'pull_request:'
         $script:ciWorkflowContent | Should -Match 'workflow_dispatch:'
         $script:ciWorkflowContent | Should -Match 'Invoke-Pester'
+        $script:ciWorkflowContent | Should -Match 'Workspace Installer Contract'
+    }
+
+    It 'defines manual installer release workflow contract' {
+        $script:releaseWorkflowContent | Should -Match 'workflow_dispatch:'
+        $script:releaseWorkflowContent | Should -Match 'release_tag:'
+        $script:releaseWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
+        $script:releaseWorkflowContent | Should -Match 'gh release upload'
     }
 }

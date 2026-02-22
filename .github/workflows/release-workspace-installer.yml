@@ -1,0 +1,206 @@
+name: release-workspace-installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish (for example, v0.1.0).
+        required: true
+        type: string
+      prerelease:
+        description: Publish as prerelease.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package Workspace Installer
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    outputs:
+      asset_name: ${{ steps.package.outputs.asset_name }}
+      asset_sha256: ${{ steps.package.outputs.asset_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: package
+        name: Build workspace installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $assetName = 'lvie-cdev-workspace-installer.exe'
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+          if (Test-Path -LiteralPath $assetPath -PathType Leaf) {
+            Remove-Item -LiteralPath $assetPath -Force
+          }
+
+          $payloadRoot = Join-Path $env:RUNNER_TEMP 'workspace-bootstrap-payload'
+          if (Test-Path -LiteralPath $payloadRoot -PathType Container) {
+            Remove-Item -LiteralPath $payloadRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'workspace-governance\scripts') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/AGENTS.md" -Destination (Join-Path $payloadRoot 'workspace-governance/AGENTS.md') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/workspace-governance.json" -Destination (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Assert-WorkspaceGovernance.ps1" -Destination (Join-Path $payloadRoot 'workspace-governance/scripts/Assert-WorkspaceGovernance.ps1') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Test-PolicyContracts.ps1" -Destination (Join-Path $payloadRoot 'workspace-governance/scripts/Test-PolicyContracts.ps1') -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          $buildScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-WorkspaceBootstrapInstaller.ps1'
+          if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
+            throw "Workspace installer build script not found: $buildScript"
+          }
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) {
+            $nsisRoot = 'C:\Program Files (x86)\NSIS'
+          }
+          $makensis = Join-Path $nsisRoot 'makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) {
+            throw "Required NSIS binary not found at '$makensis'. Set repository variable NSIS_ROOT or install NSIS at C:\Program Files (x86)\NSIS."
+          }
+
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "makensis version probe failed with exit code $LASTEXITCODE"
+          }
+
+          & $buildScript -PayloadRoot $payloadRoot -OutputPath $assetPath -WorkspaceRootDefault 'C:\dev' -NsisRoot $nsisRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build-WorkspaceBootstrapInstaller.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $metadataPath = Join-Path $env:RUNNER_TEMP 'workspace-installer-metadata.json'
+          [ordered]@{
+            asset_name = $assetName
+            asset_path = $assetPath
+            asset_sha256 = $hash
+            install_command = 'lvie-cdev-workspace-installer.exe /S'
+          } | ConvertTo-Json -Depth 5 | Out-File -FilePath $metadataPath -Encoding utf8
+
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload packaged installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-installer-release-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/lvie-cdev-workspace-installer.exe
+            ${{ runner.temp }}/workspace-installer-metadata.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release Asset
+    runs-on: ubuntu-latest
+    needs: [package]
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-installer-release-${{ github.run_id }}
+          path: ${{ runner.temp }}/workspace-installer-release
+
+      - name: Create/update release and upload installer asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $releaseTag = [string]$env:RELEASE_TAG
+          if ($releaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "Invalid release_tag '$releaseTag'. Expected semantic tag like v0.1.0."
+          }
+
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
+          $assetPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe'
+          $metadataPath = Join-Path $artifactRoot 'workspace-installer-metadata.json'
+
+          if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+            throw "Installer asset not found: $assetPath"
+          }
+          if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+            throw "Installer metadata not found: $metadataPath"
+          }
+
+          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $assetName = [string]$metadata.asset_name
+          $assetSha = [string]$metadata.asset_sha256
+          $installCommand = [string]$metadata.install_command
+          if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
+            throw "Installer metadata is missing required fields."
+          }
+
+          $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
+          @(
+            "# Workspace Installer $releaseTag"
+            ""
+            "Release asset:"
+            "- $assetName"
+            ""
+            "SHA256:"
+            "- $assetSha"
+            ""
+            "Install command:"
+            "```powershell"
+            $installCommand
+            "```"
+          ) | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
+
+          $repo = [string]$env:TARGET_REPOSITORY
+          $prerelease = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:PRERELEASE)) {
+            $prerelease = [System.Convert]::ToBoolean($env:PRERELEASE)
+          }
+
+          & gh release view $releaseTag -R $repo *> $null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+
+          if (-not $releaseExists) {
+            $createArgs = @(
+              'release', 'create', $releaseTag,
+              '-R', $repo,
+              '--title', "Workspace Installer $releaseTag",
+              '--notes-file', $releaseNotesPath
+            )
+            if ($prerelease) {
+              $createArgs += '--prerelease'
+            }
+            & gh @createArgs
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create release '$releaseTag' for '$repo'."
+            }
+          } else {
+            $editArgs = @(
+              'release', 'edit', $releaseTag,
+              '-R', $repo,
+              '--title', "Workspace Installer $releaseTag",
+              '--notes-file', $releaseNotesPath
+            )
+            if ($prerelease) {
+              $editArgs += '--prerelease'
+            }
+            & gh @editArgs
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to edit release '$releaseTag' for '$repo'."
+            }
+          }
+
+          & gh release upload $releaseTag $assetPath -R $repo --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload installer asset '$assetPath' to release '$releaseTag'."
+          }
