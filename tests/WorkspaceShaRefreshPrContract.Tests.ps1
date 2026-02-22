@@ -29,6 +29,13 @@ Describe 'Workspace SHA refresh PR workflow contract' {
         $script:workflowContent | Should -Match 'workspace-governance-payload/workspace-governance/workspace-governance\.json'
     }
 
+    It 'requires WORKFLOW_BOT_TOKEN for mutation operations' {
+        $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN'
+        $script:workflowContent | Should -Match 'Required secret WORKFLOW_BOT_TOKEN is not configured'
+        $script:workflowContent | Should -Match 'token:\s*\${{\s*secrets\.WORKFLOW_BOT_TOKEN\s*}}'
+        $script:workflowContent | Should -Not -Match 'token:\s*\${{\s*github\.token\s*}}'
+    }
+
     It 'enables squash auto-merge for refresh PRs' {
         $script:workflowContent | Should -Match 'gh pr merge'
         $script:workflowContent | Should -Match '--auto'

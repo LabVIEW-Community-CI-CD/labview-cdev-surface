@@ -24,6 +24,14 @@ Describe 'Build runner-cli bundle from manifest contract' {
         $script:scriptContent | Should -Match 'global\.json'
     }
 
+    It 'uses runner temp with fallback and isolated temp roots' {
+        $script:scriptContent | Should -Match '\$env:RUNNER_TEMP'
+        $script:scriptContent | Should -Match '\$env:TEMP'
+        $script:scriptContent | Should -Match 'Get-IsolationToken'
+        $script:scriptContent | Should -Match 'lvie-runner-cli-bundle-'
+        $script:scriptContent | Should -Match 'Write-Warning'
+    }
+
     It 'builds and writes runner-cli executable, hash, and metadata' {
         $script:scriptContent | Should -Match 'dotnet publish'
         $script:scriptContent | Should -Match 'runner-cli\.exe'

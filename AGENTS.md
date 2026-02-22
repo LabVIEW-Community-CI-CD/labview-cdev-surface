@@ -20,10 +20,13 @@ This repository is the canonical policy and manifest surface for deterministic `
 ## Release Signal Contract
 - `Workspace SHA Refresh PR` is the primary path for updating `pinned_sha` values.
 - On drift, automation must update manifest pins, create/update branch `automation/sha-refresh`, and open or update a PR to `main`.
+- `workspace-sha-refresh-pr.yml` requires repository secret `WORKFLOW_BOT_TOKEN` for branch mutation, PR operations, and workflow dispatch.
+- If `WORKFLOW_BOT_TOKEN` is missing or misconfigured, refresh automation must fail fast with explicit remediation.
 - Auto-merge is enabled by default for refresh PRs using squash strategy.
 - Maintainer review is not required for `labview-cdev-surface` refresh PR merges (`required_approving_review_count = 0`).
 - Do not bypass this by weakening checks or disabling scheduled runs.
-- If automation cannot create or merge the PR, manual refresh is fallback.
+- Do not use manual no-op pushes as a normal workaround for refresh PR check propagation.
+- If automation cannot create or merge the PR due to platform outage, manual refresh is fallback.
 
 ## Installer Release Contract
 - The NSIS workspace installer is published as a GitHub release asset from `.github/workflows/release-workspace-installer.yml`.

@@ -38,6 +38,79 @@ function Convert-ToEpochIso8601 {
     return [DateTimeOffset]::FromUnixTimeSeconds($EpochSeconds).UtcDateTime.ToString('o')
 }
 
+function Convert-ToPathSafeSegment {
+    param(
+        [Parameter(Mandatory = $true)][string]$Value,
+        [Parameter()][int]$MaxLength = 64
+    )
+
+    $safe = $Value -replace '[^A-Za-z0-9._-]', '-'
+    $safe = $safe -replace '-{2,}', '-'
+    $safe = $safe.Trim('-')
+    if ([string]::IsNullOrWhiteSpace($safe)) {
+        $safe = 'segment'
+    }
+    if ($safe.Length -gt $MaxLength) {
+        $safe = $safe.Substring(0, $MaxLength)
+    }
+    return $safe
+}
+
+function Get-TempBasePath {
+    if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+        return [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) {
+        return [System.IO.Path]::GetFullPath($env:TEMP)
+    }
+    throw "Neither RUNNER_TEMP nor TEMP is set. Cannot allocate temporary workspace."
+}
+
+function Get-IsolationToken {
+    $seed = [string]::Join(
+        '|',
+        @(
+            [string]$env:GITHUB_RUN_ID,
+            [string]$env:GITHUB_JOB,
+            [string]$env:RUNNER_NAME,
+            [string]$PID,
+            [guid]::NewGuid().ToString('N')
+        )
+    )
+
+    $hashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($seed)
+        $hashBytes = $hashAlgorithm.ComputeHash($bytes)
+    } finally {
+        $hashAlgorithm.Dispose()
+    }
+
+    $hash = [System.BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant()
+    return $hash.Substring(0, 12)
+}
+
+function Remove-Directory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter()][switch]$BestEffort
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        return
+    }
+
+    try {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+    } catch {
+        if ($BestEffort) {
+            Write-Warning "Failed to remove temporary directory '$Path': $($_.Exception.Message)"
+            return
+        }
+        throw
+    }
+}
+
 function Get-PinnedSdkVersion {
     param([Parameter(Mandatory = $true)][string]$RepoRoot)
 
@@ -134,11 +207,19 @@ if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
 }
 
 $epoch = if ($PSBoundParameters.ContainsKey('SourceDateEpoch')) { $SourceDateEpoch } else { 0L }
-$tempRoot = Join-Path $env:TEMP ("lvie-runner-cli-bundle-{0}-{1}-{2}" -f $RepoName, $pinnedSha.Substring(0, 12), $Runtime)
+$tempBasePath = Get-TempBasePath
+Ensure-Directory -Path $tempBasePath
+$tempRoot = Join-Path $tempBasePath (
+    "lvie-runner-cli-bundle-{0}-{1}-{2}-{3}" -f
+    (Convert-ToPathSafeSegment -Value $RepoName -MaxLength 24),
+    $pinnedSha.Substring(0, 12),
+    (Convert-ToPathSafeSegment -Value $Runtime -MaxLength 24),
+    (Get-IsolationToken)
+)
 $cloneRoot = Join-Path $tempRoot 'src'
 $publishRoot = Join-Path $tempRoot 'publish'
 if (Test-Path -LiteralPath $tempRoot -PathType Container) {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    Remove-Directory -Path $tempRoot
 }
 Ensure-Directory -Path $cloneRoot
 Ensure-Directory -Path $publishRoot
@@ -246,6 +327,6 @@ try {
     } | ConvertTo-Json -Depth 8 | Write-Output
 } finally {
     if (-not $KeepTemp -and (Test-Path -LiteralPath $tempRoot -PathType Container)) {
-        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+        Remove-Directory -Path $tempRoot -BestEffort
     }
 }

@@ -21,11 +21,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate workflow bot token
+        shell: pwsh
+        env:
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+            throw "Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with contents:write, pull-requests:write, and workflow dispatch capability."
+          }
+
       - id: refresh
         name: Update manifest pinned SHAs
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'workspace-sha-refresh-report.json'
@@ -77,7 +87,7 @@ jobs:
         if: steps.refresh.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.WORKFLOW_BOT_TOKEN }}
           commit-message: 'chore(manifest): refresh pinned SHAs'
           branch: automation/sha-refresh
           delete-branch: true
@@ -100,7 +110,7 @@ jobs:
         if: steps.create_pr.outputs.pull-request-number != ''
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           & gh workflow run ci.yml `
@@ -114,7 +124,7 @@ jobs:
         if: steps.create_pr.outputs.pull-request-number != ''
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           & gh pr merge "${{ steps.create_pr.outputs.pull-request-number }}" `
