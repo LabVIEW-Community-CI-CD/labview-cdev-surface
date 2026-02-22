@@ -194,8 +194,8 @@ if ((-not $SkipSmokeInstall) -and (-not $SkipSmokeBuild)) {
         }
         Ensure-Directory -Path $resolvedSmokeRoot
 
-        $smokeProcess = Start-Process -FilePath $smokeInstallerPath -ArgumentList '/S' -Wait -PassThru
-        $smokeExitCode = $smokeProcess.ExitCode
+        & $smokeInstallerPath '/S' | Out-Host
+        $smokeExitCode = $LASTEXITCODE
         if ($smokeExitCode -ne 0) {
             throw "Smoke installer failed with exit code $smokeExitCode"
         }
