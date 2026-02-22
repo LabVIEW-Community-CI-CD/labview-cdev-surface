@@ -184,6 +184,73 @@ function Expand-CdevCliWindowsBundle {
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestinationPath -Force
 }
 
+function Invoke-VipcApplyWithVipmCli {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$IconEditorRepoPath,
+        [Parameter(Mandatory = $true)]
+        [string]$VipcPath,
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredLabviewYear,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('32', '64')]
+        [string]$RequiredBitness
+    )
+
+    $result = [ordered]@{
+        status = 'pending'
+        message = ''
+        command = @()
+        exit_code = $null
+        resolved_vipc_path = ''
+        vipm_cli_path = ''
+    }
+
+    try {
+        $vipmCommand = Get-Command -Name 'vipm' -ErrorAction Stop
+        $result.vipm_cli_path = [string]$vipmCommand.Source
+
+        $resolvedVipcPath = if ([System.IO.Path]::IsPathRooted($VipcPath)) {
+            [System.IO.Path]::GetFullPath($VipcPath)
+        } else {
+            [System.IO.Path]::GetFullPath((Join-Path -Path $IconEditorRepoPath -ChildPath $VipcPath))
+        }
+        if (-not (Test-Path -LiteralPath $resolvedVipcPath -PathType Leaf)) {
+            throw "VIPC file was not found for native VIPM apply: $resolvedVipcPath"
+        }
+        $result.resolved_vipc_path = $resolvedVipcPath
+
+        $vipmArgs = @(
+            '--labview-version', $RequiredLabviewYear,
+            '--labview-bitness', $RequiredBitness,
+            'install',
+            $resolvedVipcPath
+        )
+        $result.command = @($vipmArgs)
+        Write-InstallerFeedback -Message ("Executing native VIPM CLI apply: {0} {1}" -f $result.vipm_cli_path, ($vipmArgs -join ' '))
+
+        $vipmOutput = & $result.vipm_cli_path @vipmArgs 2>&1
+        if ($null -ne $vipmOutput) {
+            $vipmOutput | Out-Host
+        }
+        $result.exit_code = $LASTEXITCODE
+        if ($result.exit_code -ne 0) {
+            throw "vipm install failed with exit code $($result.exit_code)."
+        }
+
+        $result.status = 'pass'
+        $result.message = 'Native VIPM CLI VIPC apply completed successfully.'
+    } catch {
+        if ($null -eq $result.exit_code) {
+            $result.exit_code = 1
+        }
+        $result.status = 'fail'
+        $result.message = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Invoke-RunnerCliPplCapabilityCheck {
     param(
         [Parameter(Mandatory = $true)]
@@ -379,18 +446,15 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         & $RunnerCliPath @vipcAssertArgs | Out-Host
         $vipcAssertExit = $LASTEXITCODE
         if ($vipcAssertExit -ne 0) {
-            $vipcApplyArgs = @(
-                'vipc', 'apply',
-                '--repo-root', $IconEditorRepoPath,
-                '--supported-bitness', $RequiredBitness,
-                '--vipc-path', $vipcPath,
-                '--labview-version', $RequiredLabviewYear
-            )
-            $result.command.vipc_apply = @($vipcApplyArgs)
-            Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies.'
-            & $RunnerCliPath @vipcApplyArgs | Out-Host
-            if ($LASTEXITCODE -ne 0) {
-                throw "runner-cli vipc apply failed with exit code $LASTEXITCODE."
+            Write-InstallerFeedback -Message 'VIPC assert reported dependency drift; applying VIPC dependencies via native VIPM CLI.'
+            $nativeApply = Invoke-VipcApplyWithVipmCli `
+                -IconEditorRepoPath $IconEditorRepoPath `
+                -VipcPath $vipcPath `
+                -RequiredLabviewYear ([string]$RequiredLabviewYear) `
+                -RequiredBitness ([string]$RequiredBitness)
+            $result.command.vipc_apply = @('vipm', @($nativeApply.command))
+            if ([string]$nativeApply.status -ne 'pass') {
+                throw $nativeApply.message
             }
 
             Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
