@@ -138,11 +138,9 @@ foreach ($runnerRoot in $RunnerRoots) {
         Add-Check -Scope $scope -Name 'github_url_matches_repo' -Passed ($runnerRepoUrl -eq $expectedGitHubUrl) -Detail $runnerRepoUrl
         Add-Check -Scope $scope -Name 'agent_name_present' -Passed (-not [string]::IsNullOrWhiteSpace($agentName)) -Detail $agentName
 
-        $serviceMatch = @(
-            $serviceInventory |
+        $serviceMatch = $serviceInventory |
             Where-Object { ([string]$_.PathName).Trim('"') -ieq $serviceExe } |
             Select-Object -First 1
-        )
         if ($null -eq $serviceMatch) {
             if ($AllowInteractiveRunner.IsPresent) {
                 $listenerExe = Join-Path $resolvedRoot 'bin\Runner.Listener.exe'
