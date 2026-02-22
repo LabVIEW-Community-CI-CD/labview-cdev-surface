@@ -39,7 +39,18 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}\*"
 
-  ExecWait '"pwsh" -NoProfile -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
+  StrCpy $1 ""
+  IfFileExists "$PROGRAMFILES64\PowerShell\7\pwsh.exe" 0 +2
+    StrCpy $1 "$PROGRAMFILES64\PowerShell\7\pwsh.exe"
+  ${If} $1 == ""
+    IfFileExists "$PROGRAMFILES\PowerShell\7\pwsh.exe" 0 +2
+      StrCpy $1 "$PROGRAMFILES\PowerShell\7\pwsh.exe"
+  ${EndIf}
+  ${If} $1 == ""
+    StrCpy $1 "pwsh"
+  ${EndIf}
+
+  ExecWait '"$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
   ${If} $0 != 0
     SetErrorLevel $0
     Abort
