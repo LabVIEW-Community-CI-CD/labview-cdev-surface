@@ -62,7 +62,7 @@ Section "Install"
   FileWrite $2 "report=${WORKSPACE_ROOT}\${REPORT_REL}$\r$\n"
   FileWrite $2 "powershell_exe=$1$\r$\n"
 
-  ExecWait '"$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
+  ExecWait '"$SYSDIR\cmd.exe" /c ""$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}" >> "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" 2>&1"' $0
   FileWrite $2 "exit_code=$0$\r$\n"
   FileClose $2
   ${If} $0 != 0
