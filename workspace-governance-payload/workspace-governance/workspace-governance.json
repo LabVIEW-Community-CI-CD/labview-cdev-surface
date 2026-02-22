@@ -174,7 +174,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "7459d4fa19d2288f834f4b245dc0a87e01fdaed4"
+      "pinned_sha": "c4a5992c1b3f2a098e4b28745a2f499683865fb6"
     },
     {
       "path": "C:\\dev\\labview-for-containers-org",
@@ -333,7 +333,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "874a49badb40f92fc900f4615f08f89a0e12a628"
+      "pinned_sha": "29da1bcc4105b70e67ff126793e6d41b27937288"
     }
   ]
 }
