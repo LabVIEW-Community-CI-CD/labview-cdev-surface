@@ -612,6 +612,17 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                     $vipBuildStatus = Get-Content -LiteralPath $vipBuildStatusPath -Raw | ConvertFrom-Json -ErrorAction Stop
                     if ([string]$vipBuildStatus.reason -eq 'vipm_timeout') {
                         $timeoutReasonDetected = $true
+                    } else {
+                        foreach ($timeoutLogPath in @([string]$vipBuildStatus.vipm_log, [string]$vipBuildStatus.gcli_log)) {
+                            if ([string]::IsNullOrWhiteSpace($timeoutLogPath) -or -not (Test-Path -LiteralPath $timeoutLogPath -PathType Leaf)) {
+                                continue
+                            }
+                            $timeoutPatternMatched = Select-String -Path $timeoutLogPath -Pattern 'timed out after|Timeout waiting on VIPM' -SimpleMatch:$false -Quiet
+                            if ($timeoutPatternMatched) {
+                                $timeoutReasonDetected = $true
+                                break
+                            }
+                        }
                     }
                 } catch {
                     # If status parsing fails, fall through to non-retry path.
