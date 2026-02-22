@@ -17,6 +17,7 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match '\[string\]\$WorkspaceRoot = ''C:\\dev'''
         $script:scriptContent | Should -Match '\[Parameter\(Mandatory = \$true\)\]\s*\[string\]\$ManifestPath'
         $script:scriptContent | Should -Match '\[ValidateSet\(''Install'', ''Verify''\)\]'
+        $script:scriptContent | Should -Match '\$ExecutionContext = '''''
         $script:scriptContent | Should -Match '\[Parameter\(Mandatory = \$true\)\]\s*\[string\]\$OutputPath'
     }
 
@@ -34,8 +35,17 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'Assert-WorkspaceGovernance\.ps1'
         $script:scriptContent | Should -Match 'runner-cli\.exe'
         $script:scriptContent | Should -Match 'runner-cli\.metadata\.json'
+        $script:scriptContent | Should -Match 'required_ppl_bitnesses'
+        $script:scriptContent | Should -Match 'required_vip_bitness'
+        $script:scriptContent | Should -Match 'NsisInstall'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliPplCapabilityCheck'
-        $script:scriptContent | Should -Match 'LabVIEW 2026'
+        $script:scriptContent | Should -Match 'Invoke-RunnerCliVipPackageHarnessCheck'
+        $script:scriptContent | Should -Match 'vipc assert'
+        $script:scriptContent | Should -Match 'vip build'
+        $script:scriptContent | Should -Match 'Write-InstallerFeedback'
+        $script:scriptContent | Should -Match 'ppl_capability_checks'
+        $script:scriptContent | Should -Match 'post_action_sequence'
+        $script:scriptContent | Should -Match 'governance-audit'
         $script:scriptContent | Should -Match 'branch_protection_'
         $script:scriptContent | Should -Match 'branch_only_failure'
     }

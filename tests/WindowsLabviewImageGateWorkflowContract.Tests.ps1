@@ -19,12 +19,14 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:workflowContent | Should -Not -Match '(?m)^\s*pull_request:'
     }
 
-    It 'targets windows containers with labview image and runner-cli ppl check' {
+    It 'targets windows containers with installer-post-action report checks' {
         $script:workflowContent | Should -Match 'nationalinstruments/labview:latest-windows'
         $script:workflowContent | Should -Match 'DockerCli\.exe.*-SwitchWindowsEngine'
         $script:workflowContent | Should -Match 'Install-WorkspaceFromManifest\.ps1'
-        $script:workflowContent | Should -Match 'runner-cli\.exe'
-        $script:workflowContent | Should -Match 'ppl build'
+        $script:workflowContent | Should -Match 'workspace-install-latest\.json'
+        $script:workflowContent | Should -Match "ppl_capability_checks\.'32'\.status"
+        $script:workflowContent | Should -Match "ppl_capability_checks\.'64'\.status"
+        $script:workflowContent | Should -Match 'vip_package_build_check\.status'
     }
 
     It 'publishes gate artifacts for troubleshooting' {

@@ -39,7 +39,7 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}\*"
 
-  ExecWait '"pwsh" -NoProfile -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
+  ExecWait '"pwsh" -NoProfile -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -ExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}"' $0
   ${If} $0 != 0
     SetErrorLevel $0
     Abort

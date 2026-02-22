@@ -27,6 +27,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Release preflight - verify icon-editor upstream pin freshness
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "workspace-governance.json was not found at $manifestPath"
+          }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $iconEditorEntry = @(
+            $manifest.managed_repos |
+            Where-Object {
+              [string]$_.required_gh_repo -eq 'LabVIEW-Community-CI-CD/labview-icon-editor' -and
+              [string]$_.default_branch -eq 'develop'
+            } |
+            Select-Object -First 1
+          )
+
+          if ($null -eq $iconEditorEntry) {
+            throw "Manifest is missing managed repo entry for LabVIEW-Community-CI-CD/labview-icon-editor on develop."
+          }
+
+          $pinnedSha = ([string]$iconEditorEntry.pinned_sha).ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Manifest pinned_sha is invalid for LabVIEW-Community-CI-CD/labview-icon-editor: '$pinnedSha'"
+          }
+
+          $upstreamSha = (& gh api repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop --jq '.commit.sha').Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamSha)) {
+            throw "Failed to read upstream develop SHA for LabVIEW-Community-CI-CD/labview-icon-editor."
+          }
+
+          if ($upstreamSha -ne $pinnedSha) {
+            throw "Manifest pin is stale for LabVIEW-Community-CI-CD/labview-icon-editor:develop. pinned=$pinnedSha upstream=$upstreamSha"
+          }
+
+          Write-Host "Release preflight passed. icon-editor pinned_sha matches upstream develop HEAD."
+
       - id: package
         name: Build workspace installer with reproducibility and provenance gates
         shell: pwsh
