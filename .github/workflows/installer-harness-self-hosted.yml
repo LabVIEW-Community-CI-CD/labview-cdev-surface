@@ -48,12 +48,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $runnerWorkspace = [string]$env:RUNNER_WORKSPACE
+          if ([string]::IsNullOrWhiteSpace($runnerWorkspace) -or -not (Test-Path -LiteralPath $runnerWorkspace -PathType Container)) {
+            throw "RUNNER_WORKSPACE is not set to a valid path: '$runnerWorkspace'"
+          }
+          $activeRunnerRoot = Split-Path -Path (Split-Path -Path $runnerWorkspace -Parent) -Parent
+          if ([string]::IsNullOrWhiteSpace($activeRunnerRoot) -or -not (Test-Path -LiteralPath $activeRunnerRoot -PathType Container)) {
+            throw "Unable to resolve active runner root from RUNNER_WORKSPACE '$runnerWorkspace'."
+          }
+
           $reportPath = Join-Path $env:RUNNER_TEMP 'installer-harness/runner-baseline-report.json'
           & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessRunnerBaseline.ps1 `
             -Repository 'LabVIEW-Community-CI-CD/labview-cdev-surface' `
-            -RunnerRoots @('C:\actions-runner-cdev', 'C:\actions-runner-cdev-2') `
+            -RunnerRoots @($activeRunnerRoot) `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
             throw "Runner baseline lock failed."
           }
 
