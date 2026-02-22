@@ -5,9 +5,26 @@ Canonical governance surface for deterministic `C:\dev` workspace provisioning.
 This repository owns:
 - `workspace-governance.json` (machine-readable remote/branch/commit contract)
 - `workspace-governance-payload\workspace-governance\*` (canonical payload copied into `C:\dev` by installer runtime)
+- `workspace-governance-payload\tools\cdev-cli\*` (bundled control-plane CLI assets for offline deterministic operation)
 - `AGENTS.md` (human policy contract)
 - validation scripts in `scripts/`
 - drift and contract workflows in `.github/workflows/`
+
+## CLI-first control plane
+
+Preferred operator interface:
+
+```powershell
+pwsh -NoProfile -File C:\dev\tools\cdev-cli\win-x64\cdev-cli\scripts\Invoke-CdevCli.ps1 help
+```
+
+Core commands:
+- `repos doctor`
+- `installer exercise`
+- `postactions collect`
+- `linux deploy-ni --docker-context desktop-linux --image nationalinstruments/labview:latest-linux`
+
+The NSIS payload bundles pinned CLI assets for both `win-x64` and `linux-x64` and release preflight verifies their hashes against `workspace-governance.json`.
 
 ## Core release signal
 

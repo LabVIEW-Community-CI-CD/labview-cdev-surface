@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "entrypoint": "scripts/Invoke-CdevCli.ps1",
+  "commands": {
+    "help": ["", "<topic>"],
+    "repos": ["list", "doctor"],
+    "surface": ["sync"],
+    "installer": ["build", "exercise", "install"],
+    "postactions": ["collect"],
+    "linux": ["install", "deploy-ni"],
+    "ci": ["integration-gate"],
+    "release": ["package"]
+  }
+}

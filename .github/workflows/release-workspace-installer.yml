@@ -67,7 +67,51 @@ jobs:
             throw "Manifest pin is stale for LabVIEW-Community-CI-CD/labview-icon-editor:develop. pinned=$pinnedSha upstream=$upstreamSha"
           }
 
-          Write-Host "Release preflight passed. icon-editor pinned_sha matches upstream develop HEAD."
+          if ($null -eq $manifest.installer_contract -or $null -eq $manifest.installer_contract.cli_bundle) {
+            throw "Manifest installer_contract.cli_bundle is required for release packaging."
+          }
+
+          $cliBundle = $manifest.installer_contract.cli_bundle
+          $cliPayloadRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload/tools/cdev-cli'
+          $cliWinAsset = Join-Path $cliPayloadRoot ([string]$cliBundle.asset_win)
+          $cliLinuxAsset = Join-Path $cliPayloadRoot ([string]$cliBundle.asset_linux)
+          $cliWinShaPath = "$cliWinAsset.sha256"
+          $cliLinuxShaPath = "$cliLinuxAsset.sha256"
+
+          foreach ($required in @($cliWinAsset, $cliLinuxAsset, $cliWinShaPath, $cliLinuxShaPath)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "CLI bundle contract file is missing from payload: $required"
+            }
+          }
+
+          $cliWinExpected = ([string]$cliBundle.asset_win_sha256).ToLowerInvariant()
+          $cliLinuxExpected = ([string]$cliBundle.asset_linux_sha256).ToLowerInvariant()
+          if ($cliWinExpected -notmatch '^[0-9a-f]{64}$') {
+            throw "Manifest cli_bundle.asset_win_sha256 is invalid: '$cliWinExpected'"
+          }
+          if ($cliLinuxExpected -notmatch '^[0-9a-f]{64}$') {
+            throw "Manifest cli_bundle.asset_linux_sha256 is invalid: '$cliLinuxExpected'"
+          }
+
+          $cliWinActual = (Get-FileHash -LiteralPath $cliWinAsset -Algorithm SHA256).Hash.ToLowerInvariant()
+          $cliLinuxActual = (Get-FileHash -LiteralPath $cliLinuxAsset -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($cliWinActual -ne $cliWinExpected) {
+            throw "CLI bundle Windows hash mismatch. expected=$cliWinExpected actual=$cliWinActual"
+          }
+          if ($cliLinuxActual -ne $cliLinuxExpected) {
+            throw "CLI bundle Linux hash mismatch. expected=$cliLinuxExpected actual=$cliLinuxActual"
+          }
+
+          $cliWinShaLine = (Get-Content -LiteralPath $cliWinShaPath -Raw).Trim()
+          $cliLinuxShaLine = (Get-Content -LiteralPath $cliLinuxShaPath -Raw).Trim()
+          if (-not $cliWinShaLine.StartsWith($cliWinExpected)) {
+            throw "CLI bundle Windows .sha256 file does not start with expected hash."
+          }
+          if (-not $cliLinuxShaLine.StartsWith($cliLinuxExpected)) {
+            throw "CLI bundle Linux .sha256 file does not start with expected hash."
+          }
+
+          Write-Host "Release preflight passed. icon-editor pinned_sha and bundled cdev-cli hashes match manifest contract."
 
       - id: package
         name: Build workspace installer with reproducibility and provenance gates

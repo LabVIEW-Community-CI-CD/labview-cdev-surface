@@ -11,6 +11,18 @@ This repository is the canonical policy and manifest surface for deterministic `
 - `.github/workflows/workspace-sha-drift-signal.yml` is the drift signal workflow.
 - `.github/workflows/workspace-sha-refresh-pr.yml` is the auto-PR SHA refresh workflow.
 
+## CLI Orchestration Contract
+- Preferred operator interface is `Invoke-CdevCli.ps1` from the bundled cdev CLI payload.
+- Required CLI command surface (stable tokens):
+  - `repos doctor`
+  - `installer exercise`
+  - `postactions collect`
+  - `linux deploy-ni`
+- Linux deploy defaults must stay documented as:
+  - Docker context `desktop-linux`
+  - Image `nationalinstruments/labview:latest-linux`
+- Direct script entrypoints remain supported for fallback and debugging, but policy/docs/tests must stay CLI-first.
+
 ## Safety Rules
 - Do not relax fork/org mutation restrictions encoded in `workspace-governance.json`.
 - Do not mutate governed default branches directly when branch-protection contracts are missing.

@@ -56,6 +56,18 @@
       "labview_version": "2020",
       "supported_bitness": "64",
       "command": "runner-cli vip build"
+    },
+    "cli_bundle": {
+      "repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
+      "version": "0.1.0",
+      "source_commit": "35ad00364d366e8ebe924c65466b635290886ff1",
+      "asset_win": "cdev-cli-win-x64.zip",
+      "asset_win_sha256": "6869a2db9456a21689fde59da73c3f7e767e0a59a08880f1b015bcceb3e13be5",
+      "asset_linux": "cdev-cli-linux-x64.tar.gz",
+      "asset_linux_sha256": "61589f136ae26c57f55810f50077180fe2c28f97ec66b2d30f03ed13b6d1dda1",
+      "payload_root": "tools\\cdev-cli",
+      "entrypoint_win": "tools\\cdev-cli\\win-x64\\cdev-cli\\scripts\\Invoke-CdevCli.ps1",
+      "entrypoint_linux": "tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1"
     }
   },
   "managed_repos": [
@@ -356,4 +368,3 @@
     }
   ]
 }
-

@@ -164,6 +164,25 @@ function Get-LatestVipPath {
     return [string]$latestVip.FullName
 }
 
+function Expand-CdevCliWindowsBundle {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ZipPath,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+        throw "cdev-cli Windows asset not found: $ZipPath"
+    }
+
+    if (Test-Path -LiteralPath $DestinationPath -PathType Container) {
+        Remove-Item -LiteralPath $DestinationPath -Recurse -Force
+    }
+    Ensure-Directory -Path $DestinationPath
+    Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestinationPath -Force
+}
+
 function Invoke-RunnerCliPplCapabilityCheck {
     param(
         [Parameter(Mandatory = $true)]
@@ -461,6 +480,28 @@ $runnerCliBundle = [ordered]@{
     expected_sha256 = ''
     actual_sha256 = ''
 }
+$cliBundle = [ordered]@{
+    status = 'not_checked'
+    message = ''
+    repo = ''
+    version = ''
+    source_commit = ''
+    payload_root = Join-Path $payloadRoot 'tools\cdev-cli'
+    asset_win = ''
+    asset_win_path = ''
+    asset_win_expected_sha256 = ''
+    asset_win_actual_sha256 = ''
+    asset_win_sha_file = ''
+    asset_linux = ''
+    asset_linux_path = ''
+    asset_linux_expected_sha256 = ''
+    asset_linux_actual_sha256 = ''
+    asset_linux_sha_file = ''
+    entrypoint_win = ''
+    entrypoint_linux = ''
+    extracted_win_root = ''
+    entrypoint_win_path = ''
+}
 $pplCapabilityChecks = [ordered]@{
     '32' = [ordered]@{
         status = 'not_run'
@@ -556,6 +597,13 @@ try {
     $requiredPplBitnesses = @('32', '64')
     $requiredVipBitness = '64'
     $runnerCliRelativeRoot = 'tools\runner-cli\win-x64'
+    $cliBundleRelativeRoot = 'tools\cdev-cli'
+    $cliBundleAssetWin = 'cdev-cli-win-x64.zip'
+    $cliBundleAssetWinSha = ''
+    $cliBundleAssetLinux = 'cdev-cli-linux-x64.tar.gz'
+    $cliBundleAssetLinuxSha = ''
+    $cliBundleEntrypointWin = 'tools\cdev-cli\win-x64\cdev-cli\scripts\Invoke-CdevCli.ps1'
+    $cliBundleEntrypointLinux = 'tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1'
     if ($null -ne $manifest.PSObject.Properties['installer_contract']) {
         $installerContract = $manifest.installer_contract
         if ($null -ne $installerContract.PSObject.Properties['labview_gate']) {
@@ -579,6 +627,34 @@ try {
                 $runnerCliRelativeRoot = [string]$runnerCliBundleContract.relative_root
             }
         }
+        if ($null -eq $installerContract.PSObject.Properties['cli_bundle']) {
+            throw "Installer contract requires 'cli_bundle' metadata."
+        }
+        $cliBundleContract = $installerContract.cli_bundle
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.payload_root)) {
+            $cliBundleRelativeRoot = [string]$cliBundleContract.payload_root
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.asset_win)) {
+            $cliBundleAssetWin = [string]$cliBundleContract.asset_win
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.asset_win_sha256)) {
+            $cliBundleAssetWinSha = ([string]$cliBundleContract.asset_win_sha256).ToLowerInvariant()
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.asset_linux)) {
+            $cliBundleAssetLinux = [string]$cliBundleContract.asset_linux
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.asset_linux_sha256)) {
+            $cliBundleAssetLinuxSha = ([string]$cliBundleContract.asset_linux_sha256).ToLowerInvariant()
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.entrypoint_win)) {
+            $cliBundleEntrypointWin = [string]$cliBundleContract.entrypoint_win
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundleContract.entrypoint_linux)) {
+            $cliBundleEntrypointLinux = [string]$cliBundleContract.entrypoint_linux
+        }
+        $cliBundle.repo = [string]$cliBundleContract.repo
+        $cliBundle.version = [string]$cliBundleContract.version
+        $cliBundle.source_commit = ([string]$cliBundleContract.source_commit).ToLowerInvariant()
     }
 
     $requiredPplBitnesses = @(
@@ -593,6 +669,15 @@ try {
     }
     if ($requiredVipBitness -ne '64') {
         throw "Installer contract requires VIP bitness '64'; received '$requiredVipBitness'."
+    }
+    if ([string]::IsNullOrWhiteSpace($cliBundleAssetWin) -or [string]::IsNullOrWhiteSpace($cliBundleAssetLinux)) {
+        throw "Installer contract requires cli_bundle asset names for both Windows and Linux."
+    }
+    if ($cliBundleAssetWinSha -notmatch '^[0-9a-f]{64}$') {
+        throw "Installer contract has invalid cli_bundle.asset_win_sha256 '$cliBundleAssetWinSha'."
+    }
+    if ($cliBundleAssetLinuxSha -notmatch '^[0-9a-f]{64}$') {
+        throw "Installer contract has invalid cli_bundle.asset_linux_sha256 '$cliBundleAssetLinuxSha'."
     }
 
     if ($Mode -eq 'Install') {
@@ -809,6 +894,20 @@ try {
     }
 
     Write-InstallerFeedback -Message 'Syncing governance payload into workspace root.'
+    $cliBundle.asset_win = $cliBundleAssetWin
+    $cliBundle.asset_linux = $cliBundleAssetLinux
+    $cliBundle.asset_win_expected_sha256 = $cliBundleAssetWinSha
+    $cliBundle.asset_linux_expected_sha256 = $cliBundleAssetLinuxSha
+    $cliBundle.entrypoint_win = $cliBundleEntrypointWin
+    $cliBundle.entrypoint_linux = $cliBundleEntrypointLinux
+    $cliBundle.payload_root = Join-Path $payloadRoot $cliBundleRelativeRoot
+    $cliBundle.asset_win_path = Join-Path $resolvedWorkspaceRoot (Join-Path $cliBundleRelativeRoot $cliBundleAssetWin)
+    $cliBundle.asset_linux_path = Join-Path $resolvedWorkspaceRoot (Join-Path $cliBundleRelativeRoot $cliBundleAssetLinux)
+    $cliBundle.asset_win_sha_file = "$($cliBundle.asset_win_path).sha256"
+    $cliBundle.asset_linux_sha_file = "$($cliBundle.asset_linux_path).sha256"
+    $cliBundle.entrypoint_win_path = Join-Path $resolvedWorkspaceRoot $cliBundleEntrypointWin
+    $cliBundle.extracted_win_root = Join-Path $resolvedWorkspaceRoot 'tools\cdev-cli\win-x64'
+
     $payloadFiles = @(
         @{ source = (Join-Path $payloadRoot 'AGENTS.md'); destination = (Join-Path $resolvedWorkspaceRoot 'AGENTS.md') },
         @{ source = (Join-Path $payloadRoot 'workspace-governance.json'); destination = (Join-Path $resolvedWorkspaceRoot 'workspace-governance.json') },
@@ -816,7 +915,12 @@ try {
         @{ source = (Join-Path $payloadRoot 'scripts\Test-PolicyContracts.ps1'); destination = (Join-Path $resolvedWorkspaceRoot 'scripts\Test-PolicyContracts.ps1') },
         @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe') },
         @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.exe.sha256') },
-        @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json') }
+        @{ source = (Join-Path $payloadRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json'); destination = (Join-Path $resolvedWorkspaceRoot 'tools\runner-cli\win-x64\runner-cli.metadata.json') },
+        @{ source = (Join-Path $payloadRoot (Join-Path $cliBundleRelativeRoot $cliBundleAssetWin)); destination = $cliBundle.asset_win_path },
+        @{ source = (Join-Path $payloadRoot (Join-Path $cliBundleRelativeRoot "$cliBundleAssetWin.sha256")); destination = $cliBundle.asset_win_sha_file },
+        @{ source = (Join-Path $payloadRoot (Join-Path $cliBundleRelativeRoot $cliBundleAssetLinux)); destination = $cliBundle.asset_linux_path },
+        @{ source = (Join-Path $payloadRoot (Join-Path $cliBundleRelativeRoot "$cliBundleAssetLinux.sha256")); destination = $cliBundle.asset_linux_sha_file },
+        @{ source = (Join-Path $payloadRoot (Join-Path $cliBundleRelativeRoot 'cli-contract.json')); destination = (Join-Path $resolvedWorkspaceRoot (Join-Path $cliBundleRelativeRoot 'cli-contract.json')) }
     )
 
     try {
@@ -907,6 +1011,55 @@ try {
         -Phase 'runner-cli-bundle' `
         -Status ([string]$runnerCliBundle.status) `
         -Message ([string]$runnerCliBundle.message)
+
+    try {
+        Write-InstallerFeedback -Message 'Verifying bundled cdev-cli assets.'
+        if ([string]::IsNullOrWhiteSpace($cliBundle.asset_win_path) -or -not (Test-Path -LiteralPath $cliBundle.asset_win_path -PathType Leaf)) {
+            throw "Bundled cdev-cli Windows asset was not found: $($cliBundle.asset_win_path)"
+        }
+        if ([string]::IsNullOrWhiteSpace($cliBundle.asset_linux_path) -or -not (Test-Path -LiteralPath $cliBundle.asset_linux_path -PathType Leaf)) {
+            throw "Bundled cdev-cli Linux asset was not found: $($cliBundle.asset_linux_path)"
+        }
+
+        $winExpectedFromFile = Get-ExpectedShaFromFile -ShaFilePath $cliBundle.asset_win_sha_file
+        if ($winExpectedFromFile -ne [string]$cliBundle.asset_win_expected_sha256) {
+            throw "cdev-cli Windows SHA file does not match installer contract. expected=$($cliBundle.asset_win_expected_sha256) actual=$winExpectedFromFile"
+        }
+        $linuxExpectedFromFile = Get-ExpectedShaFromFile -ShaFilePath $cliBundle.asset_linux_sha_file
+        if ($linuxExpectedFromFile -ne [string]$cliBundle.asset_linux_expected_sha256) {
+            throw "cdev-cli Linux SHA file does not match installer contract. expected=$($cliBundle.asset_linux_expected_sha256) actual=$linuxExpectedFromFile"
+        }
+
+        $cliBundle.asset_win_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_win_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($cliBundle.asset_win_actual_sha256 -ne [string]$cliBundle.asset_win_expected_sha256) {
+            throw "cdev-cli Windows asset hash mismatch. expected=$($cliBundle.asset_win_expected_sha256) actual=$($cliBundle.asset_win_actual_sha256)"
+        }
+        $cliBundle.asset_linux_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_linux_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($cliBundle.asset_linux_actual_sha256 -ne [string]$cliBundle.asset_linux_expected_sha256) {
+            throw "cdev-cli Linux asset hash mismatch. expected=$($cliBundle.asset_linux_expected_sha256) actual=$($cliBundle.asset_linux_actual_sha256)"
+        }
+
+        Expand-CdevCliWindowsBundle -ZipPath $cliBundle.asset_win_path -DestinationPath $cliBundle.extracted_win_root
+        if (-not (Test-Path -LiteralPath $cliBundle.entrypoint_win_path -PathType Leaf)) {
+            throw "cdev-cli Windows entrypoint was not found after extraction: $($cliBundle.entrypoint_win_path)"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$cliBundle.source_commit) -and ([string]$cliBundle.source_commit -notmatch '^[0-9a-f]{40}$')) {
+            throw "Installer contract has invalid cli_bundle.source_commit '$($cliBundle.source_commit)'."
+        }
+
+        $cliBundle.status = 'pass'
+        $cliBundle.message = 'Bundled cdev-cli assets passed hash verification and Windows extraction checks.'
+    } catch {
+        $cliBundle.status = 'fail'
+        $cliBundle.message = $_.Exception.Message
+        $errors += "cdev-cli bundle verification failed. $($cliBundle.message)"
+    }
+    Add-PostActionSequenceEntry `
+        -Sequence $postActionSequence `
+        -Phase 'cli-bundle' `
+        -Status ([string]$cliBundle.status) `
+        -Message ([string]$cliBundle.message)
 
     if ($runnerCliBundle.status -eq 'pass') {
         $repoContractStatus = @($repositoryResults | Where-Object { [string]$_.path -eq $iconEditorRepoPath } | Select-Object -First 1)
@@ -1091,6 +1244,7 @@ $report = [ordered]@{
     payload_sync = $payloadSync
     repositories = $repositoryResults
     runner_cli_bundle = $runnerCliBundle
+    cli_bundle = $cliBundle
     ppl_capability_checks = $pplCapabilityChecks
     vip_package_build_check = $vipPackageBuildCheck
     post_action_sequence = $postActionSequence

@@ -96,6 +96,7 @@ $installerContractMembers = if ($null -ne $installerContract) { @($installerCont
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_reproducibility' -Passed ($installerContractMembers -contains 'reproducibility') -Detail 'installer_contract.reproducibility'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_provenance' -Passed ($installerContractMembers -contains 'provenance') -Detail 'installer_contract.provenance'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_canary' -Passed ($installerContractMembers -contains 'canary') -Detail 'installer_contract.canary'
+Add-Check -Scope 'manifest' -Name 'has_installer_contract_cli_bundle' -Passed ($installerContractMembers -contains 'cli_bundle') -Detail 'installer_contract.cli_bundle'
 if ($installerContractMembers -contains 'reproducibility') {
     Add-Check -Scope 'manifest' -Name 'reproducibility_required_true' -Passed ([bool]$manifest.installer_contract.reproducibility.required) -Detail "required=$($manifest.installer_contract.reproducibility.required)"
     Add-Check -Scope 'manifest' -Name 'reproducibility_strict_hash_match_true' -Passed ([bool]$manifest.installer_contract.reproducibility.strict_hash_match) -Detail "strict_hash_match=$($manifest.installer_contract.reproducibility.strict_hash_match)"
@@ -108,6 +109,16 @@ if ($installerContractMembers -contains 'provenance') {
 if ($installerContractMembers -contains 'canary') {
     Add-Check -Scope 'manifest' -Name 'canary_has_schedule' -Passed (-not [string]::IsNullOrWhiteSpace([string]$manifest.installer_contract.canary.schedule_cron_utc)) -Detail ([string]$manifest.installer_contract.canary.schedule_cron_utc)
     Add-Check -Scope 'manifest' -Name 'canary_linux_context' -Passed ([string]$manifest.installer_contract.canary.docker_context -eq 'desktop-linux') -Detail ([string]$manifest.installer_contract.canary.docker_context)
+}
+if ($installerContractMembers -contains 'cli_bundle') {
+    $cliBundle = $manifest.installer_contract.cli_bundle
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_repo' -Passed ([string]$cliBundle.repo -eq 'LabVIEW-Community-CI-CD/labview-cdev-cli') -Detail ([string]$cliBundle.repo)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_asset_win' -Passed ([string]$cliBundle.asset_win -eq 'cdev-cli-win-x64.zip') -Detail ([string]$cliBundle.asset_win)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_asset_linux' -Passed ([string]$cliBundle.asset_linux -eq 'cdev-cli-linux-x64.tar.gz') -Detail ([string]$cliBundle.asset_linux)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_asset_win_sha256' -Passed ([regex]::IsMatch(([string]$cliBundle.asset_win_sha256).ToLowerInvariant(), '^[0-9a-f]{64}$')) -Detail ([string]$cliBundle.asset_win_sha256)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_asset_linux_sha256' -Passed ([regex]::IsMatch(([string]$cliBundle.asset_linux_sha256).ToLowerInvariant(), '^[0-9a-f]{64}$')) -Detail ([string]$cliBundle.asset_linux_sha256)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_entrypoint_win' -Passed ([string]$cliBundle.entrypoint_win -eq 'tools\cdev-cli\win-x64\cdev-cli\scripts\Invoke-CdevCli.ps1') -Detail ([string]$cliBundle.entrypoint_win)
+    Add-Check -Scope 'manifest' -Name 'cli_bundle_entrypoint_linux' -Passed ([string]$cliBundle.entrypoint_linux -eq 'tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1') -Detail ([string]$cliBundle.entrypoint_linux)
 }
 
 $requiredSchemaFields = @(
