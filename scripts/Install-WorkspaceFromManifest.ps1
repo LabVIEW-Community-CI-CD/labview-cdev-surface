@@ -122,6 +122,89 @@ function Get-LabVIEWInstallRoot {
     return $null
 }
 
+function Get-LabVIEWYearFromText {
+    param(
+        [Parameter()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ''
+    }
+
+    if ($Text -match 'LabVIEW\s+(\d{4})') {
+        return [string]$Matches[1]
+    }
+
+    return ''
+}
+
+function Test-PplBuildLabVIEWVersionAlignment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$IconEditorRepoPath,
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredLabviewYear,
+        [Parameter()]
+        [string[]]$PreExistingExecuteBuildSpecLogs = @()
+    )
+
+    $result = [ordered]@{
+        status = 'fail'
+        message = ''
+        buildspec_log_path = ''
+        detected_labview_executable = ''
+        detected_labview_year = ''
+    }
+
+    try {
+        $logsRoot = Join-Path -Path $IconEditorRepoPath -ChildPath 'builds\logs'
+        if (-not (Test-Path -LiteralPath $logsRoot -PathType Container)) {
+            throw "PPL build log root not found: $logsRoot"
+        }
+
+        $allLogs = @(
+            Get-ChildItem -Path $logsRoot -Filter 'labviewcli-executebuildspec-*.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object -Property LastWriteTimeUtc -Descending
+        )
+        if (@($allLogs).Count -eq 0) {
+            throw "No LabVIEW CLI execute-buildspec logs were found in '$logsRoot'."
+        }
+
+        $normalizedPreviousLogs = @($PreExistingExecuteBuildSpecLogs | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $newLogs = @($allLogs | Where-Object { $_.FullName.ToLowerInvariant() -notin $normalizedPreviousLogs })
+        $selectedLog = if (@($newLogs).Count -gt 0) { $newLogs[0] } else { $allLogs[0] }
+        $result.buildspec_log_path = [string]$selectedLog.FullName
+
+        $logContent = Get-Content -LiteralPath $selectedLog.FullName -Raw
+        if ($logContent -match 'Using LabVIEW:\s*"([^"]+)"') {
+            $result.detected_labview_executable = [string]$Matches[1]
+        }
+
+        $detectedYear = Get-LabVIEWYearFromText -Text $result.detected_labview_executable
+        if ([string]::IsNullOrWhiteSpace($detectedYear)) {
+            $detectedYear = Get-LabVIEWYearFromText -Text $logContent
+        }
+        $result.detected_labview_year = [string]$detectedYear
+
+        if ([string]::IsNullOrWhiteSpace($detectedYear)) {
+            throw "Could not determine LabVIEW year from execute-buildspec log '$($selectedLog.FullName)'."
+        }
+
+        if ([string]$detectedYear -ne [string]$RequiredLabviewYear) {
+            throw "Illegal combination: PPL build executed with LabVIEW $detectedYear while VIP/package target requires LabVIEW $RequiredLabviewYear."
+        }
+
+        $result.status = 'pass'
+        $result.message = "PPL build executed with LabVIEW $detectedYear, matching required year $RequiredLabviewYear."
+    } catch {
+        $result.status = 'fail'
+        $result.message = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Get-ExpectedShaFromFile {
     param(
         [Parameter(Mandatory = $true)]
@@ -369,6 +452,9 @@ function Invoke-RunnerCliPplCapabilityCheck {
         command = @()
         exit_code = $null
         labview_install_root = ''
+        buildspec_log_path = ''
+        detected_labview_executable = ''
+        detected_labview_year = ''
     }
 
     try {
@@ -383,6 +469,14 @@ function Invoke-RunnerCliPplCapabilityCheck {
         }
 
         Ensure-Directory -Path $statusRoot
+        $logsRoot = Join-Path -Path $IconEditorRepoPath -ChildPath 'builds\logs'
+        $preExistingExecuteBuildSpecLogs = @()
+        if (Test-Path -LiteralPath $logsRoot -PathType Container) {
+            $preExistingExecuteBuildSpecLogs = @(
+                Get-ChildItem -Path $logsRoot -Filter 'labviewcli-executebuildspec-*.log' -File -ErrorAction SilentlyContinue |
+                ForEach-Object { [string]$_.FullName }
+            )
+        }
 
         $labviewRoot = Get-LabVIEWInstallRoot -VersionYear $RequiredLabviewYear -Bitness $RequiredBitness
         if ([string]::IsNullOrWhiteSpace($labviewRoot)) {
@@ -414,6 +508,17 @@ function Invoke-RunnerCliPplCapabilityCheck {
             throw "runner-cli reported success, but PPL output was not found: $($result.output_ppl_path)"
         }
         Copy-Item -LiteralPath $result.output_ppl_path -Destination $result.output_ppl_snapshot_path -Force
+
+        $logAlignment = Test-PplBuildLabVIEWVersionAlignment `
+            -IconEditorRepoPath $IconEditorRepoPath `
+            -RequiredLabviewYear ([string]$RequiredLabviewYear) `
+            -PreExistingExecuteBuildSpecLogs @($preExistingExecuteBuildSpecLogs)
+        $result.buildspec_log_path = [string]$logAlignment.buildspec_log_path
+        $result.detected_labview_executable = [string]$logAlignment.detected_labview_executable
+        $result.detected_labview_year = [string]$logAlignment.detected_labview_year
+        if ([string]$logAlignment.status -ne 'pass') {
+            throw [string]$logAlignment.message
+        }
 
         $result.status = 'pass'
         $result.message = "runner-cli PPL capability check passed for LabVIEW $RequiredLabviewYear x$RequiredBitness."
@@ -776,6 +881,9 @@ $pplCapabilityChecks = [ordered]@{
         command = @()
         exit_code = $null
         labview_install_root = ''
+        buildspec_log_path = ''
+        detected_labview_executable = ''
+        detected_labview_year = ''
     }
     '64' = [ordered]@{
         status = 'not_run'
@@ -789,6 +897,9 @@ $pplCapabilityChecks = [ordered]@{
         command = @()
         exit_code = $null
         labview_install_root = ''
+        buildspec_log_path = ''
+        detected_labview_executable = ''
+        detected_labview_year = ''
     }
 }
 $vipPackageBuildCheck = [ordered]@{
@@ -1406,6 +1517,9 @@ try {
                         command = @($capabilityResult.command)
                         exit_code = $capabilityResult.exit_code
                         labview_install_root = [string]$capabilityResult.labview_install_root
+                        buildspec_log_path = [string]$capabilityResult.buildspec_log_path
+                        detected_labview_executable = [string]$capabilityResult.detected_labview_executable
+                        detected_labview_year = [string]$capabilityResult.detected_labview_year
                     }
 
                     Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
