@@ -31,7 +31,17 @@ This repository is the canonical policy and manifest surface for deterministic `
 - If automation cannot create or merge the PR due to platform outage, manual refresh is fallback.
 
 ## Installer Release Contract
-- The NSIS workspace installer is published as a GitHub release asset from `.github/workflows/release-workspace-installer.yml`.
+- Primary release publish path is `.github/workflows/release-with-windows-gate.yml`.
+- `release-with-windows-gate.yml` must run `repo_guard` and fail outside `LabVIEW-Community-CI-CD/labview-cdev-surface`.
+- `release-with-windows-gate.yml` must run Windows acceptance via `./.github/workflows/_windows-labview-image-gate-core.yml` before publish.
+- Publish is hard-blocked when Windows gate fails unless controlled override is explicitly enabled with complete metadata.
+- Controlled override requires all of:
+  - `allow_gate_override=true`
+  - non-empty `override_reason`
+  - `override_incident_url` matching GitHub issue/discussion URL format.
+- Override path must emit explicit warning summary and append override disclosure to release notes.
+- `.github/workflows/release-workspace-installer.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_release-workspace-installer-core.yml`.
+- `.github/workflows/windows-labview-image-gate.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_windows-labview-image-gate-core.yml`.
 - Publishing mode is manual dispatch only with explicit semantic tag input (`v<major>.<minor>.<patch>`).
 - Release tags are immutable by default: existing tags must fail publication unless `allow_existing_tag=true` is explicitly set for break-glass recovery.
 - Release creation must bind tag creation to the exact workflow commit SHA (`github.sha`), not a moving branch target.
