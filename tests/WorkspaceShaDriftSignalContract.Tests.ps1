@@ -37,6 +37,13 @@ Describe 'Workspace SHA drift signal contract' {
         $script:scriptContent | Should -Match '--jq ''\.sha'''
     }
 
+    It 'supports self-repo first-parent pin semantics to avoid recursive drift loops' {
+        $script:scriptContent | Should -Match 'GITHUB_REPOSITORY'
+        $script:scriptContent | Should -Match 'parents\[0\]\.sha'
+        $script:scriptContent | Should -Match 'in_sync_self_parent'
+        $script:scriptContent | Should -Match 'actual_default_branch_parent_sha'
+    }
+
     It 'uses workflow bot token strategy for cross-repo drift lookup' {
         $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN:\s*\$\{\{\s*secrets\.WORKFLOW_BOT_TOKEN\s*\}\}'
         $script:workflowContent | Should -Match 'GH_TOKEN:\s*\$\{\{\s*secrets\.WORKFLOW_BOT_TOKEN\s*\}\}'
