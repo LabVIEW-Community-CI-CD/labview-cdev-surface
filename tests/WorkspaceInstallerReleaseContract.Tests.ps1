@@ -23,6 +23,8 @@ Describe 'Workspace installer release workflow contract' {
         $script:workflowContent | Should -Match 'type:\s*string'
         $script:workflowContent | Should -Match 'prerelease:'
         $script:workflowContent | Should -Match 'type:\s*boolean'
+        $script:workflowContent | Should -Match 'allow_existing_tag:'
+        $script:workflowContent | Should -Match 'Allow updating an existing release tag'
     }
 
     It 'defines package and publish jobs with release asset upload' {
@@ -38,6 +40,10 @@ Describe 'Workspace installer release workflow contract' {
         $script:workflowContent | Should -Match 'Test-ProvenanceContracts\.ps1'
         $script:workflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match '(gh release create|''release'',\s*''create'')'
+        $script:workflowContent | Should -Match '--target \$releaseTargetSha'
+        $script:workflowContent | Should -Match 'RELEASE_TARGET_SHA:\s*\$\{\{\s*github\.sha\s*\}\}'
+        $script:workflowContent | Should -Match 'already exists'
+        $script:workflowContent | Should -Match 'allow_existing_tag=true'
         $script:workflowContent | Should -Match 'gh release upload'
         $script:workflowContent | Should -Match '--clobber'
     }
@@ -45,6 +51,7 @@ Describe 'Workspace installer release workflow contract' {
     It 'enforces release notes and tag validation' {
         $script:workflowContent | Should -Match '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'
         $script:workflowContent | Should -Match 'SHA256'
+        $script:workflowContent | Should -Match 'Release target commit'
         $script:workflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe /S'
         $script:workflowContent | Should -Match 'workspace-installer\.spdx\.json'
         $script:workflowContent | Should -Match 'workspace-installer\.slsa\.json'

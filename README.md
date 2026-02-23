@@ -124,15 +124,16 @@ If Docker Desktop cannot start, verify Windows virtualization features are enabl
 
 Use manual workflow dispatch for release publication:
 1. Run `.github/workflows/release-workspace-installer.yml`.
-2. Provide `release_tag` in semantic format (for example, `v0.1.0`).
-3. Set `prerelease` as needed.
+2. Provide a new `release_tag` in semantic format (for example, `v0.1.1`).
+3. Keep `allow_existing_tag=false` (default). Set `true` only for break-glass overwrite operations.
+4. Set `prerelease` as needed.
 
 The workflow:
 - Builds `lvie-cdev-workspace-installer.exe`
 - Computes SHA256
 - Runs determinism gates and fails on hash drift
 - Generates `workspace-installer.spdx.json` and `workspace-installer.slsa.json`
-- Creates the GitHub release if missing
+- Creates the GitHub release if missing and binds the tag to the exact workflow commit SHA
 - Uploads installer + SHA + provenance + reproducibility report assets to the release
 - Writes release notes including SHA256 and the install command:
 
@@ -141,6 +142,7 @@ lvie-cdev-workspace-installer.exe /S
 ```
 
 Verify downloaded asset integrity by matching the local hash against the SHA256 value published in the release notes.
+Tag immutability policy: existing release tags fail by default to prevent mutable release history.
 
 ## Nightly canary
 
