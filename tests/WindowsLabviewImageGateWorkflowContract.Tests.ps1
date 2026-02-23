@@ -27,6 +27,7 @@ Describe 'Windows LabVIEW image gate workflow contract' {
 
     It 'targets windows containers with installer-post-action report checks in core workflow' {
         $script:coreWorkflowContent | Should -Match 'workflow_call:'
+        $script:coreWorkflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*windows-containers,\s*user-session,\s*cdev-surface-windows-gate\]'
         $script:coreWorkflowContent | Should -Match 'nationalinstruments/labview:2026q1-windows'
         $script:coreWorkflowContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
         $script:coreWorkflowContent | Should -Match "docker version --format '\{\{\.Server\.Os\}\}'"

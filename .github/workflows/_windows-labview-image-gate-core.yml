@@ -19,7 +19,7 @@ permissions:
 jobs:
   windows-labview-image-gate:
     name: Windows LabVIEW Image Gate
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers, user-session, cdev-surface-windows-gate]
     outputs:
       gate_status: ${{ steps.capture-gate-metadata.outputs.gate_status }}
       gate_report_artifact_name: ${{ steps.capture-gate-metadata.outputs.gate_report_artifact_name }}

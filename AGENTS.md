@@ -35,6 +35,7 @@ This repository is the canonical policy and manifest surface for deterministic `
 - `release-with-windows-gate.yml` must run `repo_guard` and fail outside `LabVIEW-Community-CI-CD/labview-cdev-surface`.
 - `release-with-windows-gate.yml` must run Windows acceptance via `./.github/workflows/_windows-labview-image-gate-core.yml` before publish.
 - Windows gate runners must be preconfigured in Windows container mode; do not rely on interactive Docker engine switching in CI.
+- Windows gate workflow must target labels: `self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`.
 - Windows gate image default is `nationalinstruments/labview:2026q1-windows`; optional override via repository variable `LABVIEW_WINDOWS_IMAGE`.
 - Publish is hard-blocked when Windows gate fails unless controlled override is explicitly enabled with complete metadata.
 - Controlled override requires all of:
