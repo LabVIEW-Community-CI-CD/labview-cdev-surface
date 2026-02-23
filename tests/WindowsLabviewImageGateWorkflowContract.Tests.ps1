@@ -27,8 +27,11 @@ Describe 'Windows LabVIEW image gate workflow contract' {
 
     It 'targets windows containers with installer-post-action report checks in core workflow' {
         $script:coreWorkflowContent | Should -Match 'workflow_call:'
-        $script:coreWorkflowContent | Should -Match 'nationalinstruments/labview:latest-windows'
+        $script:coreWorkflowContent | Should -Match 'nationalinstruments/labview:2026q1-windows'
+        $script:coreWorkflowContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
         $script:coreWorkflowContent | Should -Match "docker version --format '\{\{\.Server\.Os\}\}'"
+        $script:coreWorkflowContent | Should -Match 'docker manifest inspect --verbose'
+        $script:coreWorkflowContent | Should -Match 'Windows container compatibility mismatch'
         $script:coreWorkflowContent | Should -Match 'automatic engine switching is disabled for non-interactive CI'
         $script:coreWorkflowContent | Should -Match 'Install-WorkspaceFromManifest\.ps1'
         $script:coreWorkflowContent | Should -Match 'workspace-install-latest\.json'
