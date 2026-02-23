@@ -1,0 +1,350 @@
+name: _release-workspace-installer-core
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Release tag to publish (for example, v0.1.0).
+        required: true
+        type: string
+      allow_existing_tag:
+        description: Allow updating an existing release tag (break-glass only).
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: Publish as prerelease.
+        required: false
+        default: false
+        type: boolean
+      override_applied:
+        description: Whether controlled gate override was used.
+        required: false
+        default: false
+        type: boolean
+      override_reason:
+        description: Human-readable reason for controlled gate override.
+        required: false
+        default: ''
+        type: string
+      override_incident_url:
+        description: Incident tracking URL for controlled gate override.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package Workspace Installer
+    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    outputs:
+      asset_name: ${{ steps.package.outputs.asset_name }}
+      asset_sha256: ${{ steps.package.outputs.asset_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Release preflight - verify icon-editor upstream pin freshness
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "workspace-governance.json was not found at $manifestPath"
+          }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $iconEditorEntry = @(
+            $manifest.managed_repos |
+            Where-Object {
+              [string]$_.required_gh_repo -eq 'LabVIEW-Community-CI-CD/labview-icon-editor' -and
+              [string]$_.default_branch -eq 'develop'
+            } |
+            Select-Object -First 1
+          )
+
+          if ($null -eq $iconEditorEntry) {
+            throw "Manifest is missing managed repo entry for LabVIEW-Community-CI-CD/labview-icon-editor on develop."
+          }
+
+          $pinnedSha = ([string]$iconEditorEntry.pinned_sha).ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Manifest pinned_sha is invalid for LabVIEW-Community-CI-CD/labview-icon-editor: '$pinnedSha'"
+          }
+
+          $upstreamSha = (& gh api repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop --jq '.commit.sha').Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamSha)) {
+            throw "Failed to read upstream develop SHA for LabVIEW-Community-CI-CD/labview-icon-editor."
+          }
+
+          if ($upstreamSha -ne $pinnedSha) {
+            throw "Manifest pin is stale for LabVIEW-Community-CI-CD/labview-icon-editor:develop. pinned=$pinnedSha upstream=$upstreamSha"
+          }
+
+          Write-Host "Release preflight passed. icon-editor pinned_sha matches upstream develop HEAD."
+
+      - id: package
+        name: Build workspace installer with reproducibility and provenance gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $assetName = 'lvie-cdev-workspace-installer.exe'
+          $releaseRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
+          $payloadRoot = Join-Path $releaseRoot 'payload'
+          $reproRoot = Join-Path $releaseRoot 'reproducibility'
+          $provRoot = Join-Path $releaseRoot 'provenance'
+          if (Test-Path -LiteralPath $releaseRoot -PathType Container) {
+            Remove-Item -LiteralPath $releaseRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          New-Item -Path $reproRoot -ItemType Directory -Force | Out-Null
+          New-Item -Path $provRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
+          if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
+            throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+          }
+          & $bundleRunnerCliScript `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic:$true
+          if ($LASTEXITCODE -ne 0) { throw "Build-RunnerCliBundleFromManifest.ps1 failed." }
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-RunnerCliBundleDeterminism.ps1') `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputRoot $reproRoot `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64'
+          if ($LASTEXITCODE -ne 0) { throw "Runner CLI determinism gate failed." }
+
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-WorkspaceInstallerDeterminism.ps1') `
+            -PayloadRoot $payloadRoot `
+            -OutputRoot $reproRoot `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot
+          if ($LASTEXITCODE -ne 0) { throw "Workspace installer determinism gate failed." }
+
+          $deterministicInstallerPath = Join-Path $reproRoot 'workspace-installer-deterministic.exe'
+          if (-not (Test-Path -LiteralPath $deterministicInstallerPath -PathType Leaf)) {
+            throw "Deterministic installer output missing: $deterministicInstallerPath"
+          }
+
+          $assetPath = Join-Path $releaseRoot $assetName
+          Copy-Item -LiteralPath $deterministicInstallerPath -Destination $assetPath -Force
+          $assetSha = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "{0} *{1}" -f $assetSha, $assetName | Set-Content -LiteralPath (Join-Path $releaseRoot "$assetName.sha256") -Encoding ascii
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseProvenance.ps1') `
+            -InstallerPath $assetPath `
+            -RunnerCliPath (Join-Path $payloadRoot 'tools/runner-cli/win-x64/runner-cli.exe') `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputDirectory $provRoot
+          if ($LASTEXITCODE -ne 0) { throw "Provenance generation failed." }
+
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-ProvenanceContracts.ps1') `
+            -SpdxPath (Join-Path $provRoot 'workspace-installer.spdx.json') `
+            -SlsaPath (Join-Path $provRoot 'workspace-installer.slsa.json') `
+            -InstallerPath $assetPath `
+            -RunnerCliPath (Join-Path $payloadRoot 'tools/runner-cli/win-x64/runner-cli.exe') `
+            -ManifestPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') `
+            -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
+          if ($LASTEXITCODE -ne 0) { throw "Provenance contract validation failed." }
+
+          $metadataPath = Join-Path $releaseRoot 'workspace-installer-metadata.json'
+          [ordered]@{
+            asset_name = $assetName
+            asset_path = $assetPath
+            asset_sha256 = $assetSha
+            install_command = 'lvie-cdev-workspace-installer.exe /S'
+            repro_report = (Join-Path $reproRoot 'workspace-installer-determinism-summary.json')
+            spdx_path = (Join-Path $provRoot 'workspace-installer.spdx.json')
+            slsa_path = (Join-Path $provRoot 'workspace-installer.slsa.json')
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
+
+          Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination (Join-Path $releaseRoot 'reproducibility-report.json') -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.spdx.json') -Destination (Join-Path $releaseRoot 'workspace-installer.spdx.json') -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.slsa.json') -Destination (Join-Path $releaseRoot 'workspace-installer.slsa.json') -Force
+
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_sha256=$assetSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload packaged installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-installer-release-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/workspace-installer-release/lvie-cdev-workspace-installer.exe
+            ${{ runner.temp }}/workspace-installer-release/lvie-cdev-workspace-installer.exe.sha256
+            ${{ runner.temp }}/workspace-installer-release/reproducibility-report.json
+            ${{ runner.temp }}/workspace-installer-release/workspace-installer.spdx.json
+            ${{ runner.temp }}/workspace-installer-release/workspace-installer.slsa.json
+            ${{ runner.temp }}/workspace-installer-release/workspace-installer-metadata.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release Asset
+    runs-on: ubuntu-latest
+    needs: [package]
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-installer-release-${{ github.run_id }}
+          path: ${{ runner.temp }}/workspace-installer-release
+
+      - name: Create/update release and upload installer assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ALLOW_EXISTING_TAG: ${{ inputs.allow_existing_tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TARGET_SHA: ${{ github.sha }}
+          OVERRIDE_APPLIED: ${{ inputs.override_applied }}
+          OVERRIDE_REASON: ${{ inputs.override_reason }}
+          OVERRIDE_INCIDENT_URL: ${{ inputs.override_incident_url }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $releaseTag = [string]$env:RELEASE_TAG
+          if ($releaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "Invalid release_tag '$releaseTag'. Expected semantic tag like v0.1.0."
+          }
+
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
+          $assetPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe'
+          $shaPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe.sha256'
+          $reproPath = Join-Path $artifactRoot 'reproducibility-report.json'
+          $spdxPath = Join-Path $artifactRoot 'workspace-installer.spdx.json'
+          $slsaPath = Join-Path $artifactRoot 'workspace-installer.slsa.json'
+          $metadataPath = Join-Path $artifactRoot 'workspace-installer-metadata.json'
+
+          foreach ($path in @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $metadataPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required release artifact missing: $path"
+            }
+          }
+
+          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $assetName = [string]$metadata.asset_name
+          $assetSha = [string]$metadata.asset_sha256
+          $installCommand = [string]$metadata.install_command
+          if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
+            throw "Installer metadata is missing required fields."
+          }
+
+          $allowExistingTag = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:ALLOW_EXISTING_TAG)) {
+            $allowExistingTag = [System.Convert]::ToBoolean($env:ALLOW_EXISTING_TAG)
+          }
+          $prerelease = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:PRERELEASE)) {
+            $prerelease = [System.Convert]::ToBoolean($env:PRERELEASE)
+          }
+          $overrideApplied = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:OVERRIDE_APPLIED)) {
+            $overrideApplied = [System.Convert]::ToBoolean($env:OVERRIDE_APPLIED)
+          }
+
+          $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
+          $releaseNoteLines = @(
+            "# Workspace Installer $releaseTag"
+            ""
+            "Release target commit:"
+            "- $env:RELEASE_TARGET_SHA"
+            ""
+            "Release assets:"
+            "- $assetName"
+            "- $(Split-Path -Path $shaPath -Leaf)"
+            "- $(Split-Path -Path $reproPath -Leaf)"
+            "- $(Split-Path -Path $spdxPath -Leaf)"
+            "- $(Split-Path -Path $slsaPath -Leaf)"
+            ""
+            "SHA256:"
+            "- $assetSha"
+            ""
+            "Install command:"
+            $installCommand
+          )
+
+          if ($overrideApplied) {
+            $releaseNoteLines += @(
+              ""
+              "Override Disclosure:"
+              "- Windows gate override applied: true"
+              "- Reason: $env:OVERRIDE_REASON"
+              "- Incident: $env:OVERRIDE_INCIDENT_URL"
+            )
+          }
+          $releaseNoteLines | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
+
+          $repo = [string]$env:TARGET_REPOSITORY
+          $releaseTargetSha = ([string]$env:RELEASE_TARGET_SHA).Trim().ToLowerInvariant()
+          if ($releaseTargetSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Invalid release target SHA '$releaseTargetSha'."
+          }
+
+          $releaseExists = $false
+          $existingReleaseMetadata = $null
+          $releaseViewOutput = & gh release view $releaseTag -R $repo --json tagName,publishedAt,url 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+            $existingReleaseMetadata = $releaseViewOutput | ConvertFrom-Json -ErrorAction Stop
+          }
+
+          if ($releaseExists -and -not $allowExistingTag) {
+            $publishedAt = [string]$existingReleaseMetadata.publishedAt
+            $releaseUrl = [string]$existingReleaseMetadata.url
+            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new semantic tag or set allow_existing_tag=true for break-glass overwrite."
+          }
+
+          $releaseTitle = "Workspace Installer $releaseTag"
+
+          if (-not $releaseExists) {
+            if ($prerelease) {
+              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+            } else {
+              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo'." }
+          } else {
+            if ($prerelease) {
+              & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+            } else {
+              & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Failed to edit release '$releaseTag' for '$repo'." }
+          }
+
+          if ($allowExistingTag) {
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo --clobber
+          } else {
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload release assets for '$releaseTag'."
+          }

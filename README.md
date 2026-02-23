@@ -120,21 +120,34 @@ pwsh -NoProfile -File .\scripts\Invoke-DockerDesktopLinuxIteration.ps1 `
 This lane bundles manifest-pinned `runner-cli` for `linux-x64`, runs `runner-cli --help` and `runner-cli ppl --help` inside the container, and optionally executes core Pester contract tests.
 If Docker Desktop cannot start, verify Windows virtualization features are enabled (`Microsoft-Hyper-V-All`, `VirtualMachinePlatform`, `Microsoft-Windows-Subsystem-Linux`) and reboot after feature changes.
 
-## Publish release asset
+## Publish Release (Automated Gate)
 
 Use manual workflow dispatch for release publication:
-1. Run `.github/workflows/release-workspace-installer.yml`.
+1. Run `.github/workflows/release-with-windows-gate.yml`.
 2. Provide a new `release_tag` in semantic format (for example, `v0.1.1`).
 3. Keep `allow_existing_tag=false` (default). Set `true` only for break-glass overwrite operations.
 4. Set `prerelease` as needed.
+5. Keep `allow_gate_override=false` (default).
 
-The workflow:
-- Builds `lvie-cdev-workspace-installer.exe`
-- Computes SHA256
-- Runs determinism gates and fails on hash drift
-- Generates `workspace-installer.spdx.json` and `workspace-installer.slsa.json`
-- Creates the GitHub release if missing and binds the tag to the exact workflow commit SHA
-- Uploads installer + SHA + provenance + reproducibility report assets to the release
+Automated flow:
+1. `repo_guard` verifies release runs only in `LabVIEW-Community-CI-CD/labview-cdev-surface`.
+2. `windows_gate` runs Windows-container installer acceptance.
+3. `gate_policy` hard-blocks publish on gate failure.
+4. `release_publish` runs only when gate policy succeeds.
+
+Controlled override (exception only):
+1. Set `allow_gate_override=true`.
+2. Provide non-empty `override_reason`.
+3. Provide `override_incident_url` pointing to a GitHub issue/discussion.
+4. Workflow appends an "Override Disclosure" section to release notes.
+
+Release packaging still:
+- Builds `lvie-cdev-workspace-installer.exe`.
+- Computes SHA256.
+- Runs determinism gates and fails on hash drift.
+- Generates `workspace-installer.spdx.json` and `workspace-installer.slsa.json`.
+- Creates the GitHub release if missing and binds the tag to the exact workflow commit SHA.
+- Uploads installer + SHA + provenance + reproducibility report assets to the release.
 - Writes release notes including SHA256 and the install command:
 
 ```powershell
@@ -143,6 +156,7 @@ lvie-cdev-workspace-installer.exe /S
 
 Verify downloaded asset integrity by matching the local hash against the SHA256 value published in the release notes.
 Tag immutability policy: existing release tags fail by default to prevent mutable release history.
+Fallback entrypoint: `.github/workflows/release-workspace-installer.yml` (wrapper to `_release-workspace-installer-core.yml`).
 
 ## Nightly canary
 
@@ -155,5 +169,5 @@ On failure, it updates a single tracking issue (`Nightly Supply-Chain Canary Fai
 
 ## Windows LabVIEW image gate
 
-`windows-labview-image-gate.yml` is dispatch-only in phase 1 and targets a dedicated self-hosted Windows runner with Windows containers.  
-It pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build` and `runner-cli vip build`, and verifies PPL + VIP output presence.
+`windows-labview-image-gate.yml` is dispatch-only and wraps `./.github/workflows/_windows-labview-image-gate-core.yml` for standalone diagnostics.  
+The core gate pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build` and `runner-cli vip build`, and verifies PPL + VIP output presence.

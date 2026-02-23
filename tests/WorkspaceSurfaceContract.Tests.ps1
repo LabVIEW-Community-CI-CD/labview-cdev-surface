@@ -26,8 +26,11 @@ Describe 'Workspace surface contract' {
         $script:driftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-drift-signal.yml'
         $script:shaRefreshWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-refresh-pr.yml'
         $script:releaseWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
+        $script:releaseCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
+        $script:releaseWithGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-with-windows-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
+        $script:windowsImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_windows-labview-image-gate-core.yml'
         $script:globalJsonPath = Join-Path $script:repoRoot 'global.json'
         $script:payloadAgentsPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/AGENTS.md'
         $script:payloadManifestPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/workspace-governance.json'
@@ -55,8 +58,11 @@ Describe 'Workspace surface contract' {
             $script:driftWorkflowPath,
             $script:shaRefreshWorkflowPath,
             $script:releaseWorkflowPath,
+            $script:releaseCoreWorkflowPath,
+            $script:releaseWithGateWorkflowPath,
             $script:canaryWorkflowPath,
             $script:windowsImageGateWorkflowPath,
+            $script:windowsImageGateCoreWorkflowPath,
             $script:globalJsonPath,
             $script:payloadAgentsPath,
             $script:payloadManifestPath,
@@ -76,6 +82,8 @@ Describe 'Workspace surface contract' {
         $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
         $script:ciWorkflowContent = Get-Content -LiteralPath $script:ciWorkflowPath -Raw
         $script:releaseWorkflowContent = Get-Content -LiteralPath $script:releaseWorkflowPath -Raw
+        $script:releaseCoreWorkflowContent = Get-Content -LiteralPath $script:releaseCoreWorkflowPath -Raw
+        $script:releaseWithGateWorkflowContent = Get-Content -LiteralPath $script:releaseWithGateWorkflowPath -Raw
     }
 
     It 'tracks a deterministic managed repo set with pinned SHA lock' {
@@ -142,10 +150,13 @@ Describe 'Workspace surface contract' {
     It 'defines manual installer release workflow contract' {
         $script:releaseWorkflowContent | Should -Match 'workflow_dispatch:'
         $script:releaseWorkflowContent | Should -Match 'release_tag:'
-        $script:releaseWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
-        $script:releaseWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
-        $script:releaseWorkflowContent | Should -Match 'gh release upload'
-        $script:releaseWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
-        $script:releaseWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:releaseWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_release-workspace-installer-core\.yml'
+        $script:releaseCoreWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
+        $script:releaseCoreWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
+        $script:releaseCoreWorkflowContent | Should -Match 'gh release upload'
+        $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
+        $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:releaseWithGateWorkflowContent | Should -Match 'allow_gate_override:'
+        $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
     }
 }

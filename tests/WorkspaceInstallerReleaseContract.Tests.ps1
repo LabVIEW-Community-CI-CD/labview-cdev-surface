@@ -6,55 +6,73 @@ $ErrorActionPreference = 'Stop'
 Describe 'Workspace installer release workflow contract' {
     BeforeAll {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
-        $script:workflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
-        if (-not (Test-Path -LiteralPath $script:workflowPath -PathType Leaf)) {
-            throw "Release workflow not found: $script:workflowPath"
+        $script:wrapperWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
+        $script:coreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
+        if (-not (Test-Path -LiteralPath $script:wrapperWorkflowPath -PathType Leaf)) {
+            throw "Release wrapper workflow not found: $script:wrapperWorkflowPath"
         }
-        $script:workflowContent = Get-Content -LiteralPath $script:workflowPath -Raw
+        if (-not (Test-Path -LiteralPath $script:coreWorkflowPath -PathType Leaf)) {
+            throw "Release core workflow not found: $script:coreWorkflowPath"
+        }
+        $script:wrapperWorkflowContent = Get-Content -LiteralPath $script:wrapperWorkflowPath -Raw
+        $script:coreWorkflowContent = Get-Content -LiteralPath $script:coreWorkflowPath -Raw
     }
 
-    It 'is dispatch-only and requires release inputs' {
-        $script:workflowContent | Should -Match 'workflow_dispatch:'
-        $script:workflowContent | Should -Not -Match '(?m)^\s*push:'
-        $script:workflowContent | Should -Not -Match '(?m)^\s*pull_request:'
-        $script:workflowContent | Should -Not -Match '(?m)^\s*schedule:'
-        $script:workflowContent | Should -Match 'release_tag:'
-        $script:workflowContent | Should -Match 'required:\s*true'
-        $script:workflowContent | Should -Match 'type:\s*string'
-        $script:workflowContent | Should -Match 'prerelease:'
-        $script:workflowContent | Should -Match 'type:\s*boolean'
-        $script:workflowContent | Should -Match 'allow_existing_tag:'
-        $script:workflowContent | Should -Match 'Allow updating an existing release tag'
+    It 'keeps dispatch-only wrapper and forwards to release core workflow' {
+        $script:wrapperWorkflowContent | Should -Match 'workflow_dispatch:'
+        $script:wrapperWorkflowContent | Should -Not -Match '(?m)^\s*push:'
+        $script:wrapperWorkflowContent | Should -Not -Match '(?m)^\s*pull_request:'
+        $script:wrapperWorkflowContent | Should -Not -Match '(?m)^\s*schedule:'
+        $script:wrapperWorkflowContent | Should -Match 'release_tag:'
+        $script:wrapperWorkflowContent | Should -Match 'required:\s*true'
+        $script:wrapperWorkflowContent | Should -Match 'type:\s*string'
+        $script:wrapperWorkflowContent | Should -Match 'prerelease:'
+        $script:wrapperWorkflowContent | Should -Match 'type:\s*boolean'
+        $script:wrapperWorkflowContent | Should -Match 'allow_existing_tag:'
+        $script:wrapperWorkflowContent | Should -Match 'Allow updating an existing release tag'
+        $script:wrapperWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_release-workspace-installer-core\.yml'
+    }
+
+    It 'defines reusable release-core workflow-call inputs' {
+        $script:coreWorkflowContent | Should -Match 'workflow_call:'
+        $script:coreWorkflowContent | Should -Match 'release_tag:'
+        $script:coreWorkflowContent | Should -Match 'allow_existing_tag:'
+        $script:coreWorkflowContent | Should -Match 'prerelease:'
+        $script:coreWorkflowContent | Should -Match 'override_applied:'
+        $script:coreWorkflowContent | Should -Match 'override_reason:'
+        $script:coreWorkflowContent | Should -Match 'override_incident_url:'
     }
 
     It 'defines package and publish jobs with release asset upload' {
-        $script:workflowContent | Should -Match 'name:\s*Package Workspace Installer'
-        $script:workflowContent | Should -Match 'name:\s*Publish GitHub Release Asset'
-        $script:workflowContent | Should -Match 'Release preflight - verify icon-editor upstream pin freshness'
-        $script:workflowContent | Should -Match 'repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop'
-        $script:workflowContent | Should -Match 'Manifest pin is stale'
-        $script:workflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
-        $script:workflowContent | Should -Match 'Test-RunnerCliBundleDeterminism\.ps1'
-        $script:workflowContent | Should -Match 'Test-WorkspaceInstallerDeterminism\.ps1'
-        $script:workflowContent | Should -Match 'Write-ReleaseProvenance\.ps1'
-        $script:workflowContent | Should -Match 'Test-ProvenanceContracts\.ps1'
-        $script:workflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:workflowContent | Should -Match '(gh release create|''release'',\s*''create'')'
-        $script:workflowContent | Should -Match '--target \$releaseTargetSha'
-        $script:workflowContent | Should -Match 'RELEASE_TARGET_SHA:\s*\$\{\{\s*github\.sha\s*\}\}'
-        $script:workflowContent | Should -Match 'already exists'
-        $script:workflowContent | Should -Match 'allow_existing_tag=true'
-        $script:workflowContent | Should -Match 'gh release upload'
-        $script:workflowContent | Should -Match '--clobber'
+        $script:coreWorkflowContent | Should -Match 'name:\s*Package Workspace Installer'
+        $script:coreWorkflowContent | Should -Match 'name:\s*Publish GitHub Release Asset'
+        $script:coreWorkflowContent | Should -Match 'Release preflight - verify icon-editor upstream pin freshness'
+        $script:coreWorkflowContent | Should -Match 'repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop'
+        $script:coreWorkflowContent | Should -Match 'Manifest pin is stale'
+        $script:coreWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Test-RunnerCliBundleDeterminism\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Test-WorkspaceInstallerDeterminism\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Write-ReleaseProvenance\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Test-ProvenanceContracts\.ps1'
+        $script:coreWorkflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:coreWorkflowContent | Should -Match '(gh release create|''release'',\s*''create'')'
+        $script:coreWorkflowContent | Should -Match '--target \$releaseTargetSha'
+        $script:coreWorkflowContent | Should -Match 'RELEASE_TARGET_SHA:\s*\$\{\{\s*github\.sha\s*\}\}'
+        $script:coreWorkflowContent | Should -Match 'already exists'
+        $script:coreWorkflowContent | Should -Match 'allow_existing_tag=true'
+        $script:coreWorkflowContent | Should -Match 'gh release upload'
+        $script:coreWorkflowContent | Should -Match '--clobber'
     }
 
-    It 'enforces release notes and tag validation' {
-        $script:workflowContent | Should -Match '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'
-        $script:workflowContent | Should -Match 'SHA256'
-        $script:workflowContent | Should -Match 'Release target commit'
-        $script:workflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe /S'
-        $script:workflowContent | Should -Match 'workspace-installer\.spdx\.json'
-        $script:workflowContent | Should -Match 'workspace-installer\.slsa\.json'
-        $script:workflowContent | Should -Match 'reproducibility-report\.json'
+    It 'enforces release notes, tag validation, and override disclosure support' {
+        $script:coreWorkflowContent | Should -Match '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'
+        $script:coreWorkflowContent | Should -Match 'SHA256'
+        $script:coreWorkflowContent | Should -Match 'Release target commit'
+        $script:coreWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe /S'
+        $script:coreWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
+        $script:coreWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:coreWorkflowContent | Should -Match 'reproducibility-report\.json'
+        $script:coreWorkflowContent | Should -Match 'Override Disclosure'
+        $script:coreWorkflowContent | Should -Match 'OVERRIDE_APPLIED'
     }
 }
