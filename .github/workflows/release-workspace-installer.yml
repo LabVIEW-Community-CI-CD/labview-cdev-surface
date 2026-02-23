@@ -7,6 +7,11 @@ on:
         description: Release tag to publish (for example, v0.1.0).
         required: true
         type: string
+      allow_existing_tag:
+        description: Allow updating an existing release tag (break-glass only).
+        required: false
+        default: false
+        type: boolean
       prerelease:
         description: Publish as prerelease.
         required: false
@@ -201,7 +206,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          ALLOW_EXISTING_TAG: ${{ inputs.allow_existing_tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TARGET_SHA: ${{ github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -236,6 +243,9 @@ jobs:
           $releaseNoteLines = @(
             "# Workspace Installer $releaseTag"
             ""
+            "Release target commit:"
+            "- $env:RELEASE_TARGET_SHA"
+            ""
             "Release assets:"
             "- $assetName"
             "- $(Split-Path -Path $shaPath -Leaf)"
@@ -252,20 +262,40 @@ jobs:
           $releaseNoteLines | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
 
           $repo = [string]$env:TARGET_REPOSITORY
+          $allowExistingTag = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:ALLOW_EXISTING_TAG)) {
+            $allowExistingTag = [System.Convert]::ToBoolean($env:ALLOW_EXISTING_TAG)
+          }
           $prerelease = $false
           if (-not [string]::IsNullOrWhiteSpace($env:PRERELEASE)) {
             $prerelease = [System.Convert]::ToBoolean($env:PRERELEASE)
           }
+          $releaseTargetSha = ([string]$env:RELEASE_TARGET_SHA).Trim().ToLowerInvariant()
+          if ($releaseTargetSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Invalid release target SHA '$releaseTargetSha'."
+          }
 
-          & gh release view $releaseTag -R $repo *> $null
-          $releaseExists = ($LASTEXITCODE -eq 0)
+          $releaseExists = $false
+          $existingReleaseMetadata = $null
+          $releaseViewOutput = & gh release view $releaseTag -R $repo --json tagName,publishedAt,url 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+            $existingReleaseMetadata = $releaseViewOutput | ConvertFrom-Json -ErrorAction Stop
+          }
+
+          if ($releaseExists -and -not $allowExistingTag) {
+            $publishedAt = [string]$existingReleaseMetadata.publishedAt
+            $releaseUrl = [string]$existingReleaseMetadata.url
+            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new semantic tag or set allow_existing_tag=true for break-glass overwrite."
+          }
+
           $releaseTitle = "Workspace Installer $releaseTag"
 
           if (-not $releaseExists) {
             if ($prerelease) {
-              & gh release create $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
             } else {
-              & gh release create $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
+              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
             }
             if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo'." }
           } else {
@@ -277,7 +307,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Failed to edit release '$releaseTag' for '$repo'." }
           }
 
-          & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo --clobber
+          if ($allowExistingTag) {
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo --clobber
+          } else {
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo
+          }
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to upload release assets for '$releaseTag'."
           }

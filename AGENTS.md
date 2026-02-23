@@ -33,6 +33,8 @@ This repository is the canonical policy and manifest surface for deterministic `
 ## Installer Release Contract
 - The NSIS workspace installer is published as a GitHub release asset from `.github/workflows/release-workspace-installer.yml`.
 - Publishing mode is manual dispatch only with explicit semantic tag input (`v<major>.<minor>.<patch>`).
+- Release tags are immutable by default: existing tags must fail publication unless `allow_existing_tag=true` is explicitly set for break-glass recovery.
+- Release creation must bind tag creation to the exact workflow commit SHA (`github.sha`), not a moving branch target.
 - Keep fork-first mutation rules when preparing release changes:
   - mutate `origin` (`svelderrainruiz/labview-cdev-surface`) only
   - open PRs to `LabVIEW-Community-CI-CD/labview-cdev-surface:main`
