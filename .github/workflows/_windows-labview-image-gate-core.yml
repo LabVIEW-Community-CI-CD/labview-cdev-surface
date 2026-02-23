@@ -54,7 +54,7 @@ jobs:
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
             -Runtime 'win-x64' `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build runner-cli bundle for windows image gate."
           }
@@ -67,7 +67,7 @@ jobs:
             -OutputPath $installerPath `
             -WorkspaceRootDefault 'C:\dev' `
             -NsisRoot $nsisRoot `
-            -Deterministic $true
+            -Deterministic:$true
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build installer for windows image gate."
           }
