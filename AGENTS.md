@@ -34,6 +34,7 @@ This repository is the canonical policy and manifest surface for deterministic `
 - Primary release publish path is `.github/workflows/release-with-windows-gate.yml`.
 - `release-with-windows-gate.yml` must run `repo_guard` and fail outside `LabVIEW-Community-CI-CD/labview-cdev-surface`.
 - `release-with-windows-gate.yml` must run Windows acceptance via `./.github/workflows/_windows-labview-image-gate-core.yml` before publish.
+- Windows gate runners must be preconfigured in Windows container mode; do not rely on interactive Docker engine switching in CI.
 - Publish is hard-blocked when Windows gate fails unless controlled override is explicitly enabled with complete metadata.
 - Controlled override requires all of:
   - `allow_gate_override=true`

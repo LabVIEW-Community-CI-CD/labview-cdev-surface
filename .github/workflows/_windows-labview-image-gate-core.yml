@@ -72,12 +72,17 @@ jobs:
             throw "Failed to build installer for windows image gate."
           }
 
-      - name: Switch to Windows containers and pull image
+      - name: Validate Windows container engine and pull image
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & 'C:\Program Files\Docker\Docker\DockerCli.exe' -SwitchWindowsEngine
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to switch Docker to Windows engine.' }
+          $serverOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serverOs)) {
+            throw 'Failed to query Docker server OS. Ensure Docker Desktop is running and accessible from the runner service account.'
+          }
+          if ($serverOs -ne 'windows') {
+            throw "Docker server OS is '$serverOs'. Runner must be preconfigured for Windows containers; automatic engine switching is disabled for non-interactive CI."
+          }
           docker pull nationalinstruments/labview:latest-windows
           if ($LASTEXITCODE -ne 0) { throw 'Failed to pull LabVIEW Windows image.' }
 

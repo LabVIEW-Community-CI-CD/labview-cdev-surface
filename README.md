@@ -170,4 +170,4 @@ On failure, it updates a single tracking issue (`Nightly Supply-Chain Canary Fai
 ## Windows LabVIEW image gate
 
 `windows-labview-image-gate.yml` is dispatch-only and wraps `./.github/workflows/_windows-labview-image-gate-core.yml` for standalone diagnostics.  
-The core gate pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build` and `runner-cli vip build`, and verifies PPL + VIP output presence.
+The core gate requires the runner to already be in Windows container mode (non-interactive CI does not switch Docker engine), then pulls `nationalinstruments/labview:latest-windows`, installs the NSIS workspace installer in-container, runs bundled `runner-cli ppl build` and `runner-cli vip build`, and verifies PPL + VIP output presence.
