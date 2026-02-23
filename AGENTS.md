@@ -37,6 +37,10 @@ This repository is the canonical policy and manifest surface for deterministic `
 - Windows gate runners must be preconfigured in Windows container mode; do not rely on interactive Docker engine switching in CI.
 - Windows gate workflow must target labels: `self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`.
 - Windows gate image default is `nationalinstruments/labview:2026q1-windows`; optional override via repository variable `LABVIEW_WINDOWS_IMAGE`.
+- Windows gate isolation policy:
+  - `LABVIEW_WINDOWS_DOCKER_ISOLATION=auto` (default): use `process` for compatible host/image versions and fallback to `hyperv` on mismatch.
+  - `LABVIEW_WINDOWS_DOCKER_ISOLATION=process`: strict process isolation only (mismatch is hard fail).
+  - `LABVIEW_WINDOWS_DOCKER_ISOLATION=hyperv`: force Hyper-V isolation.
 - Publish is hard-blocked when Windows gate fails unless controlled override is explicitly enabled with complete metadata.
 - Controlled override requires all of:
   - `allow_gate_override=true`

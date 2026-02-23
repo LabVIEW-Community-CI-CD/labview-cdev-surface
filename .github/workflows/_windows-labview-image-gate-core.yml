@@ -72,13 +72,21 @@ jobs:
             throw "Failed to build installer for windows image gate."
           }
 
-      - name: Validate Windows container engine and pull image
+      - name: Validate Windows container engine and configure isolation
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $labviewImage = '${{ vars.LABVIEW_WINDOWS_IMAGE }}'
           if ([string]::IsNullOrWhiteSpace($labviewImage)) {
             $labviewImage = 'nationalinstruments/labview:2026q1-windows'
+          }
+          $requestedIsolation = '${{ vars.LABVIEW_WINDOWS_DOCKER_ISOLATION }}'
+          if ([string]::IsNullOrWhiteSpace($requestedIsolation)) {
+            $requestedIsolation = 'auto'
+          }
+          $requestedIsolation = $requestedIsolation.Trim().ToLowerInvariant()
+          if (@('auto', 'process', 'hyperv') -notcontains $requestedIsolation) {
+            throw "Invalid LABVIEW_WINDOWS_DOCKER_ISOLATION value '$requestedIsolation'. Supported values: auto, process, hyperv."
           }
 
           $serverOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim().ToLowerInvariant()
@@ -115,16 +123,30 @@ jobs:
 
           $hostVersionPrefix = Get-WindowsVersionPrefix -VersionString $hostKernelVersion
           $imageVersionPrefix = Get-WindowsVersionPrefix -VersionString $imageOsVersion
+
+          $effectiveIsolation = 'process'
           if ($hostVersionPrefix -ne $imageVersionPrefix) {
-            throw "Windows container compatibility mismatch. Host kernel '$hostKernelVersion' does not match image '$labviewImage' os.version '$imageOsVersion'. Use a runner host compatible with '$imageVersionPrefix' or set repository variable LABVIEW_WINDOWS_IMAGE to a compatible tag."
+            if ($requestedIsolation -eq 'process') {
+              throw "Windows container compatibility mismatch. Host kernel '$hostKernelVersion' does not match image '$labviewImage' os.version '$imageOsVersion'. LABVIEW_WINDOWS_DOCKER_ISOLATION is explicitly set to process, so fallback is disabled."
+            }
+            $effectiveIsolation = 'hyperv'
+            Write-Host "::warning::Windows container compatibility mismatch detected. Falling back to Hyper-V isolation for image '$labviewImage'. Host='$hostKernelVersion' Image='$imageOsVersion'."
+          } elseif ($requestedIsolation -eq 'hyperv') {
+            $effectiveIsolation = 'hyperv'
+            Write-Host "::notice::LABVIEW_WINDOWS_DOCKER_ISOLATION requests Hyper-V isolation for compatible host/image versions."
           }
 
-          docker pull $labviewImage
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to pull LabVIEW Windows image '$labviewImage'."
+          if ($effectiveIsolation -eq 'process') {
+            docker pull $labviewImage
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to pull LabVIEW Windows image '$labviewImage'."
+            }
+          } else {
+            Write-Host "Skipping explicit docker pull because effective isolation is '$effectiveIsolation'. The docker run step will resolve and pull image '$labviewImage' under Hyper-V isolation."
           }
 
           "LABVIEW_WINDOWS_IMAGE=$labviewImage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LABVIEW_WINDOWS_DOCKER_ISOLATION=$effectiveIsolation" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Run installer and runner-cli gate in Windows container
         shell: pwsh
@@ -177,8 +199,13 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($labviewImage)) {
             $labviewImage = 'nationalinstruments/labview:2026q1-windows'
           }
+          $dockerIsolation = [string]$env:LABVIEW_WINDOWS_DOCKER_ISOLATION
+          if ([string]::IsNullOrWhiteSpace($dockerIsolation)) {
+            $dockerIsolation = 'process'
+          }
 
           docker run --rm `
+            --isolation=$dockerIsolation `
             -v "${env:GITHUB_WORKSPACE}:C:\workspace" `
             $labviewImage `
             powershell -NoProfile -Command $containerCmd

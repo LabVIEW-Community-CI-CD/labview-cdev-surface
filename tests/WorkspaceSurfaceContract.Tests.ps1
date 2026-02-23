@@ -131,11 +131,13 @@ Describe 'Workspace surface contract' {
 
     It 'documents Windows feature troubleshooting reporting contract for Docker gating' {
         $script:agentsContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
+        $script:agentsContent | Should -Match 'LABVIEW_WINDOWS_DOCKER_ISOLATION'
         $script:agentsContent | Should -Match 'NoRestart'
         $script:agentsContent | Should -Match 'features_enabled'
         $script:agentsContent | Should -Match 'reboot_pending'
         $script:agentsContent | Should -Match 'docker_daemon_ready'
         $script:readmeContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
+        $script:readmeContent | Should -Match 'LABVIEW_WINDOWS_DOCKER_ISOLATION'
         $script:readmeContent | Should -Match 'features_enabled'
         $script:readmeContent | Should -Match 'reboot_pending'
         $script:readmeContent | Should -Match 'docker_daemon_ready'
