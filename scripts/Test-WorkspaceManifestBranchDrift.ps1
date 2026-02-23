@@ -5,15 +5,64 @@ param(
     [string]$ManifestPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'workspace-governance.json'),
 
     [Parameter()]
-    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\workspace-drift\workspace-drift-report.json')
+    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\workspace-drift\workspace-drift-report.json'),
+
+    [Parameter()]
+    [string]$SelfRepoSlug = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
-    $env:GH_TOKEN = $env:GITHUB_TOKEN
+function Initialize-GhToken {
+    if (-not [string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+        $env:GH_TOKEN = $env:WORKFLOW_BOT_TOKEN
+        return 'WORKFLOW_BOT_TOKEN'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        return 'GH_TOKEN'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $env:GH_TOKEN = $env:GITHUB_TOKEN
+        return 'GITHUB_TOKEN'
+    }
+    return ''
 }
+$tokenSource = Initialize-GhToken
+
+function Resolve-SelfRepoSlug {
+    param(
+        [Parameter()]
+        [string]$SelfRepoSlugOverride
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($SelfRepoSlugOverride)) {
+        return $SelfRepoSlugOverride
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_REPOSITORY)) {
+        return [string]$env:GITHUB_REPOSITORY
+    }
+    return ''
+}
+
+function Get-CommitFirstParentSha {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoSlug,
+        [Parameter(Mandatory)]
+        [string]$CommitSha
+    )
+
+    $encodedCommit = [System.Uri]::EscapeDataString($CommitSha)
+    $parentOutput = & gh api "repos/$RepoSlug/commits/$encodedCommit" --jq '.parents[0].sha' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        return ''
+    }
+
+    return ([string]$parentOutput).Trim().ToLowerInvariant()
+}
+
+$resolvedSelfRepoSlug = Resolve-SelfRepoSlug -SelfRepoSlugOverride $SelfRepoSlug
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "Required command 'gh' was not found on PATH."
@@ -42,6 +91,7 @@ foreach ($repo in @($manifest.managed_repos)) {
         default_branch = $defaultBranch
         pinned_sha = $pinnedSha
         actual_default_branch_sha = ''
+        actual_default_branch_parent_sha = ''
         status = 'unknown'
         message = ''
     }
@@ -70,9 +120,20 @@ foreach ($repo in @($manifest.managed_repos)) {
         $check.status = 'in_sync'
         $check.message = 'Default branch SHA matches manifest pin.'
     } else {
-        $check.status = 'drifted'
-        $check.message = 'Default branch SHA differs from manifest pin.'
-        $drifts += "{0}:{1}" -f $repoSlug, $defaultBranch
+        $parentSha = ''
+        if (-not [string]::IsNullOrWhiteSpace($resolvedSelfRepoSlug) -and $repoSlug -eq $resolvedSelfRepoSlug) {
+            $parentSha = Get-CommitFirstParentSha -RepoSlug $repoSlug -CommitSha $actualSha
+            $check.actual_default_branch_parent_sha = $parentSha
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($parentSha) -and $parentSha -eq $pinnedSha) {
+            $check.status = 'in_sync_self_parent'
+            $check.message = 'Default branch head advanced; manifest pin matches first parent for self-repo merge semantics.'
+        } else {
+            $check.status = 'drifted'
+            $check.message = 'Default branch SHA differs from manifest pin.'
+            $drifts += "{0}:{1}" -f $repoSlug, $defaultBranch
+        }
     }
 
     $checks += [pscustomobject]$check
@@ -88,6 +149,7 @@ if ($errors.Count -gt 0) {
 $report = [ordered]@{
     timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
     manifest_path = $resolvedManifestPath
+    token_source = $tokenSource
     status = $status
     drift_count = $drifts.Count
     error_count = $errors.Count

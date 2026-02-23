@@ -1,0 +1,138 @@
+name: release-with-windows-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish (for example, v0.1.0).
+        required: true
+        type: string
+      allow_existing_tag:
+        description: Allow updating an existing release tag (break-glass only).
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: Publish as prerelease.
+        required: false
+        default: false
+        type: boolean
+      allow_gate_override:
+        description: Allow publish even if Windows gate fails (controlled break-glass).
+        required: false
+        default: false
+        type: boolean
+      override_reason:
+        description: Required when allow_gate_override=true. Brief reason for override.
+        required: false
+        default: ''
+        type: string
+      override_incident_url:
+        description: Required when allow_gate_override=true. GitHub issue/discussion URL.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-with-gate-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  repo_guard:
+    name: Repo Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate repository context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedRepo = 'LabVIEW-Community-CI-CD/labview-cdev-surface'
+          $actualRepo = '${{ github.repository }}'
+          if ($actualRepo -ne $expectedRepo) {
+            throw "Release orchestration is restricted to '$expectedRepo'. Current repository '$actualRepo' is not allowed."
+          }
+
+  windows_gate:
+    name: Windows Gate
+    needs: [repo_guard]
+    uses: ./.github/workflows/_windows-labview-image-gate-core.yml
+    secrets: inherit
+
+  gate_policy:
+    name: Gate Policy
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [repo_guard, windows_gate]
+    outputs:
+      override_applied: ${{ steps.evaluate.outputs.override_applied }}
+      override_reason: ${{ steps.evaluate.outputs.override_reason }}
+      override_incident_url: ${{ steps.evaluate.outputs.override_incident_url }}
+    steps:
+      - id: evaluate
+        name: Enforce hard gate and controlled override
+        shell: pwsh
+        env:
+          REPO_GUARD_RESULT: ${{ needs.repo_guard.result }}
+          GATE_RESULT: ${{ needs.windows_gate.result }}
+          ALLOW_GATE_OVERRIDE: ${{ inputs.allow_gate_override }}
+          OVERRIDE_REASON_INPUT: ${{ inputs.override_reason }}
+          OVERRIDE_INCIDENT_URL_INPUT: ${{ inputs.override_incident_url }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $repoGuardResult = [string]$env:REPO_GUARD_RESULT
+          $gateResult = [string]$env:GATE_RESULT
+          $allowOverride = [System.Convert]::ToBoolean([string]$env:ALLOW_GATE_OVERRIDE)
+          $overrideReason = [string]$env:OVERRIDE_REASON_INPUT
+          $overrideIncidentUrl = [string]$env:OVERRIDE_INCIDENT_URL_INPUT
+
+          $overrideApplied = $false
+          if ($repoGuardResult -ne 'success') {
+            throw "Repository guard did not succeed. Blocking release publish."
+          }
+          if ($gateResult -eq 'success') {
+            Write-Host 'Windows gate passed. Release publish is allowed.'
+          } else {
+            if (-not $allowOverride) {
+              throw "Gate failed and override is not enabled. Blocking release publish."
+            }
+
+            if ([string]::IsNullOrWhiteSpace($overrideReason)) {
+              throw "allow_gate_override=true requires non-empty override_reason."
+            }
+
+            if ($overrideIncidentUrl -notmatch '^https://github\.com/[^/]+/[^/]+/(issues|discussions)/[0-9]+(?:[?#].*)?$') {
+              throw "allow_gate_override=true requires override_incident_url to be a GitHub issue/discussion URL."
+            }
+
+            $overrideApplied = $true
+            Write-Host "::warning::Windows gate failed but controlled override is active. Reason: $overrideReason. Incident: $overrideIncidentUrl"
+
+            @(
+              "## Controlled Override Applied"
+              ""
+              "- Gate result: $gateResult"
+              "- Reason: $overrideReason"
+              "- Incident: $overrideIncidentUrl"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          "override_applied=$($overrideApplied.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "override_reason=$overrideReason" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "override_incident_url=$overrideIncidentUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  release_publish:
+    name: Release Publish
+    needs: [gate_policy]
+    uses: ./.github/workflows/_release-workspace-installer-core.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      allow_existing_tag: ${{ inputs.allow_existing_tag }}
+      prerelease: ${{ inputs.prerelease }}
+      override_applied: ${{ fromJSON(needs.gate_policy.outputs.override_applied) }}
+      override_reason: ${{ needs.gate_policy.outputs.override_reason }}
+      override_incident_url: ${{ needs.gate_policy.outputs.override_incident_url }}
+    secrets: inherit

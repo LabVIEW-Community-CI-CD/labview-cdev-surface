@@ -124,7 +124,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d4b1c7fe1a347705f709dad38399d72e751e108d"
+      "pinned_sha": "893e8bb8784eccdb28c40b2a4490f621eca68c4d"
     },
     {
       "path": "C:\\dev\\labview-icon-editor-org",
@@ -157,7 +157,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d4b1c7fe1a347705f709dad38399d72e751e108d"
+      "pinned_sha": "893e8bb8784eccdb28c40b2a4490f621eca68c4d"
     },
     {
       "path": "C:\\dev\\labview-icon-editor-upstream",
@@ -188,7 +188,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "d4b1c7fe1a347705f709dad38399d72e751e108d"
+      "pinned_sha": "893e8bb8784eccdb28c40b2a4490f621eca68c4d"
     },
     {
       "path": "C:\\dev\\labview-for-containers",
@@ -255,7 +255,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "dc19c8034b10528a59208138520f71a65548f5ce"
+      "pinned_sha": "debd97fa975faa904aa292c8532a03d1c934cb41"
     },
     {
       "path": "C:\\dev\\labview-icon-editor-codex-skills",
@@ -353,7 +353,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "6e445510a24121b36fbede5f883b616211e22818"
+      "pinned_sha": "e7688e8e1c7613be839ad365c1dc9e4426d5a5e1"
     },
     {
       "path": "C:\\dev\\labview-cdev-surface-upstream",
@@ -386,8 +386,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "c3b51bd185b2cc42d43a3ca82b6d8683c65cf630"
+      "pinned_sha": "44c5ea0b36ae13d8388e66cffde4d5f54b648f09"
     }
   ]
 }
-

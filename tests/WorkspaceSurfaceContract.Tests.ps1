@@ -30,8 +30,11 @@ Describe 'Workspace surface contract' {
         $script:releaseWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
         $script:integrationGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/integration-gate.yml'
         $script:installerHarnessWorkflowPath = Join-Path $script:repoRoot '.github/workflows/installer-harness-self-hosted.yml'
+        $script:releaseCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
+        $script:releaseWithGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-with-windows-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
+        $script:windowsImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_windows-labview-image-gate-core.yml'
         $script:globalJsonPath = Join-Path $script:repoRoot 'global.json'
         $script:payloadAgentsPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/AGENTS.md'
         $script:payloadManifestPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/workspace-governance.json'
@@ -69,8 +72,11 @@ Describe 'Workspace surface contract' {
             $script:releaseWorkflowPath,
             $script:integrationGateWorkflowPath,
             $script:installerHarnessWorkflowPath,
+            $script:releaseCoreWorkflowPath,
+            $script:releaseWithGateWorkflowPath,
             $script:canaryWorkflowPath,
             $script:windowsImageGateWorkflowPath,
+            $script:windowsImageGateCoreWorkflowPath,
             $script:globalJsonPath,
             $script:payloadAgentsPath,
             $script:payloadManifestPath,
@@ -95,6 +101,8 @@ Describe 'Workspace surface contract' {
         $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
         $script:ciWorkflowContent = Get-Content -LiteralPath $script:ciWorkflowPath -Raw
         $script:releaseWorkflowContent = Get-Content -LiteralPath $script:releaseWorkflowPath -Raw
+        $script:releaseCoreWorkflowContent = Get-Content -LiteralPath $script:releaseCoreWorkflowPath -Raw
+        $script:releaseWithGateWorkflowContent = Get-Content -LiteralPath $script:releaseWithGateWorkflowPath -Raw
     }
 
     It 'tracks a deterministic managed repo set with pinned SHA lock' {
@@ -199,6 +207,20 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'installer-harness'
     }
 
+    It 'documents Windows feature troubleshooting reporting contract for Docker gating' {
+        $script:agentsContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
+        $script:agentsContent | Should -Match 'LABVIEW_WINDOWS_DOCKER_ISOLATION'
+        $script:agentsContent | Should -Match 'NoRestart'
+        $script:agentsContent | Should -Match 'features_enabled'
+        $script:agentsContent | Should -Match 'reboot_pending'
+        $script:agentsContent | Should -Match 'docker_daemon_ready'
+        $script:readmeContent | Should -Match 'LABVIEW_WINDOWS_IMAGE'
+        $script:readmeContent | Should -Match 'LABVIEW_WINDOWS_DOCKER_ISOLATION'
+        $script:readmeContent | Should -Match 'features_enabled'
+        $script:readmeContent | Should -Match 'reboot_pending'
+        $script:readmeContent | Should -Match 'docker_daemon_ready'
+    }
+
     It 'defines CI pipeline workflow' {
         $script:ciWorkflowContent | Should -Match 'name:\s*CI Pipeline'
         $script:ciWorkflowContent | Should -Match 'pull_request:'
@@ -213,6 +235,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'ProvenanceContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'IntegrationGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'InstallerHarnessWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'CiWorkflowReliabilityContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceShaRefreshPrContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ENABLE_SELF_HOSTED_CONTRACTS'
@@ -221,10 +244,13 @@ Describe 'Workspace surface contract' {
     It 'defines manual installer release workflow contract' {
         $script:releaseWorkflowContent | Should -Match 'workflow_dispatch:'
         $script:releaseWorkflowContent | Should -Match 'release_tag:'
-        $script:releaseWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
-        $script:releaseWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
-        $script:releaseWorkflowContent | Should -Match 'gh release upload'
-        $script:releaseWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
-        $script:releaseWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:releaseWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_release-workspace-installer-core\.yml'
+        $script:releaseCoreWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
+        $script:releaseCoreWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
+        $script:releaseCoreWorkflowContent | Should -Match 'gh release upload'
+        $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
+        $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
+        $script:releaseWithGateWorkflowContent | Should -Match 'allow_gate_override:'
+        $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
     }
 }

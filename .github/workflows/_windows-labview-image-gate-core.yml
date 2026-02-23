@@ -1,0 +1,253 @@
+name: _windows-labview-image-gate-core
+
+on:
+  workflow_call:
+    outputs:
+      gate_status:
+        description: Pass/fail status for the Windows image gate.
+        value: ${{ jobs.windows-labview-image-gate.outputs.gate_status }}
+      gate_report_artifact_name:
+        description: Artifact name containing gate logs and reports.
+        value: ${{ jobs.windows-labview-image-gate.outputs.gate_report_artifact_name }}
+      gate_report_path:
+        description: Full path for the generated windows image gate report JSON.
+        value: ${{ jobs.windows-labview-image-gate.outputs.gate_report_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  windows-labview-image-gate:
+    name: Windows LabVIEW Image Gate
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers, user-session, cdev-surface-windows-gate]
+    outputs:
+      gate_status: ${{ steps.capture-gate-metadata.outputs.gate_status }}
+      gate_report_artifact_name: ${{ steps.capture-gate-metadata.outputs.gate_report_artifact_name }}
+      gate_report_path: ${{ steps.capture-gate-metadata.outputs.gate_report_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build installer payload for gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gateRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate'
+          $payloadRoot = Join-Path $gateRoot 'payload'
+          if (Test-Path -LiteralPath $gateRoot -PathType Container) {
+            Remove-Item -LiteralPath $gateRoot -Recurse -Force
+          }
+          New-Item -Path $payloadRoot -ItemType Directory -Force | Out-Null
+          $payloadContractRoot = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance-payload'
+          if (-not (Test-Path -LiteralPath $payloadContractRoot -PathType Container)) {
+            throw "Canonical payload root not found: $payloadContractRoot"
+          }
+          Copy-Item -Path (Join-Path $payloadContractRoot '*') -Destination $payloadRoot -Recurse -Force
+
+          New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
+          New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
+
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
+            -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
+            -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
+            -RepoName 'labview-icon-editor' `
+            -Runtime 'win-x64' `
+            -Deterministic:$true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build runner-cli bundle for windows image gate."
+          }
+
+          $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
+          $nsisRoot = '${{ vars.NSIS_ROOT }}'
+          if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
+          & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
+            -PayloadRoot $payloadRoot `
+            -OutputPath $installerPath `
+            -WorkspaceRootDefault 'C:\dev' `
+            -NsisRoot $nsisRoot `
+            -Deterministic:$true
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build installer for windows image gate."
+          }
+
+      - name: Validate Windows container engine and configure isolation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $labviewImage = '${{ vars.LABVIEW_WINDOWS_IMAGE }}'
+          if ([string]::IsNullOrWhiteSpace($labviewImage)) {
+            $labviewImage = 'nationalinstruments/labview:2026q1-windows'
+          }
+          $requestedIsolation = '${{ vars.LABVIEW_WINDOWS_DOCKER_ISOLATION }}'
+          if ([string]::IsNullOrWhiteSpace($requestedIsolation)) {
+            $requestedIsolation = 'auto'
+          }
+          $requestedIsolation = $requestedIsolation.Trim().ToLowerInvariant()
+          if (@('auto', 'process', 'hyperv') -notcontains $requestedIsolation) {
+            throw "Invalid LABVIEW_WINDOWS_DOCKER_ISOLATION value '$requestedIsolation'. Supported values: auto, process, hyperv."
+          }
+
+          $serverOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serverOs)) {
+            throw 'Failed to query Docker server OS. Ensure Docker Desktop is running and accessible from the runner service account.'
+          }
+          if ($serverOs -ne 'windows') {
+            throw "Docker server OS is '$serverOs'. Runner must be preconfigured for Windows containers; automatic engine switching is disabled for non-interactive CI."
+          }
+
+          $hostKernelVersion = (& docker version --format '{{.Server.KernelVersion}}' 2>$null).Trim()
+          if ([string]::IsNullOrWhiteSpace($hostKernelVersion)) {
+            $hostKernelVersion = [System.Environment]::OSVersion.Version.ToString()
+          }
+
+          $manifestJson = (& docker manifest inspect --verbose $labviewImage 2>$null)
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($manifestJson)) {
+            throw "Failed to inspect Docker image manifest for '$labviewImage'."
+          }
+
+          $manifest = $manifestJson | ConvertFrom-Json -ErrorAction Stop
+          $imageOsVersion = [string]$manifest.Descriptor.platform.'os.version'
+          if ([string]::IsNullOrWhiteSpace($imageOsVersion)) {
+            throw "Docker image '$labviewImage' does not expose Descriptor.platform.os.version; cannot validate host compatibility."
+          }
+
+          function Get-WindowsVersionPrefix {
+            param([Parameter(Mandatory = $true)][string]$VersionString)
+            if ($VersionString -match '(\d+\.\d+\.\d+)') {
+              return $Matches[1]
+            }
+            return $VersionString
+          }
+
+          $hostVersionPrefix = Get-WindowsVersionPrefix -VersionString $hostKernelVersion
+          $imageVersionPrefix = Get-WindowsVersionPrefix -VersionString $imageOsVersion
+
+          $effectiveIsolation = 'process'
+          if ($hostVersionPrefix -ne $imageVersionPrefix) {
+            if ($requestedIsolation -eq 'process') {
+              throw "Windows container compatibility mismatch. Host kernel '$hostKernelVersion' does not match image '$labviewImage' os.version '$imageOsVersion'. LABVIEW_WINDOWS_DOCKER_ISOLATION is explicitly set to process, so fallback is disabled."
+            }
+            $effectiveIsolation = 'hyperv'
+            Write-Host "::warning::Windows container compatibility mismatch detected. Falling back to Hyper-V isolation for image '$labviewImage'. Host='$hostKernelVersion' Image='$imageOsVersion'."
+          } elseif ($requestedIsolation -eq 'hyperv') {
+            $effectiveIsolation = 'hyperv'
+            Write-Host "::notice::LABVIEW_WINDOWS_DOCKER_ISOLATION requests Hyper-V isolation for compatible host/image versions."
+          }
+
+          if ($effectiveIsolation -eq 'process') {
+            docker pull $labviewImage
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to pull LabVIEW Windows image '$labviewImage'."
+            }
+          } else {
+            Write-Host "Skipping explicit docker pull because effective isolation is '$effectiveIsolation'. The docker run step will resolve and pull image '$labviewImage' under Hyper-V isolation."
+          }
+
+          "LABVIEW_WINDOWS_IMAGE=$labviewImage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LABVIEW_WINDOWS_DOCKER_ISOLATION=$effectiveIsolation" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run installer and runner-cli gate in Windows container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gateRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate'
+          $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
+          if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+            throw "Installer missing for gate: $installerPath"
+          }
+
+          $containerCmd = @'
+          $ErrorActionPreference = "Stop"
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            throw "pwsh is not available in container image. Install PowerShell 7 or use an image that includes pwsh."
+          }
+
+          & "C:\workspace\artifacts\windows-image-gate\lvie-cdev-workspace-installer.exe" /S
+          if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
+
+          $installReportPath = "C:\dev\artifacts\workspace-install-latest.json"
+          if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
+            throw "Installer report missing: $installReportPath"
+          }
+          $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$installReport.status -ne "succeeded") {
+            throw "Installer report status is not succeeded: $([string]$installReport.status)"
+          }
+
+          $ppl32 = [string]$installReport.ppl_capability_checks.'32'.status
+          $ppl64 = [string]$installReport.ppl_capability_checks.'64'.status
+          if ($ppl32 -ne "pass") { throw "PPL 32-bit gate did not pass. status=$ppl32" }
+          if ($ppl64 -ne "pass") { throw "PPL 64-bit gate did not pass. status=$ppl64" }
+
+          $vipStatus = [string]$installReport.vip_package_build_check.status
+          $vipPath = [string]$installReport.vip_package_build_check.output_vip_path
+          if ($vipStatus -ne "pass") { throw "VIP gate did not pass. status=$vipStatus" }
+          if ([string]::IsNullOrWhiteSpace($vipPath) -or -not (Test-Path -LiteralPath $vipPath -PathType Leaf)) {
+            throw "VIP output missing after successful gate: $vipPath"
+          }
+
+          [ordered]@{
+            status = "pass"
+            install_report = $installReportPath
+            ppl_32_status = $ppl32
+            ppl_64_status = $ppl64
+            vip_status = $vipStatus
+            vip_output = $vipPath
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "C:\workspace\artifacts\windows-image-gate\windows-image-gate-report.json" -Encoding utf8
+          '@
+
+          $labviewImage = [string]$env:LABVIEW_WINDOWS_IMAGE
+          if ([string]::IsNullOrWhiteSpace($labviewImage)) {
+            $labviewImage = 'nationalinstruments/labview:2026q1-windows'
+          }
+          $dockerIsolation = [string]$env:LABVIEW_WINDOWS_DOCKER_ISOLATION
+          if ([string]::IsNullOrWhiteSpace($dockerIsolation)) {
+            $dockerIsolation = 'process'
+          }
+
+          docker run --rm `
+            --isolation=$dockerIsolation `
+            -v "${env:GITHUB_WORKSPACE}:C:\workspace" `
+            $labviewImage `
+            powershell -NoProfile -Command $containerCmd
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows image gate failed."
+          }
+
+      - name: Capture gate metadata
+        id: capture-gate-metadata
+        if: always()
+        shell: pwsh
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate\windows-image-gate-report.json'
+          $artifactName = "windows-labview-image-gate-$env:GITHUB_RUN_ID"
+          $status = if ($env:JOB_STATUS -eq 'success') { 'pass' } else { 'fail' }
+
+          if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+            try {
+              $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+              if ([string]$report.status -eq 'pass') {
+                $status = 'pass'
+              }
+            } catch {
+              # Keep status from job conclusion.
+            }
+          }
+
+          "gate_status=$status" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "gate_report_artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "gate_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload windows image gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-labview-image-gate-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate
+          if-no-files-found: error
