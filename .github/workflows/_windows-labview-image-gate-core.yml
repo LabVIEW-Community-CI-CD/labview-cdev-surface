@@ -160,6 +160,10 @@ jobs:
 
           $containerCmd = @'
           $ErrorActionPreference = "Stop"
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            throw "pwsh is not available in container image. Install PowerShell 7 or use an image that includes pwsh."
+          }
+
           & "C:\workspace\artifacts\windows-image-gate\lvie-cdev-workspace-installer.exe" /S
           if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
 
