@@ -19,7 +19,7 @@ permissions:
 jobs:
   windows-labview-image-gate:
     name: Windows LabVIEW Image Gate
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers, user-session, cdev-surface-windows-gate]
     outputs:
       gate_status: ${{ steps.capture-gate-metadata.outputs.gate_status }}
       gate_report_artifact_name: ${{ steps.capture-gate-metadata.outputs.gate_report_artifact_name }}
@@ -76,6 +76,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $labviewImage = '${{ vars.LABVIEW_WINDOWS_IMAGE }}'
+          if ([string]::IsNullOrWhiteSpace($labviewImage)) {
+            $labviewImage = 'nationalinstruments/labview:2026q1-windows'
+          }
+
           $serverOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim().ToLowerInvariant()
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serverOs)) {
             throw 'Failed to query Docker server OS. Ensure Docker Desktop is running and accessible from the runner service account.'
@@ -83,8 +88,43 @@ jobs:
           if ($serverOs -ne 'windows') {
             throw "Docker server OS is '$serverOs'. Runner must be preconfigured for Windows containers; automatic engine switching is disabled for non-interactive CI."
           }
-          docker pull nationalinstruments/labview:latest-windows
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to pull LabVIEW Windows image.' }
+
+          $hostKernelVersion = (& docker version --format '{{.Server.KernelVersion}}' 2>$null).Trim()
+          if ([string]::IsNullOrWhiteSpace($hostKernelVersion)) {
+            $hostKernelVersion = [System.Environment]::OSVersion.Version.ToString()
+          }
+
+          $manifestJson = (& docker manifest inspect --verbose $labviewImage 2>$null)
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($manifestJson)) {
+            throw "Failed to inspect Docker image manifest for '$labviewImage'."
+          }
+
+          $manifest = $manifestJson | ConvertFrom-Json -ErrorAction Stop
+          $imageOsVersion = [string]$manifest.Descriptor.platform.'os.version'
+          if ([string]::IsNullOrWhiteSpace($imageOsVersion)) {
+            throw "Docker image '$labviewImage' does not expose Descriptor.platform.os.version; cannot validate host compatibility."
+          }
+
+          function Get-WindowsVersionPrefix {
+            param([Parameter(Mandatory = $true)][string]$VersionString)
+            if ($VersionString -match '(\d+\.\d+\.\d+)') {
+              return $Matches[1]
+            }
+            return $VersionString
+          }
+
+          $hostVersionPrefix = Get-WindowsVersionPrefix -VersionString $hostKernelVersion
+          $imageVersionPrefix = Get-WindowsVersionPrefix -VersionString $imageOsVersion
+          if ($hostVersionPrefix -ne $imageVersionPrefix) {
+            throw "Windows container compatibility mismatch. Host kernel '$hostKernelVersion' does not match image '$labviewImage' os.version '$imageOsVersion'. Use a runner host compatible with '$imageVersionPrefix' or set repository variable LABVIEW_WINDOWS_IMAGE to a compatible tag."
+          }
+
+          docker pull $labviewImage
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to pull LabVIEW Windows image '$labviewImage'."
+          }
+
+          "LABVIEW_WINDOWS_IMAGE=$labviewImage" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Run installer and runner-cli gate in Windows container
         shell: pwsh
@@ -133,9 +173,14 @@ jobs:
           } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "C:\workspace\artifacts\windows-image-gate\windows-image-gate-report.json" -Encoding utf8
           '@
 
+          $labviewImage = [string]$env:LABVIEW_WINDOWS_IMAGE
+          if ([string]::IsNullOrWhiteSpace($labviewImage)) {
+            $labviewImage = 'nationalinstruments/labview:2026q1-windows'
+          }
+
           docker run --rm `
             -v "${env:GITHUB_WORKSPACE}:C:\workspace" `
-            nationalinstruments/labview:latest-windows `
+            $labviewImage `
             powershell -NoProfile -Command $containerCmd
           if ($LASTEXITCODE -ne 0) {
             throw "Windows image gate failed."
