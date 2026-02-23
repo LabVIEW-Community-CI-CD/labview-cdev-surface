@@ -161,6 +161,13 @@ jobs:
           $containerCmd = @'
           $ErrorActionPreference = "Stop"
 
+          $env:Path = @(
+            'C:\host-tools\Git\cmd',
+            'C:\host-tools\GitHubCLI',
+            'C:\host-tools\G-CLI\bin',
+            $env:Path
+          ) -join ';'
+
           $requiredCommands = @('powershell', 'git', 'gh', 'g-cli')
           $missingCommands = @()
           foreach ($name in $requiredCommands) {
@@ -222,9 +229,21 @@ jobs:
             $dockerIsolation = 'process'
           }
 
+          $hostGitRoot = 'C:\Program Files\Git'
+          $hostGhRoot = 'C:\Program Files\GitHub CLI'
+          $hostGCliRoot = 'C:\Program Files\G-CLI'
+          foreach ($hostToolRoot in @($hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
+            if (-not (Test-Path -LiteralPath $hostToolRoot -PathType Container)) {
+              throw "Required host tool root is missing for container bind mount: $hostToolRoot"
+            }
+          }
+
           docker run --rm `
             --isolation=$dockerIsolation `
-            -v "${env:GITHUB_WORKSPACE}:C:\workspace" `
+            --mount "type=bind,source=${env:GITHUB_WORKSPACE},target=C:\workspace" `
+            --mount "type=bind,source=$hostGitRoot,target=C:\host-tools\Git,readonly" `
+            --mount "type=bind,source=$hostGhRoot,target=C:\host-tools\GitHubCLI,readonly" `
+            --mount "type=bind,source=$hostGCliRoot,target=C:\host-tools\G-CLI,readonly" `
             $labviewImage `
             powershell -NoProfile -Command $containerCmd
           if ($LASTEXITCODE -ne 0) {
