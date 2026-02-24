@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -31,6 +30,33 @@ function Ensure-Directory {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         New-Item -Path $Path -ItemType Directory -Force | Out-Null
     }
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File not found for hashing: $Path"
+    }
+
+    $hashCmd = Get-Command 'Get-FileHash' -ErrorAction SilentlyContinue
+    if ($null -ne $hashCmd) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $sha.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant())
 }
 
 function Convert-ToEpochIso8601 {
@@ -293,7 +319,7 @@ try {
 
     Copy-Item -LiteralPath $publishedExe -Destination $bundleExePath -Force
 
-    $sha256 = (Get-FileHash -LiteralPath $bundleExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha256 = Get-Sha256Hex -Path $bundleExePath
     "{0} *{1}" -f $sha256, (Split-Path -Path $bundleExePath -Leaf) | Set-Content -LiteralPath $bundleShaPath -Encoding ascii
 
     $metadata = [ordered]@{

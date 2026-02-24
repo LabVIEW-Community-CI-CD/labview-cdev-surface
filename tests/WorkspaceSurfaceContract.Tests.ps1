@@ -100,6 +100,8 @@ Describe 'Workspace surface contract' {
         $script:agentsContent = Get-Content -LiteralPath $script:agentsPath -Raw
         $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
         $script:nsisInstallerContent = Get-Content -LiteralPath $script:nsisInstallerPath -Raw
+        $script:buildInstallerScriptContent = Get-Content -LiteralPath $script:buildInstallerScriptPath -Raw
+        $script:bundleRunnerCliScriptContent = Get-Content -LiteralPath $script:bundleRunnerCliScriptPath -Raw
         $script:ciWorkflowContent = Get-Content -LiteralPath $script:ciWorkflowPath -Raw
         $script:releaseWorkflowContent = Get-Content -LiteralPath $script:releaseWorkflowPath -Raw
         $script:releaseCoreWorkflowContent = Get-Content -LiteralPath $script:releaseCoreWorkflowPath -Raw
@@ -188,6 +190,15 @@ Describe 'Workspace surface contract' {
         $script:nsisInstallerContent | Should -Match 'WindowsPowerShell\\v1\.0\\powershell\.exe'
         $script:nsisInstallerContent | Should -Match 'powershell_resolution_error=windows_powershell_not_found'
         $script:nsisInstallerContent | Should -Not -Match 'StrCpy \$1 "powershell"'
+    }
+
+    It 'keeps gate bootstrap scripts compatible with Windows PowerShell' {
+        $script:buildInstallerScriptContent | Should -Not -Match '^#Requires -Version 7\.0'
+        $script:bundleRunnerCliScriptContent | Should -Not -Match '^#Requires -Version 7\.0'
+        $script:buildInstallerScriptContent | Should -Match "Get-Command 'Get-FileHash'"
+        $script:buildInstallerScriptContent | Should -Match '\[System\.Security\.Cryptography\.SHA256\]::Create\(\)'
+        $script:bundleRunnerCliScriptContent | Should -Match "Get-Command 'Get-FileHash'"
+        $script:bundleRunnerCliScriptContent | Should -Match '\[System\.Security\.Cryptography\.SHA256\]::Create\(\)'
     }
 
     It 'keeps canonical payload manifest aligned with repository manifest' {
