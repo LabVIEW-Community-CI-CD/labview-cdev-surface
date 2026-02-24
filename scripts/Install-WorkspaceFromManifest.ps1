@@ -1687,20 +1687,15 @@ try {
         -Message ([string]$cliBundle.message)
 
     $originalWorktreeRoot = $env:LVIE_WORKTREE_ROOT
-    $effectiveWorktreeRoot = $resolvedWorkspaceRoot
+    $effectiveWorktreeRoot = if ([string]::IsNullOrWhiteSpace($originalWorktreeRoot)) { $resolvedWorkspaceRoot } else { $originalWorktreeRoot }
     $worktreeRootOverridden = $false
-    if (-not [string]::IsNullOrWhiteSpace($effectiveWorktreeRoot)) {
-        if ([string]::IsNullOrWhiteSpace($originalWorktreeRoot)) {
+    if ([string]::IsNullOrWhiteSpace($originalWorktreeRoot)) {
+        if (-not [string]::IsNullOrWhiteSpace($effectiveWorktreeRoot)) {
             Write-InstallerFeedback -Message ("Setting LVIE_WORKTREE_ROOT to workspace root for post-actions: {0}" -f $effectiveWorktreeRoot)
             $worktreeRootOverridden = $true
-        } else {
-            $normalizedOriginal = [System.IO.Path]::GetFullPath($originalWorktreeRoot).TrimEnd('\')
-            $normalizedEffective = [System.IO.Path]::GetFullPath($effectiveWorktreeRoot).TrimEnd('\')
-            if ($normalizedOriginal -ne $normalizedEffective) {
-                Write-InstallerFeedback -Message ("Overriding LVIE_WORKTREE_ROOT for post-actions. previous='{0}' effective='{1}'" -f $originalWorktreeRoot, $effectiveWorktreeRoot)
-                $worktreeRootOverridden = $true
-            }
         }
+    } else {
+        Write-InstallerFeedback -Message ("Using existing LVIE_WORKTREE_ROOT for post-actions: {0}" -f $effectiveWorktreeRoot)
     }
 
     try {

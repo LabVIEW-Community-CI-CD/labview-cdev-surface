@@ -64,6 +64,7 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '& \$pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "\$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller\.ps1"'
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''host-release'''
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''container-parity'''
+        $script:coreWorkflowContent | Should -Match 'LVIE_WORKTREE_ROOT = ''C:\\dev'''
     }
 
     It 'enforces release-vs-parity post-action roles and vi analyzer parity execution' {
@@ -81,6 +82,9 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'feed-add https://download\.ni\.com/support/nipkg/products/ni-l/ni-labview-2026-x86/26\.1/released --name=ni-labview-2026-core-x86-en-2026-q1-released'
         $script:coreWorkflowContent | Should -Match 'feed-add https://download\.ni\.com/support/nipkg/products/ni-l/ni-labview-2020-x86/20\.0/released --name=ni-labview-2020-core-x86-en-2020-released'
         $script:coreWorkflowContent | Should -Not -Match 'feed-add\s+ni-labview-[^\s]+\s+https://'
+        $script:coreWorkflowContent | Should -Match 'LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64'
+        $script:coreWorkflowContent | Should -Match 'FromBase64String'
+        $script:coreWorkflowContent | Should -Not -Match 'LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=\$labviewX86NipkgInstallCmd'
         $script:coreWorkflowContent | Should -Match 'Join-Path \$artifactRoot ''host-mounts'''
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGitMountSource,target=C:\\host-tools\\Git,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGhMountSource,target=C:\\host-tools\\GitHubCLI,readonly'

@@ -318,6 +318,7 @@ jobs:
           $env:VIPM_COMMUNITY_EDITION = 'true'
           $env:LVIE_OFFLINE_GIT_MODE = 'true'
           $env:LVIE_INSTALLER_EXECUTION_PROFILE = 'host-release'
+          $env:LVIE_WORKTREE_ROOT = 'C:\dev'
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:SELECTED_PPL_BITNESS
 
@@ -569,9 +570,19 @@ jobs:
           $env:VIPM_COMMUNITY_EDITION = 'true'
           $env:LVIE_OFFLINE_GIT_MODE = 'true'
           $env:LVIE_INSTALLER_EXECUTION_PROFILE = 'container-parity'
+          $env:LVIE_WORKTREE_ROOT = 'C:\dev'
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
-          $env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD
+          $labviewX86NipkgInstallCmdB64 = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64
+          if (-not [string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmdB64)) {
+            try {
+              $env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($labviewX86NipkgInstallCmdB64))
+            } catch {
+              throw "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64 is not valid base64. $($_.Exception.Message)"
+            }
+          } else {
+            $env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD
+          }
           $env:LVIE_PARITY_LVCONTAINER_RAW = [string]$env:LVIE_PARITY_LVCONTAINER_RAW
           $env:LVIE_PARITY_WINDOWS_TAG = [string]$env:LVIE_PARITY_WINDOWS_TAG
           $env:LVIE_PARITY_BUILD_SPEC_KIND = 'ppl'
@@ -730,6 +741,10 @@ jobs:
               $labviewX86NipkgInstallCmd = ''
             }
           }
+          $labviewX86NipkgInstallCmdB64 = ''
+          if (-not [string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmd)) {
+            $labviewX86NipkgInstallCmdB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($labviewX86NipkgInstallCmd))
+          }
 
           $hostDevRoot = 'C:\dev'
           $hostLabview2020x64Root = 'C:\Program Files\National Instruments\LabVIEW 2020'
@@ -836,7 +851,7 @@ jobs:
             '--env', 'LVIE_OFFLINE_GIT_MODE=true',
             '--env', "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$requiredYear",
             '--env', "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness",
-            '--env', "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmd",
+            '--env', "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64=$labviewX86NipkgInstallCmdB64",
             '--env', "LVIE_PARITY_LVCONTAINER_RAW=$env:LVIE_PARITY_LVCONTAINER_RAW",
             '--env', "LVIE_PARITY_WINDOWS_TAG=$env:LVIE_PARITY_WINDOWS_TAG",
             '--env', "PARITY_BUILD_SPEC_MARKER=$env:PARITY_BUILD_SPEC_MARKER"
