@@ -1732,58 +1732,63 @@ try {
                     Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
                     Start-Sleep -Seconds 3
 
-                    Write-InstallerFeedback -Message ("Running runner-cli PPL capability gate ({0}-bit)." -f $bitness)
-                    $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
-                        -RunnerCliPath $runnerCliExePath `
-                        -IconEditorRepoPath $iconEditorRepoPath `
-                        -PinnedSha $iconEditorPinnedSha `
-                        -RequiredLabviewYear ([string]$requiredLabviewYear) `
-                        -RequiredBitness $bitness
-
-                    if ([string]$capabilityResult.status -ne 'pass') {
-                        $firstAttemptMessage = [string]$capabilityResult.message
-                        Write-InstallerFeedback -Message ("runner-cli PPL capability gate ({0}-bit) failed on first attempt; retrying once after additional LabVIEW cleanup." -f $bitness)
-                        Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
-                        Start-Sleep -Seconds 5
-
-                        $retryCapabilityResult = Invoke-RunnerCliPplCapabilityCheck `
+                    try {
+                        Write-InstallerFeedback -Message ("Running runner-cli PPL capability gate ({0}-bit)." -f $bitness)
+                        $capabilityResult = Invoke-RunnerCliPplCapabilityCheck `
                             -RunnerCliPath $runnerCliExePath `
                             -IconEditorRepoPath $iconEditorRepoPath `
                             -PinnedSha $iconEditorPinnedSha `
                             -RequiredLabviewYear ([string]$requiredLabviewYear) `
                             -RequiredBitness $bitness
 
-                        if ([string]$retryCapabilityResult.status -eq 'pass') {
-                            $retryCapabilityResult.message = ("{0} (passed on retry after additional cleanup)." -f [string]$retryCapabilityResult.message)
-                            $capabilityResult = $retryCapabilityResult
-                        } else {
-                            $retryCapabilityResult.message = ("First attempt: {0} Retry attempt: {1}" -f $firstAttemptMessage, [string]$retryCapabilityResult.message)
-                            $capabilityResult = $retryCapabilityResult
+                        if ([string]$capabilityResult.status -ne 'pass') {
+                            $firstAttemptMessage = [string]$capabilityResult.message
+                            Write-InstallerFeedback -Message ("runner-cli PPL capability gate ({0}-bit) failed on first attempt; retrying once after additional LabVIEW cleanup." -f $bitness)
+                            Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
+                            Start-Sleep -Seconds 5
+
+                            $retryCapabilityResult = Invoke-RunnerCliPplCapabilityCheck `
+                                -RunnerCliPath $runnerCliExePath `
+                                -IconEditorRepoPath $iconEditorRepoPath `
+                                -PinnedSha $iconEditorPinnedSha `
+                                -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                                -RequiredBitness $bitness
+
+                            if ([string]$retryCapabilityResult.status -eq 'pass') {
+                                $retryCapabilityResult.message = ("{0} (passed on retry after additional cleanup)." -f [string]$retryCapabilityResult.message)
+                                $capabilityResult = $retryCapabilityResult
+                            } else {
+                                $retryCapabilityResult.message = ("First attempt: {0} Retry attempt: {1}" -f $firstAttemptMessage, [string]$retryCapabilityResult.message)
+                                $capabilityResult = $retryCapabilityResult
+                            }
                         }
-                    }
 
-                    $pplCapabilityChecks[$bitness] = [ordered]@{
-                        status = [string]$capabilityResult.status
-                        message = [string]$capabilityResult.message
-                        runner_cli_path = [string]$capabilityResult.runner_cli_path
-                        repo_path = [string]$capabilityResult.repo_path
-                        required_labview_year = [string]$capabilityResult.required_labview_year
-                        required_bitness = [string]$capabilityResult.required_bitness
-                        output_ppl_path = [string]$capabilityResult.output_ppl_path
-                        output_ppl_snapshot_path = [string]$capabilityResult.output_ppl_snapshot_path
-                        command = @($capabilityResult.command)
-                        exit_code = $capabilityResult.exit_code
-                        labview_install_root = [string]$capabilityResult.labview_install_root
-                        buildspec_log_path = [string]$capabilityResult.buildspec_log_path
-                        detected_labview_executable = [string]$capabilityResult.detected_labview_executable
-                        detected_labview_year = [string]$capabilityResult.detected_labview_year
-                    }
+                        $pplCapabilityChecks[$bitness] = [ordered]@{
+                            status = [string]$capabilityResult.status
+                            message = [string]$capabilityResult.message
+                            runner_cli_path = [string]$capabilityResult.runner_cli_path
+                            repo_path = [string]$capabilityResult.repo_path
+                            required_labview_year = [string]$capabilityResult.required_labview_year
+                            required_bitness = [string]$capabilityResult.required_bitness
+                            output_ppl_path = [string]$capabilityResult.output_ppl_path
+                            output_ppl_snapshot_path = [string]$capabilityResult.output_ppl_snapshot_path
+                            command = @($capabilityResult.command)
+                            exit_code = $capabilityResult.exit_code
+                            labview_install_root = [string]$capabilityResult.labview_install_root
+                            buildspec_log_path = [string]$capabilityResult.buildspec_log_path
+                            detected_labview_executable = [string]$capabilityResult.detected_labview_executable
+                            detected_labview_year = [string]$capabilityResult.detected_labview_year
+                        }
 
-                    Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
+                        Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
 
-                    if ([string]$capabilityResult.status -ne 'pass') {
-                        $allPplPass = $false
-                        $errors += "Runner CLI PPL capability check failed ($bitness-bit). $([string]$capabilityResult.message)"
+                        if ([string]$capabilityResult.status -ne 'pass') {
+                            $allPplPass = $false
+                            $errors += "Runner CLI PPL capability check failed ($bitness-bit). $([string]$capabilityResult.message)"
+                        }
+                    } finally {
+                        Write-InstallerFeedback -Message ("Running post-PPL LabVIEW close sweep after {0}-bit gate." -f $bitness)
+                        Invoke-PreVipLabVIEWCloseBestEffort -IconEditorRepoPath $iconEditorRepoPath
                     }
                 }
 
