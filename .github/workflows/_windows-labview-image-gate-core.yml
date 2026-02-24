@@ -344,6 +344,17 @@ jobs:
               $labviewX86NipkgInstallCmd = ''
             }
           }
+          $labviewX86NipkgInstallCmdForContainer = $labviewX86NipkgInstallCmd
+          if (-not [string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmd)) {
+            $x86NipkgCmdScriptPath = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate\x86-nipkg-bootstrap.cmd'
+            $x86NipkgCmdScriptContent = @(
+              '@echo off',
+              'setlocal EnableExtensions',
+              $labviewX86NipkgInstallCmd
+            ) -join [Environment]::NewLine
+            Set-Content -LiteralPath $x86NipkgCmdScriptPath -Value $x86NipkgCmdScriptContent -Encoding ascii
+            $labviewX86NipkgInstallCmdForContainer = 'C:\workspace\artifacts\windows-image-gate\x86-nipkg-bootstrap.cmd'
+          }
 
           $hostDevRoot = 'C:\dev'
           $hostLabview2020x64Root = 'C:\Program Files\National Instruments\LabVIEW 2020'
@@ -365,7 +376,7 @@ jobs:
             '--env', 'LVIE_OFFLINE_GIT_MODE=true',
             '--env', "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$gateRequiredLabviewYear",
             '--env', "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness",
-            '--env', "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmd",
+            '--env', "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmdForContainer",
             '--mount', "type=bind,source=${env:GITHUB_WORKSPACE},target=C:\workspace",
             '--mount', "type=bind,source=$hostDevRoot,target=C:\dev",
             '--mount', "type=bind,source=$hostLabview2020x64Root,target=C:\Program Files\National Instruments\LabVIEW 2020,readonly",
