@@ -36,6 +36,17 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context,\s*windows-host-ppl-32,\s*windows-host-ppl-64,\s*linux-parity-projectspec-via-container\]'
     }
 
+    It 'enforces isolated windows prerequisite workspaces with deterministic cleanup' {
+        $script:coreWorkflowContent | Should -Match 'Resolve-IsolatedBuildWorkspace\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Prepare-IsolatedRepoAtPinnedSha\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Cleanup-IsolatedBuildWorkspace\.ps1'
+        $script:coreWorkflowContent | Should -Match 'LVIE_ISOLATED_JOB_ROOT_LINUX_PPL32'
+        $script:coreWorkflowContent | Should -Match 'LVIE_ISOLATED_JOB_ROOT_LINUX_PPL64'
+        $script:coreWorkflowContent | Should -Match 'isolated-workspace-resolution\.json'
+        $script:coreWorkflowContent | Should -Match 'repo-provisioning\.labview-icon-editor\.json'
+        $script:coreWorkflowContent | Should -Match 'if:\s*always\(\)'
+    }
+
     It 'derives Linux image from lvcontainer with derive-then-lock policy and lane override support' {
         $script:coreWorkflowContent | Should -Match '\.lvcontainer'
         $script:coreWorkflowContent | Should -Match 'allowed_linux_tags'

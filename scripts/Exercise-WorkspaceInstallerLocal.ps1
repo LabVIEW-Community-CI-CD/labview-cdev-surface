@@ -67,49 +67,18 @@ function Stage-Payload {
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\Install-WorkspaceFromManifest.ps1') -Destination (Join-Path $PayloadRoot 'scripts\Install-WorkspaceFromManifest.ps1') -Force
 }
 
-function Convert-ManifestToWorkspace {
-    param(
-        [Parameter(Mandatory = $true)][string]$ManifestPath,
-        [Parameter(Mandatory = $true)][string]$WorkspaceRoot
-    )
-
-    $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
-    $sourceRoot = [string]$manifest.workspace_root
-    if ([string]::IsNullOrWhiteSpace($sourceRoot)) {
-        throw "Manifest is missing workspace_root: $ManifestPath"
-    }
-
-    $normalizedSource = [System.IO.Path]::GetFullPath($sourceRoot)
-    $normalizedTarget = [System.IO.Path]::GetFullPath($WorkspaceRoot)
-    $manifest.workspace_root = $normalizedTarget
-
-    foreach ($repo in @($manifest.managed_repos)) {
-        $repoPath = [string]$repo.path
-        if ([string]::IsNullOrWhiteSpace($repoPath)) {
-            throw "Managed repo path is empty in manifest: $ManifestPath"
-        }
-
-        $fullRepoPath = [System.IO.Path]::GetFullPath($repoPath)
-        if ($fullRepoPath.StartsWith($normalizedSource, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $suffix = $fullRepoPath.Substring($normalizedSource.Length).TrimStart('\')
-            $repo.path = if ([string]::IsNullOrWhiteSpace($suffix)) { $normalizedTarget } else { Join-Path $normalizedTarget $suffix }
-        } else {
-            # Keep non-workspace paths unchanged, but make deterministic absolute.
-            $repo.path = $fullRepoPath
-        }
-    }
-
-    $manifest | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $ManifestPath -Encoding utf8
-}
-
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
 $buildScript = Join-Path $repoRoot 'scripts\Build-WorkspaceBootstrapInstaller.ps1'
 $bundleRunnerCliScript = Join-Path $repoRoot 'scripts\Build-RunnerCliBundleFromManifest.ps1'
+$convertManifestScript = Join-Path $repoRoot 'scripts\Convert-ManifestToWorkspace.ps1'
 if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
     throw "Build script not found: $buildScript"
 }
 if (-not (Test-Path -LiteralPath $bundleRunnerCliScript -PathType Leaf)) {
     throw "Runner CLI bundle script not found: $bundleRunnerCliScript"
+}
+if (-not (Test-Path -LiteralPath $convertManifestScript -PathType Leaf)) {
+    throw "Manifest workspace conversion script not found: $convertManifestScript"
 }
 
 foreach ($commandName in @('pwsh', 'git', 'gh', 'dotnet', 'g-cli')) {
@@ -153,7 +122,12 @@ if (-not $SkipSmokeBuild) {
             -Destination (Join-Path $smokePayload 'tools\runner-cli\win-x64') `
             -Force
     }
-    Convert-ManifestToWorkspace -ManifestPath (Join-Path $smokePayload 'workspace-governance\workspace-governance.json') -WorkspaceRoot $resolvedSmokeRoot
+    & $convertManifestScript `
+        -ManifestPath (Join-Path $smokePayload 'workspace-governance\workspace-governance.json') `
+        -WorkspaceRoot $resolvedSmokeRoot | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to remap smoke payload manifest workspace root to '$resolvedSmokeRoot'."
+    }
 } elseif (-not $SkipSmokeInstall) {
     Write-Host "SkipSmokeBuild was set; forcing SkipSmokeInstall."
     $SkipSmokeInstall = $true

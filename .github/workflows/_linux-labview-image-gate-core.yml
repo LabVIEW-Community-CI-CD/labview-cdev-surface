@@ -250,43 +250,56 @@ jobs:
             throw "runner-cli executable not found: $runnerCliPath"
           }
 
-          $manifest = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') -Raw | ConvertFrom-Json -ErrorAction Stop
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $iconEditorRepo = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
           if ($null -eq $iconEditorRepo) {
             throw "Managed repo 'labview-icon-editor' not found in manifest."
           }
 
-          $repoPath = [string]$iconEditorRepo.path
+          $sourceRepoPath = [string]$iconEditorRepo.path
           $repoOriginUrl = [string]$iconEditorRepo.required_remotes.origin
           $repoPinnedSha = ([string]$iconEditorRepo.pinned_sha).ToLowerInvariant()
-          if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($repoOriginUrl) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
+          if ([string]::IsNullOrWhiteSpace($sourceRepoPath) -or [string]::IsNullOrWhiteSpace($repoOriginUrl) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
             throw "Managed repo contract for 'labview-icon-editor' is incomplete."
           }
 
-          & git config --global --add safe.directory $repoPath 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to configure git safe.directory for $repoPath"
-          }
-
-          if (-not (Test-Path -LiteralPath $repoPath -PathType Container)) {
-            $repoParent = Split-Path -Parent $repoPath
-            if (-not (Test-Path -LiteralPath $repoParent -PathType Container)) {
-              New-Item -Path $repoParent -ItemType Directory -Force | Out-Null
-            }
-            & git clone --quiet $repoOriginUrl $repoPath
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to clone icon-editor repo into $repoPath"
+          $resolveIsolationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Resolve-IsolatedBuildWorkspace.ps1'
+          $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
+          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript)) {
+            if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
+              throw "Required isolation script is missing: $requiredScriptPath"
             }
           }
 
-          & git -C $repoPath fetch --no-tags --quiet origin $repoPinnedSha
+          $isolationReportPath = Join-Path $artifactRoot 'isolated-workspace-resolution.json'
+          $isolation = & $resolveIsolationScript `
+            -PolicyManifestPath $manifestPath `
+            -WorkspaceKind 'linux-gate-windows-ppl-32' `
+            -OutputPath $isolationReportPath
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to fetch pinned SHA '$repoPinnedSha' for icon-editor repo."
+            throw 'Failed to resolve isolated workspace root for linux gate windows 32-bit prerequisite lane.'
           }
 
-          & git -C $repoPath checkout --quiet --detach $repoPinnedSha
+          $isolatedReposRoot = [string]$isolation.repos_root
+          $isolatedJobRoot = [string]$isolation.job_root
+          if ([string]::IsNullOrWhiteSpace($isolatedReposRoot) -or [string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            throw 'Isolation resolver returned incomplete linux gate windows 32-bit prerequisite paths.'
+          }
+          "LVIE_ISOLATED_JOB_ROOT_LINUX_PPL32=$isolatedJobRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $repoPath = Join-Path $isolatedReposRoot 'labview-icon-editor'
+          $provisionReportPath = Join-Path $artifactRoot 'repo-provisioning.labview-icon-editor.json'
+          & $prepareRepoScript `
+            -RepoName 'labview-icon-editor' `
+            -RepoOriginUrl $repoOriginUrl `
+            -PinnedSha $repoPinnedSha `
+            -DefaultBranch ([string]$iconEditorRepo.default_branch) `
+            -SourceRepoPath $sourceRepoPath `
+            -TargetRepoPath $repoPath `
+            -OutputPath $provisionReportPath | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to checkout pinned SHA '$repoPinnedSha' for icon-editor repo."
+            throw "Failed to provision isolated icon-editor repo into '$repoPath'."
           }
 
           $requiredLabviewYear = [string]$env:REQUIRED_LABVIEW_YEAR
@@ -328,7 +341,10 @@ jobs:
             gate_lane = 'windows-host-ppl-32'
             required_labview_year = $requiredLabviewYear
             output_ppl_path = $snapshotPath
-            source_repo_path = $repoPath
+            source_repo_path = $sourceRepoPath
+            isolated_repo_path = $repoPath
+            isolated_job_root = $isolatedJobRoot
+            isolated_repos_root = $isolatedReposRoot
             source_repo_pinned_sha = $repoPinnedSha
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-ppl-32-report.json') -Encoding utf8
@@ -350,6 +366,24 @@ jobs:
           name: linux-gate-windows-ppl-32-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/linux-image-gate/windows-ppl-32
           if-no-files-found: error
+
+      - name: Cleanup x86 isolated workspace root
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cleanupScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Cleanup-IsolatedBuildWorkspace.ps1'
+          if (-not (Test-Path -LiteralPath $cleanupScript -PathType Leaf)) {
+            throw "Cleanup script is missing: $cleanupScript"
+          }
+
+          $isolatedJobRoot = [string]$env:LVIE_ISOLATED_JOB_ROOT_LINUX_PPL32
+          if ([string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            Write-Warning 'LVIE_ISOLATED_JOB_ROOT_LINUX_PPL32 is empty; skipping cleanup.'
+            exit 0
+          }
+
+          & $cleanupScript -Path $isolatedJobRoot -BestEffort | Out-Null
 
   windows-host-ppl-64:
     name: Windows Host PPL Prerequisite (64-bit)
@@ -390,43 +424,56 @@ jobs:
             throw "runner-cli executable not found: $runnerCliPath"
           }
 
-          $manifest = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json') -Raw | ConvertFrom-Json -ErrorAction Stop
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $iconEditorRepo = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
           if ($null -eq $iconEditorRepo) {
             throw "Managed repo 'labview-icon-editor' not found in manifest."
           }
 
-          $repoPath = [string]$iconEditorRepo.path
+          $sourceRepoPath = [string]$iconEditorRepo.path
           $repoOriginUrl = [string]$iconEditorRepo.required_remotes.origin
           $repoPinnedSha = ([string]$iconEditorRepo.pinned_sha).ToLowerInvariant()
-          if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($repoOriginUrl) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
+          if ([string]::IsNullOrWhiteSpace($sourceRepoPath) -or [string]::IsNullOrWhiteSpace($repoOriginUrl) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
             throw "Managed repo contract for 'labview-icon-editor' is incomplete."
           }
 
-          & git config --global --add safe.directory $repoPath 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to configure git safe.directory for $repoPath"
-          }
-
-          if (-not (Test-Path -LiteralPath $repoPath -PathType Container)) {
-            $repoParent = Split-Path -Parent $repoPath
-            if (-not (Test-Path -LiteralPath $repoParent -PathType Container)) {
-              New-Item -Path $repoParent -ItemType Directory -Force | Out-Null
-            }
-            & git clone --quiet $repoOriginUrl $repoPath
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to clone icon-editor repo into $repoPath"
+          $resolveIsolationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Resolve-IsolatedBuildWorkspace.ps1'
+          $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
+          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript)) {
+            if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
+              throw "Required isolation script is missing: $requiredScriptPath"
             }
           }
 
-          & git -C $repoPath fetch --no-tags --quiet origin $repoPinnedSha
+          $isolationReportPath = Join-Path $artifactRoot 'isolated-workspace-resolution.json'
+          $isolation = & $resolveIsolationScript `
+            -PolicyManifestPath $manifestPath `
+            -WorkspaceKind 'linux-gate-windows-ppl-64' `
+            -OutputPath $isolationReportPath
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to fetch pinned SHA '$repoPinnedSha' for icon-editor repo."
+            throw 'Failed to resolve isolated workspace root for linux gate windows 64-bit prerequisite lane.'
           }
 
-          & git -C $repoPath checkout --quiet --detach $repoPinnedSha
+          $isolatedReposRoot = [string]$isolation.repos_root
+          $isolatedJobRoot = [string]$isolation.job_root
+          if ([string]::IsNullOrWhiteSpace($isolatedReposRoot) -or [string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            throw 'Isolation resolver returned incomplete linux gate windows 64-bit prerequisite paths.'
+          }
+          "LVIE_ISOLATED_JOB_ROOT_LINUX_PPL64=$isolatedJobRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $repoPath = Join-Path $isolatedReposRoot 'labview-icon-editor'
+          $provisionReportPath = Join-Path $artifactRoot 'repo-provisioning.labview-icon-editor.json'
+          & $prepareRepoScript `
+            -RepoName 'labview-icon-editor' `
+            -RepoOriginUrl $repoOriginUrl `
+            -PinnedSha $repoPinnedSha `
+            -DefaultBranch ([string]$iconEditorRepo.default_branch) `
+            -SourceRepoPath $sourceRepoPath `
+            -TargetRepoPath $repoPath `
+            -OutputPath $provisionReportPath | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to checkout pinned SHA '$repoPinnedSha' for icon-editor repo."
+            throw "Failed to provision isolated icon-editor repo into '$repoPath'."
           }
 
           $requiredLabviewYear = [string]$env:REQUIRED_LABVIEW_YEAR
@@ -468,7 +515,10 @@ jobs:
             gate_lane = 'windows-host-ppl-64'
             required_labview_year = $requiredLabviewYear
             output_ppl_path = $snapshotPath
-            source_repo_path = $repoPath
+            source_repo_path = $sourceRepoPath
+            isolated_repo_path = $repoPath
+            isolated_job_root = $isolatedJobRoot
+            isolated_repos_root = $isolatedReposRoot
             source_repo_pinned_sha = $repoPinnedSha
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-ppl-64-report.json') -Encoding utf8
@@ -490,6 +540,24 @@ jobs:
           name: linux-gate-windows-ppl-64-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/linux-image-gate/windows-ppl-64
           if-no-files-found: error
+
+      - name: Cleanup x64 isolated workspace root
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cleanupScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Cleanup-IsolatedBuildWorkspace.ps1'
+          if (-not (Test-Path -LiteralPath $cleanupScript -PathType Leaf)) {
+            throw "Cleanup script is missing: $cleanupScript"
+          }
+
+          $isolatedJobRoot = [string]$env:LVIE_ISOLATED_JOB_ROOT_LINUX_PPL64
+          if ([string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            Write-Warning 'LVIE_ISOLATED_JOB_ROOT_LINUX_PPL64 is empty; skipping cleanup.'
+            exit 0
+          }
+
+          & $cleanupScript -Path $isolatedJobRoot -BestEffort | Out-Null
 
   linux-parity-projectspec-via-container:
     name: Linux Parity Project-Spec + VI Analyzer (${{ needs.resolve-parity-context.outputs.lvcontainer_raw }} | ${{ needs.resolve-parity-context.outputs.build_spec_marker }})

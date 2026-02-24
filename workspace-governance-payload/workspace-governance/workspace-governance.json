@@ -7,6 +7,24 @@
       "sha256_file": "runner-cli.exe.sha256",
       "metadata_file": "runner-cli.metadata.json"
     },
+    "build_workspace_policy": {
+      "mode": "always-isolated",
+      "strategy_primary": "git-worktree",
+      "strategy_fallback": "detached-clone",
+      "windows_root_candidates": [
+        "D:\\dev",
+        "C:\\dev"
+      ],
+      "windows_root_selection": "prefer-d-fallback-c",
+      "cleanup_policy": "always",
+      "applies_to": [
+        "windows-host-release-gate",
+        "windows-container-parity-gate",
+        "linux-gate-windows-prereqs",
+        "local-exercise"
+      ],
+      "release_artifact_default_policy": "ci-only-selector"
+    },
     "release_build_contract": {
       "labview_version_source": ".lvversion",
       "required_year": "2020",

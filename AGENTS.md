@@ -2,6 +2,7 @@
 
 ## Mission
 This repository is the canonical policy and manifest surface for deterministic `C:\dev` workspace governance.
+Build and gate lanes must run in isolated workspaces on every run (`D:\dev` preferred, `C:\dev` fallback).
 
 ## Authoritative Files
 - `workspace-governance.json` is the machine contract for repo remotes, default branches, branch-protection expectations, and `pinned_sha` values.
@@ -47,6 +48,12 @@ This repository is the canonical policy and manifest surface for deterministic `
 - `release-with-windows-gate.yml` must run `repo_guard` and fail outside `LabVIEW-Community-CI-CD/labview-cdev-surface`.
 - `release-with-windows-gate.yml` must run Windows acceptance via `./.github/workflows/_windows-labview-image-gate-core.yml` before publish.
 - Windows gate runners must be preconfigured in Windows container mode; do not rely on interactive Docker engine switching in CI.
+- Build workspace isolation policy is mandatory for gate/build lanes:
+  - always-isolated
+  - `git-worktree` primary, detached-clone fallback
+  - deterministic root selection: `D:\dev` preferred, `C:\dev` fallback
+  - cleanup after artifact upload must run under `if: always()`
+  - release artifact default policy token: `ci-only-selector`
 - Windows gate workflow must target labels: `self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`.
 - Windows gate image default is `nationalinstruments/labview:2026q1-windows`; optional override via repository variable `LABVIEW_WINDOWS_IMAGE`.
 - Windows gate isolation policy:

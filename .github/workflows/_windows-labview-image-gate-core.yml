@@ -175,6 +175,33 @@ jobs:
           New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
           New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
+          $resolveIsolationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Resolve-IsolatedBuildWorkspace.ps1'
+          $convertManifestScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Convert-ManifestToWorkspace.ps1'
+          foreach ($requiredScriptPath in @($resolveIsolationScript, $convertManifestScript)) {
+            if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
+              throw "Required isolation script is missing: $requiredScriptPath"
+            }
+          }
+          $payloadManifestPath = Join-Path $payloadRoot 'workspace-governance/workspace-governance.json'
+          $isolationReportPath = Join-Path $gateRoot 'isolated-workspace-resolution.json'
+          $isolation = & $resolveIsolationScript `
+            -PolicyManifestPath $payloadManifestPath `
+            -WorkspaceKind 'windows-host-release-gate' `
+            -OutputPath $isolationReportPath
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to resolve isolated workspace root for host release payload build.'
+          }
+          $isolatedWorkspaceRoot = [string]$isolation.workspace_root
+          $isolatedReposRoot = [string]$isolation.repos_root
+          $isolatedJobRoot = [string]$isolation.job_root
+          if ([string]::IsNullOrWhiteSpace($isolatedWorkspaceRoot) -or [string]::IsNullOrWhiteSpace($isolatedReposRoot) -or [string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            throw 'Isolation resolver returned incomplete host release paths.'
+          }
+          @(
+            "LVIE_ISOLATED_JOB_ROOT_RELEASE=$isolatedJobRoot",
+            "LVIE_ISOLATED_WORKSPACE_ROOT_RELEASE=$isolatedWorkspaceRoot",
+            "LVIE_ISOLATED_REPOS_ROOT_RELEASE=$isolatedReposRoot"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           $pwshCmd = Get-Command 'pwsh' -ErrorAction SilentlyContinue
           if ($null -eq $pwshCmd -or [string]::IsNullOrWhiteSpace($pwshCmd.Source)) {
@@ -200,6 +227,11 @@ jobs:
             throw "Host release contract requires LabVIEW 2020 only. resolved_year=$requiredLabviewYear"
           }
 
+          & $convertManifestScript -ManifestPath $payloadManifestPath -WorkspaceRoot $isolatedWorkspaceRoot -OutputPath $payloadManifestPath | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to rewrite host release payload manifest for isolated workspace root '$isolatedWorkspaceRoot'."
+          }
+
           $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
           $nsisRoot = '${{ vars.NSIS_ROOT }}'
           if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
@@ -207,7 +239,7 @@ jobs:
           & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
-            -WorkspaceRootDefault 'C:\workspace\gate-dev-release' `
+            -WorkspaceRootDefault $isolatedWorkspaceRoot `
             -RequiredLabviewYear $requiredLabviewYear `
             -NsisRoot $nsisRoot `
             -Deterministic:$true
@@ -229,11 +261,14 @@ jobs:
             throw "Installer missing for host release gate: $installerPath"
           }
 
-          $workspaceRoot = 'C:\workspace\gate-dev-release'
-          $workspaceArtifactsRoot = Join-Path $workspaceRoot 'artifacts'
-          $installReportPath = Join-Path $workspaceArtifactsRoot 'workspace-install-latest.json'
-          $launchLogPath = Join-Path $workspaceArtifactsRoot 'workspace-installer-launch.log'
           $manifestPath = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.json'
+          $sourceManifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
+          foreach ($requiredScriptPath in @($prepareRepoScript)) {
+            if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
+              throw "Required isolation script is missing: $requiredScriptPath"
+            }
+          }
 
           foreach ($requiredRoot in @(
             'C:\Program Files\National Instruments\LabVIEW 2020',
@@ -249,8 +284,28 @@ jobs:
           if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
             throw "Workspace governance manifest is missing for host release gate: $manifestPath"
           }
+          if (-not (Test-Path -LiteralPath $sourceManifestPath -PathType Leaf)) {
+            throw "Source workspace governance manifest is missing: $sourceManifestPath"
+          }
 
+          $workspaceRoot = [string]$env:LVIE_ISOLATED_WORKSPACE_ROOT_RELEASE
+          $reposRoot = [string]$env:LVIE_ISOLATED_REPOS_ROOT_RELEASE
+          $jobRoot = [string]$env:LVIE_ISOLATED_JOB_ROOT_RELEASE
+          if ([string]::IsNullOrWhiteSpace($workspaceRoot) -or [string]::IsNullOrWhiteSpace($reposRoot) -or [string]::IsNullOrWhiteSpace($jobRoot)) {
+            throw 'Host release isolated workspace environment is incomplete. Ensure payload build step exported LVIE_ISOLATED_* variables.'
+          }
+
+          $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $sourceStatusPreRoot = Join-Path $artifactRoot 'source-status-pre'
+          $sourceStatusPostRoot = Join-Path $artifactRoot 'source-status-post'
+          $provisioningRoot = Join-Path $artifactRoot 'repo-provisioning'
+          foreach ($path in @($sourceStatusPreRoot, $sourceStatusPostRoot, $provisioningRoot)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+              New-Item -Path $path -ItemType Directory -Force | Out-Null
+            }
+          }
+
           $safeRepoPaths = @(
             @($manifest.managed_repos |
               ForEach-Object { [string]$_.path } |
@@ -269,55 +324,66 @@ jobs:
             $repoOriginUrl = [string]$repo.required_remotes.origin
             $repoDefaultBranch = [string]$repo.default_branch
             $repoPinnedSha = ([string]$repo.pinned_sha).ToLowerInvariant()
+            $sourceRepoPath = ''
+            $sourceEntry = @($sourceManifest.managed_repos | Where-Object { [string]$_.repo_name -eq $repoName }) | Select-Object -First 1
+            if ($null -ne $sourceEntry) {
+              $sourceRepoPath = [string]$sourceEntry.path
+            }
+            $sourceStatusPrePath = Join-Path $sourceStatusPreRoot ("{0}.status.txt" -f $repoName)
+            $sourceStatusPostPath = Join-Path $sourceStatusPostRoot ("{0}.status.txt" -f $repoName)
+            $provisionReportPath = Join-Path $provisioningRoot ("{0}.provision.json" -f $repoName)
 
             if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
               continue
             }
 
-            if (-not (Test-Path -LiteralPath $repoPath -PathType Container)) {
-              if ([string]::IsNullOrWhiteSpace($repoOriginUrl)) {
-                throw "Managed repository '$repoName' is missing required_remotes.origin for clone bootstrap."
-              }
-              $repoParent = Split-Path -Parent $repoPath
-              if (-not (Test-Path -LiteralPath $repoParent -PathType Container)) {
-                New-Item -Path $repoParent -ItemType Directory -Force | Out-Null
-              }
-              & git clone --quiet $repoOriginUrl $repoPath
+            if (-not [string]::IsNullOrWhiteSpace($sourceRepoPath) -and (Test-Path -LiteralPath $sourceRepoPath -PathType Container) -and (Test-Path -LiteralPath (Join-Path $sourceRepoPath '.git'))) {
+              & git -C $sourceRepoPath status --porcelain | Set-Content -LiteralPath $sourceStatusPrePath -Encoding utf8
               if ($LASTEXITCODE -ne 0) {
-                throw "Failed to clone managed repository '$repoName' ($repoPath)."
+                throw "Failed to capture pre-provision source status for '$repoName' from '$sourceRepoPath'."
               }
+            } else {
+              Set-Content -LiteralPath $sourceStatusPrePath -Value 'source_repo_unavailable' -Encoding utf8
+            }
+
+            if ([string]::IsNullOrWhiteSpace($repoOriginUrl)) {
+              throw "Managed repository '$repoName' is missing required_remotes.origin for isolated bootstrap."
+            }
+
+            $provisionResult = & $prepareRepoScript `
+              -RepoName $repoName `
+              -RepoOriginUrl $repoOriginUrl `
+              -PinnedSha $repoPinnedSha `
+              -DefaultBranch $repoDefaultBranch `
+              -SourceRepoPath $sourceRepoPath `
+              -TargetRepoPath $repoPath `
+              -OutputPath $provisionReportPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to provision managed repository '$repoName' at '$repoPath'."
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($sourceRepoPath) -and (Test-Path -LiteralPath $sourceRepoPath -PathType Container) -and (Test-Path -LiteralPath (Join-Path $sourceRepoPath '.git'))) {
+              & git -C $sourceRepoPath status --porcelain | Set-Content -LiteralPath $sourceStatusPostPath -Encoding utf8
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to capture post-provision source status for '$repoName' from '$sourceRepoPath'."
+              }
+            } else {
+              Set-Content -LiteralPath $sourceStatusPostPath -Value 'source_repo_unavailable' -Encoding utf8
             }
 
             if (-not (Test-Path -LiteralPath (Join-Path $repoPath '.git') -PathType Container)) {
-              throw "Managed repository path is not a git repository: $repoPath"
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($repoDefaultBranch)) {
-              & git -C $repoPath fetch --no-tags --quiet origin $repoDefaultBranch
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to fetch origin/$repoDefaultBranch for managed repository '$repoName'."
-              }
-            }
-            & git -C $repoPath fetch --no-tags --quiet origin $repoPinnedSha
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to fetch pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
-            }
-
-            & git -C $repoPath checkout --quiet --detach $repoPinnedSha
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to checkout pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
+              throw "Provisioned isolated repository is not a git repository: $repoPath"
             }
           }
 
-          if (Test-Path -LiteralPath $workspaceRoot -PathType Container) {
-            Remove-Item -LiteralPath $workspaceRoot -Recurse -Force
+          if (-not (Test-Path -LiteralPath $workspaceRoot -PathType Container)) {
+            New-Item -Path $workspaceRoot -ItemType Directory -Force | Out-Null
           }
-          New-Item -Path $workspaceRoot -ItemType Directory -Force | Out-Null
 
           $env:VIPM_COMMUNITY_EDITION = 'true'
           $env:LVIE_OFFLINE_GIT_MODE = 'true'
           $env:LVIE_INSTALLER_EXECUTION_PROFILE = 'host-release'
-          $env:LVIE_WORKTREE_ROOT = 'C:\dev'
+          $env:LVIE_WORKTREE_ROOT = $reposRoot
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
           $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:SELECTED_PPL_BITNESS
@@ -373,6 +439,9 @@ jobs:
             vip_output = $vipPath
             report_path = $installReportPath
             execution_profile = [string]$installReport.execution_profile
+            isolated_job_root = $jobRoot
+            isolated_workspace_root = $workspaceRoot
+            isolated_repos_root = $reposRoot
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-release-gate-report.json') -Encoding utf8
 
@@ -392,6 +461,24 @@ jobs:
           name: windows-labview-image-gate-release-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/windows-image-gate/release
           if-no-files-found: error
+
+      - name: Cleanup host release isolated workspace root
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cleanupScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Cleanup-IsolatedBuildWorkspace.ps1'
+          if (-not (Test-Path -LiteralPath $cleanupScript -PathType Leaf)) {
+            throw "Cleanup script is missing: $cleanupScript"
+          }
+
+          $isolatedJobRoot = [string]$env:LVIE_ISOLATED_JOB_ROOT_RELEASE
+          if ([string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            Write-Warning 'LVIE_ISOLATED_JOB_ROOT_RELEASE is empty; skipping cleanup.'
+            exit 0
+          }
+
+          & $cleanupScript -Path $isolatedJobRoot -BestEffort | Out-Null
 
   windows-container-parity-gate:
     name: Windows Container Parity (${{ needs.resolve-parity-context.outputs.lvcontainer_raw }} | b${{ needs.resolve-parity-context.outputs.selected_ppl_bitness }} | ${{ needs.resolve-parity-context.outputs.build_spec_marker }})
@@ -450,7 +537,7 @@ jobs:
           & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
-            -WorkspaceRootDefault 'C:\workspace\gate-dev-parity' `
+            -WorkspaceRootDefault 'C:\dev' `
             -RequiredLabviewYear $requiredLabviewYear `
             -NsisRoot $nsisRoot `
             -Deterministic:$true
@@ -714,7 +801,7 @@ jobs:
           }
           Write-PhaseCheckpoint -Phase 'installer_done' -Status 'info' -Message "exit_code=$([int]$installerProcess.ExitCode)"
 
-          $workspaceRoot = 'C:\workspace\gate-dev-parity'
+          $workspaceRoot = 'C:\dev'
           $workspaceArtifactsRoot = Join-Path $workspaceRoot 'artifacts'
           $launchLogPath = Join-Path $workspaceArtifactsRoot 'workspace-installer-launch.log'
           $installReportPath = Join-Path $workspaceArtifactsRoot 'workspace-install-latest.json'
@@ -879,27 +966,71 @@ jobs:
             $labviewX86NipkgInstallCmdB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($labviewX86NipkgInstallCmd))
           }
 
-          $hostDevRoot = 'C:\dev'
+          $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
+          $resolveIsolationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Resolve-IsolatedBuildWorkspace.ps1'
+          $convertManifestScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Convert-ManifestToWorkspace.ps1'
+          foreach ($requiredScriptPath in @($prepareRepoScript, $resolveIsolationScript, $convertManifestScript)) {
+            if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
+              throw "Required isolation script is missing: $requiredScriptPath"
+            }
+          }
+
+          $manifestPathCanonical = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPathCanonical -PathType Leaf)) {
+            throw "Workspace governance manifest is missing for container parity host preflight: $manifestPathCanonical"
+          }
+          $sourceManifest = Get-Content -LiteralPath $manifestPathCanonical -Raw | ConvertFrom-Json -ErrorAction Stop
+          $isolationReportPath = Join-Path $artifactRoot 'isolated-workspace-resolution.json'
+          $isolation = & $resolveIsolationScript `
+            -PolicyManifestPath $manifestPathCanonical `
+            -WorkspaceKind 'windows-container-parity-host-preflight' `
+            -OutputPath $isolationReportPath
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to resolve isolated workspace root for container parity host preflight.'
+          }
+
+          $hostDevRoot = [string]$isolation.workspace_root
+          $hostReposRoot = [string]$isolation.repos_root
+          $isolatedJobRoot = [string]$isolation.job_root
+          if ([string]::IsNullOrWhiteSpace($hostDevRoot) -or [string]::IsNullOrWhiteSpace($hostReposRoot) -or [string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            throw 'Isolation resolver returned incomplete host parity workspace paths.'
+          }
+          "LVIE_ISOLATED_JOB_ROOT_PARITY=$isolatedJobRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
           $hostLabview2020x64Root = 'C:\Program Files\National Instruments\LabVIEW 2020'
           $hostLabview2020x86Root = 'C:\Program Files (x86)\National Instruments\LabVIEW 2020'
           $hostPwshRoot = 'C:\Program Files\PowerShell\7'
           $hostGitRoot = 'C:\Program Files\Git'
           $hostGhRoot = 'C:\Program Files\GitHub CLI'
           $hostGCliRoot = 'C:\Program Files\G-CLI'
-          foreach ($hostToolRoot in @($hostDevRoot, $hostLabview2020x64Root, $hostLabview2020x86Root, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
+          foreach ($hostToolRoot in @($hostLabview2020x64Root, $hostLabview2020x86Root, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
             if (-not (Test-Path -LiteralPath $hostToolRoot -PathType Container)) {
               throw "Required host tool root is missing for container bind mount: $hostToolRoot"
             }
+          }
+          if (-not (Test-Path -LiteralPath $hostDevRoot -PathType Container)) {
+            New-Item -Path $hostDevRoot -ItemType Directory -Force | Out-Null
           }
           $hasHostPwshRoot = Test-Path -LiteralPath $hostPwshRoot -PathType Container
           if (-not $hasHostPwshRoot) {
             Write-Warning "Host PowerShell 7 root is not present at '$hostPwshRoot'. Continuing with Windows PowerShell-first container surface."
           }
-          $manifestPath = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.json'
-          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-            throw "Workspace governance manifest is missing for container parity host preflight: $manifestPath"
+
+          $hostPreflightManifestPath = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.host-preflight.json'
+          & $convertManifestScript -ManifestPath $manifestPathCanonical -WorkspaceRoot $hostDevRoot -OutputPath $hostPreflightManifestPath | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to rewrite container parity host preflight manifest for isolated root '$hostDevRoot'."
           }
-          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $manifest = Get-Content -LiteralPath $hostPreflightManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $sourceStatusPreRoot = Join-Path $artifactRoot 'source-status-pre'
+          $sourceStatusPostRoot = Join-Path $artifactRoot 'source-status-post'
+          $provisioningRoot = Join-Path $artifactRoot 'repo-provisioning'
+          foreach ($path in @($sourceStatusPreRoot, $sourceStatusPostRoot, $provisioningRoot)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+              New-Item -Path $path -ItemType Directory -Force | Out-Null
+            }
+          }
+
           $safeRepoPaths = @(
             @($manifest.managed_repos |
               ForEach-Object { [string]$_.path } |
@@ -918,43 +1049,55 @@ jobs:
             $repoOriginUrl = [string]$repo.required_remotes.origin
             $repoDefaultBranch = [string]$repo.default_branch
             $repoPinnedSha = ([string]$repo.pinned_sha).ToLowerInvariant()
+            $sourceRepoPath = ''
+            $sourceEntry = @($sourceManifest.managed_repos | Where-Object { [string]$_.repo_name -eq $repoName }) | Select-Object -First 1
+            if ($null -ne $sourceEntry) {
+              $sourceRepoPath = [string]$sourceEntry.path
+            }
+            $sourceStatusPrePath = Join-Path $sourceStatusPreRoot ("{0}.status.txt" -f $repoName)
+            $sourceStatusPostPath = Join-Path $sourceStatusPostRoot ("{0}.status.txt" -f $repoName)
+            $provisionReportPath = Join-Path $provisioningRoot ("{0}.provision.json" -f $repoName)
 
             if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($repoPinnedSha)) {
               continue
             }
 
-            if (-not (Test-Path -LiteralPath $repoPath -PathType Container)) {
-              if ([string]::IsNullOrWhiteSpace($repoOriginUrl)) {
-                throw "Managed repository '$repoName' is missing required_remotes.origin for clone bootstrap."
-              }
-              $repoParent = Split-Path -Parent $repoPath
-              if (-not (Test-Path -LiteralPath $repoParent -PathType Container)) {
-                New-Item -Path $repoParent -ItemType Directory -Force | Out-Null
-              }
-              & git clone --quiet $repoOriginUrl $repoPath
+            if (-not [string]::IsNullOrWhiteSpace($sourceRepoPath) -and (Test-Path -LiteralPath $sourceRepoPath -PathType Container) -and (Test-Path -LiteralPath (Join-Path $sourceRepoPath '.git'))) {
+              & git -C $sourceRepoPath status --porcelain | Set-Content -LiteralPath $sourceStatusPrePath -Encoding utf8
               if ($LASTEXITCODE -ne 0) {
-                throw "Failed to clone managed repository '$repoName' ($repoPath)."
+                throw "Failed to capture pre-provision source status for '$repoName' from '$sourceRepoPath'."
               }
+            } else {
+              Set-Content -LiteralPath $sourceStatusPrePath -Value 'source_repo_unavailable' -Encoding utf8
+            }
+
+            if ([string]::IsNullOrWhiteSpace($repoOriginUrl)) {
+              throw "Managed repository '$repoName' is missing required_remotes.origin for isolated bootstrap."
+            }
+
+            & $prepareRepoScript `
+              -RepoName $repoName `
+              -RepoOriginUrl $repoOriginUrl `
+              -PinnedSha $repoPinnedSha `
+              -DefaultBranch $repoDefaultBranch `
+              -SourceRepoPath $sourceRepoPath `
+              -TargetRepoPath $repoPath `
+              -OutputPath $provisionReportPath | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to provision managed repository '$repoName' at '$repoPath'."
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($sourceRepoPath) -and (Test-Path -LiteralPath $sourceRepoPath -PathType Container) -and (Test-Path -LiteralPath (Join-Path $sourceRepoPath '.git'))) {
+              & git -C $sourceRepoPath status --porcelain | Set-Content -LiteralPath $sourceStatusPostPath -Encoding utf8
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to capture post-provision source status for '$repoName' from '$sourceRepoPath'."
+              }
+            } else {
+              Set-Content -LiteralPath $sourceStatusPostPath -Value 'source_repo_unavailable' -Encoding utf8
             }
 
             if (-not (Test-Path -LiteralPath (Join-Path $repoPath '.git') -PathType Container)) {
-              throw "Managed repository path is not a git repository: $repoPath"
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($repoDefaultBranch)) {
-              & git -C $repoPath fetch --no-tags --quiet origin $repoDefaultBranch
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to fetch origin/$repoDefaultBranch for managed repository '$repoName'."
-              }
-            }
-            & git -C $repoPath fetch --no-tags --quiet origin $repoPinnedSha
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to fetch pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
-            }
-
-            & git -C $repoPath checkout --quiet --detach $repoPinnedSha
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to checkout pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
+              throw "Provisioned isolated repository is not a git repository: $repoPath"
             }
           }
 
@@ -1207,6 +1350,24 @@ jobs:
             ${{ github.workspace }}/artifacts/windows-image-gate/parity
             !${{ github.workspace }}/artifacts/windows-image-gate/parity/host-mounts/**
           if-no-files-found: error
+
+      - name: Cleanup container parity isolated workspace root
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cleanupScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Cleanup-IsolatedBuildWorkspace.ps1'
+          if (-not (Test-Path -LiteralPath $cleanupScript -PathType Leaf)) {
+            throw "Cleanup script is missing: $cleanupScript"
+          }
+
+          $isolatedJobRoot = [string]$env:LVIE_ISOLATED_JOB_ROOT_PARITY
+          if ([string]::IsNullOrWhiteSpace($isolatedJobRoot)) {
+            Write-Warning 'LVIE_ISOLATED_JOB_ROOT_PARITY is empty; skipping cleanup.'
+            exit 0
+          }
+
+          & $cleanupScript -Path $isolatedJobRoot -BestEffort | Out-Null
 
   gate-summary:
     name: Windows Gate Summary

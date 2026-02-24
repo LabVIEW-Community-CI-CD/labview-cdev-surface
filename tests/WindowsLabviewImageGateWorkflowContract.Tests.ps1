@@ -64,6 +64,14 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '& \$pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "\$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller\.ps1"'
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''host-release'''
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''container-parity'''
+        $script:coreWorkflowContent | Should -Match 'Resolve-IsolatedBuildWorkspace\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Prepare-IsolatedRepoAtPinnedSha\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Convert-ManifestToWorkspace\.ps1'
+        $script:coreWorkflowContent | Should -Match 'Cleanup-IsolatedBuildWorkspace\.ps1'
+        $script:coreWorkflowContent | Should -Match 'LVIE_ISOLATED_JOB_ROOT_RELEASE'
+        $script:coreWorkflowContent | Should -Match 'LVIE_ISOLATED_JOB_ROOT_PARITY'
+        $script:coreWorkflowContent | Should -Match '-WorkspaceRootDefault \$isolatedWorkspaceRoot'
+        $script:coreWorkflowContent | Should -Match 'LVIE_WORKTREE_ROOT = \$reposRoot'
         $script:coreWorkflowContent | Should -Match 'LVIE_WORKTREE_ROOT = ''C:\\dev'''
         $script:coreWorkflowContent | Should -Match 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = \[string\]\$env:RELEASE_REQUIRED_YEAR'
         $script:coreWorkflowContent | Should -Match 'RELEASE_REQUIRED_YEAR:\s*\$\{\{\s*needs\.resolve-parity-context\.outputs\.release_required_year\s*\}\}'
@@ -78,7 +86,10 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'PARITY_BUILD_SPEC_MARKER'
         $script:coreWorkflowContent | Should -Match 'git config --global --add safe\.directory'
         $script:coreWorkflowContent | Should -Match 'Failed to configure git safe\.directory entry'
-        $script:coreWorkflowContent | Should -Match 'git -C \$repoPath fetch --no-tags --quiet origin \$repoPinnedSha'
+        $script:coreWorkflowContent | Should -Match 'source-status-pre'
+        $script:coreWorkflowContent | Should -Match 'source-status-post'
+        $script:coreWorkflowContent | Should -Match 'repo-provisioning'
+        $script:coreWorkflowContent | Should -Match 'Prepare-IsolatedRepoAtPinnedSha\.ps1'
     }
 
     It 'keeps valid feed-add command ordering and container fallback diagnostics contract' {
