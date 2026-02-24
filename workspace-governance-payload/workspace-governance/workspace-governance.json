@@ -353,7 +353,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "e7688e8e1c7613be839ad365c1dc9e4426d5a5e1"
+      "pinned_sha": "f835eb2fe7d94b7394ad98ab2000f71121448bfa"
     },
     {
       "path": "C:\\dev\\labview-cdev-surface-upstream",
@@ -386,7 +386,7 @@
       },
       "forbid_force_push": true,
       "forbid_deletion": true,
-      "pinned_sha": "44c5ea0b36ae13d8388e66cffde4d5f54b648f09"
+      "pinned_sha": "f835eb2fe7d94b7394ad98ab2000f71121448bfa"
     }
   ]
 }
