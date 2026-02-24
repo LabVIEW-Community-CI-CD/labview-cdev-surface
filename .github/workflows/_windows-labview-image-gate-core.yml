@@ -78,7 +78,7 @@ jobs:
           & pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
-            -WorkspaceRootDefault 'C:\dev' `
+            -WorkspaceRootDefault 'C:\workspace\gate-dev' `
             -RequiredLabviewYear $requiredLabviewYear `
             -NsisRoot $nsisRoot `
             -Deterministic:$true
@@ -201,11 +201,15 @@ jobs:
             -ArgumentList '/S' `
             -Wait `
             -PassThru
+          $launchLogPath = "C:\workspace\gate-dev\artifacts\workspace-installer-launch.log"
+          if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
+            Copy-Item -LiteralPath $launchLogPath -Destination "C:\workspace\artifacts\windows-image-gate\workspace-installer-launch.log" -Force
+          }
           if ([int]$installerProcess.ExitCode -ne 0) {
             throw "Installer failed with exit code $([int]$installerProcess.ExitCode)"
           }
 
-          $installReportPath = "C:\dev\artifacts\workspace-install-latest.json"
+          $installReportPath = "C:\workspace\gate-dev\artifacts\workspace-install-latest.json"
           if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
             throw "Installer report missing: $installReportPath"
           }
