@@ -78,6 +78,7 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'PARITY_BUILD_SPEC_MARKER'
         $script:coreWorkflowContent | Should -Match 'git config --global --add safe\.directory'
         $script:coreWorkflowContent | Should -Match 'Failed to configure git safe\.directory entry'
+        $script:coreWorkflowContent | Should -Match 'git -C \$repoPath fetch --no-tags --quiet origin \$repoPinnedSha'
     }
 
     It 'keeps valid feed-add command ordering and container fallback diagnostics contract' {
