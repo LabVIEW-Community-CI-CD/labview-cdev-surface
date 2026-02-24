@@ -547,8 +547,11 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        & $RunnerCliPath @commandArgs
+        $runnerCliPplOutput = & $RunnerCliPath @commandArgs 2>&1
         $result.exit_code = $LASTEXITCODE
+        if ($null -ne $runnerCliPplOutput) {
+            $runnerCliPplOutput | ForEach-Object { Write-Host ([string]$_) }
+        }
         if ($result.exit_code -ne 0) {
             throw "runner-cli ppl build failed with exit code $($result.exit_code)."
         }
@@ -695,8 +698,11 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vipc_assert = @($vipcAssertArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vipc assert.'
-        & $RunnerCliPath @vipcAssertArgs
+        $vipcAssertOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
         $vipcAssertExit = $LASTEXITCODE
+        if ($null -ne $vipcAssertOutput) {
+            $vipcAssertOutput | ForEach-Object { Write-Host ([string]$_) }
+        }
         if ($vipcAssertExit -ne 0) {
             $mismatchAssessment = Get-VipcMismatchAssessment `
                 -VipcAuditPath $vipcAuditPath `
@@ -723,8 +729,12 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after non-blocking remediation attempt.'
-                & $RunnerCliPath @vipcAssertArgs
-                if ($LASTEXITCODE -ne 0) {
+                $vipcAssertPostRemediationOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
+                $vipcAssertPostRemediationExit = $LASTEXITCODE
+                if ($null -ne $vipcAssertPostRemediationOutput) {
+                    $vipcAssertPostRemediationOutput | ForEach-Object { Write-Host ([string]$_) }
+                }
+                if ($vipcAssertPostRemediationExit -ne 0) {
                     $postApplyAssessment = Get-VipcMismatchAssessment `
                         -VipcAuditPath $vipcAuditPath `
                         -NonBlockingRoots $nonBlockingVipcMismatchRoots
@@ -747,9 +757,13 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-                & $RunnerCliPath @vipcAssertArgs
-                if ($LASTEXITCODE -ne 0) {
-                    throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
+                $vipcAssertPostApplyOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
+                $vipcAssertPostApplyExit = $LASTEXITCODE
+                if ($null -ne $vipcAssertPostApplyOutput) {
+                    $vipcAssertPostApplyOutput | ForEach-Object { Write-Host ([string]$_) }
+                }
+                if ($vipcAssertPostApplyExit -ne 0) {
+                    throw "runner-cli vipc assert failed after apply with exit code $vipcAssertPostApplyExit."
                 }
             }
         }
