@@ -224,15 +224,28 @@ jobs:
           if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
             Copy-Item -LiteralPath $launchLogPath -Destination "C:\workspace\artifacts\windows-image-gate\workspace-installer-launch.log" -Force
           }
+          $installReportPath = "C:\workspace\gate-dev\artifacts\workspace-install-latest.json"
+          $installReportArtifactPath = "C:\workspace\artifacts\windows-image-gate\workspace-install-latest.json"
+          $installReport = $null
+          if (Test-Path -LiteralPath $installReportPath -PathType Leaf) {
+            Copy-Item -LiteralPath $installReportPath -Destination $installReportArtifactPath -Force
+            try {
+              $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+              Write-Host "installer_report_status=$([string]$installReport.status)"
+            } catch {
+              Write-Warning "Failed to parse installer report for diagnostic output: $($_.Exception.Message)"
+            }
+          }
           if ([int]$installerProcess.ExitCode -ne 0) {
             throw "Installer failed with exit code $([int]$installerProcess.ExitCode)"
           }
 
-          $installReportPath = "C:\workspace\gate-dev\artifacts\workspace-install-latest.json"
           if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
             throw "Installer report missing: $installReportPath"
           }
-          $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ($null -eq $installReport) {
+            $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          }
           if ([string]$installReport.status -ne "succeeded") {
             throw "Installer report status is not succeeded: $([string]$installReport.status)"
           }
