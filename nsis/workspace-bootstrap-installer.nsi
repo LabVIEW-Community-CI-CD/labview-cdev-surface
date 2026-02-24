@@ -53,8 +53,17 @@ Section "Install"
   CreateDirectory "${WORKSPACE_ROOT}\artifacts"
 
   StrCpy $1 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
-  IfFileExists "$1" +2 0
-    StrCpy $1 "powershell"
+  IfFileExists "$1" powershell_resolved 0
+  StrCpy $1 "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$1" powershell_resolved 0
+  StrCpy $1 "$WINDIR\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$1" powershell_resolved 0
+  FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
+  FileWrite $2 "powershell_resolution_error=windows_powershell_not_found$\r$\n"
+  FileClose $2
+  SetErrorLevel 195
+  Abort
+  powershell_resolved:
 
   FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" w
   FileWrite $2 "workspace_root=${WORKSPACE_ROOT}$\r$\n"

@@ -99,6 +99,7 @@ Describe 'Workspace surface contract' {
         $script:payloadManifest = Get-Content -LiteralPath $script:payloadManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
         $script:agentsContent = Get-Content -LiteralPath $script:agentsPath -Raw
         $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
+        $script:nsisInstallerContent = Get-Content -LiteralPath $script:nsisInstallerPath -Raw
         $script:ciWorkflowContent = Get-Content -LiteralPath $script:ciWorkflowPath -Raw
         $script:releaseWorkflowContent = Get-Content -LiteralPath $script:releaseWorkflowPath -Raw
         $script:releaseCoreWorkflowContent = Get-Content -LiteralPath $script:releaseCoreWorkflowPath -Raw
@@ -167,6 +168,12 @@ Describe 'Workspace surface contract' {
         $repoSlugs = @($script:manifest.managed_repos | ForEach-Object { [string]$_.required_gh_repo })
         $repoSlugs | Should -Contain 'svelderrainruiz/labview-icon-editor-codex-skills'
         $repoSlugs | Should -Contain 'LabVIEW-Community-CI-CD/labview-icon-editor-codex-skills'
+    }
+
+    It 'pins NSIS launcher to Windows PowerShell executable paths' {
+        $script:nsisInstallerContent | Should -Match 'WindowsPowerShell\\v1\.0\\powershell\.exe'
+        $script:nsisInstallerContent | Should -Match 'powershell_resolution_error=windows_powershell_not_found'
+        $script:nsisInstallerContent | Should -Not -Match 'StrCpy \$1 "powershell"'
     }
 
     It 'keeps canonical payload manifest aligned with repository manifest' {
