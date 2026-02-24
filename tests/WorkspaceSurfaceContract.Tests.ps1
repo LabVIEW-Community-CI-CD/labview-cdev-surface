@@ -173,9 +173,12 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.container_parity_contract.windows_host_execution_mode | Should -Be 'native'
         $script:manifest.installer_contract.container_parity_contract.windows_host_native_labview_version | Should -Be '2025q3'
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.enabled | Should -BeTrue
-        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'vipm-api'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'labviewcli-smoke'
         ((@($script:manifest.installer_contract.container_parity_contract.linux_vip_build.required_ppl_bitness) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.artifact_role | Should -Be 'signal-only'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.labview_cli_operation | Should -Be 'MassCompile'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.linux_2025q3.labview_path | Should -Be '/usr/local/natinst/LabVIEW-2025-64/labview'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.linux_2025q3.enable_cicd_features_env | Should -Be 'EnableCICDFeaturesForLabVIEW=TRUE'
         $script:manifest.installer_contract.container_parity_contract.required_check_rollout.linux_parity_required | Should -BeFalse
         $script:manifest.installer_contract.container_parity_contract.required_check_rollout.promotion_condition | Should -Be 'single_green_run'
         foreach ($repo in @($script:manifest.managed_repos)) {

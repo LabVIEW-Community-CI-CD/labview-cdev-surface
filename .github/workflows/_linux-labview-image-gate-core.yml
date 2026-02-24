@@ -43,6 +43,10 @@ jobs:
       allowed_linux_tags: ${{ steps.resolve.outputs.allowed_linux_tags }}
       windows_host_execution_mode: ${{ steps.resolve.outputs.windows_host_execution_mode }}
       windows_host_native_labview_version: ${{ steps.resolve.outputs.windows_host_native_labview_version }}
+      linux_labview_path: ${{ steps.resolve.outputs.linux_labview_path }}
+      linux_cli_operation: ${{ steps.resolve.outputs.linux_cli_operation }}
+      linux_headless_required: ${{ steps.resolve.outputs.linux_headless_required }}
+      linux_enable_cicd_features: ${{ steps.resolve.outputs.linux_enable_cicd_features }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -190,6 +194,32 @@ jobs:
             throw "locked_linux_image tag '$lockedImageTag' does not match resolved_linux_tag '$resolvedLinuxTag'."
           }
 
+          $linuxTagVersionMatch = [regex]::Match($resolvedLinuxTag, '^([0-9]{4})q([0-9]+)-linux$')
+          if (-not $linuxTagVersionMatch.Success) {
+            throw "Resolved Linux tag '$resolvedLinuxTag' does not follow expected '<year>q<quarter>-linux' format."
+          }
+
+          $linuxYear = [int]$linuxTagVersionMatch.Groups[1].Value
+          $linuxQuarter = [int]$linuxTagVersionMatch.Groups[2].Value
+
+          $linuxCliOperation = [string]$containerParityContract.linux_vip_build.labview_cli_operation
+          if ([string]::IsNullOrWhiteSpace($linuxCliOperation)) {
+            $linuxCliOperation = 'MassCompile'
+          }
+
+          $linuxLabviewPath = "/usr/local/natinst/LabVIEW-$linuxYear-64/labview"
+          $linuxHeadlessRequired = 'false'
+          $linuxEnableCicdFeatures = 'false'
+          if ($linuxYear -eq 2025 -and $linuxQuarter -eq 3) {
+            $linuxLabviewPathFromContract = [string]$containerParityContract.linux_vip_build.linux_2025q3.labview_path
+            if (-not [string]::IsNullOrWhiteSpace($linuxLabviewPathFromContract)) {
+              $linuxLabviewPath = $linuxLabviewPathFromContract
+            }
+            $linuxEnableCicdFeatures = 'true'
+          } elseif ($linuxYear -ge 2026) {
+            $linuxHeadlessRequired = 'true'
+          }
+
           $traceRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/context'
           New-Item -Path $traceRoot -ItemType Directory -Force | Out-Null
           $tracePath = Join-Path $traceRoot 'linux-image-resolution.json'
@@ -206,6 +236,10 @@ jobs:
             allowed_linux_tags = $allowedLinuxTags
             windows_host_execution_mode = $windowsHostExecutionMode
             windows_host_native_labview_version = $windowsHostNativeLabviewVersion
+            linux_labview_path = $linuxLabviewPath
+            linux_cli_operation = $linuxCliOperation
+            linux_headless_required = $linuxHeadlessRequired
+            linux_enable_cicd_features = $linuxEnableCicdFeatures
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tracePath -Encoding utf8
 
@@ -215,6 +249,10 @@ jobs:
           "allowed_linux_tags=$([string]::Join(',', $allowedLinuxTags))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "windows_host_execution_mode=$windowsHostExecutionMode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "windows_host_native_labview_version=$windowsHostNativeLabviewVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "linux_labview_path=$linuxLabviewPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "linux_cli_operation=$linuxCliOperation" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "linux_headless_required=$linuxHeadlessRequired" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "linux_enable_cicd_features=$linuxEnableCicdFeatures" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           @(
             "## Linux parity context resolved"
@@ -226,6 +264,10 @@ jobs:
             "- Allowed tags: $([string]::Join(', ', $allowedLinuxTags))"
             "- Windows host execution mode: $windowsHostExecutionMode"
             "- Windows host native LabVIEW version: $windowsHostNativeLabviewVersion"
+            "- Linux LabVIEW path: $linuxLabviewPath"
+            "- Linux CLI operation: $linuxCliOperation"
+            "- Linux headless required: $linuxHeadlessRequired"
+            "- Linux EnableCICDFeaturesForLabVIEW required: $linuxEnableCicdFeatures"
             "- Strategy: $linuxTagStrategy"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
@@ -244,6 +286,10 @@ jobs:
         env:
           LINUX_IMAGE: ${{ needs.resolve-linux-context.outputs.linux_image }}
           RAW_LVCONTAINER_TAG: ${{ needs.resolve-linux-context.outputs.raw_lvcontainer_tag }}
+          LINUX_LABVIEW_PATH: ${{ needs.resolve-linux-context.outputs.linux_labview_path }}
+          LINUX_CLI_OPERATION: ${{ needs.resolve-linux-context.outputs.linux_cli_operation }}
+          LINUX_HEADLESS_REQUIRED: ${{ needs.resolve-linux-context.outputs.linux_headless_required }}
+          LINUX_ENABLE_CICD_FEATURES: ${{ needs.resolve-linux-context.outputs.linux_enable_cicd_features }}
         run: |
           $ErrorActionPreference = 'Stop'
           Write-Host "::notice::[heartbeat] linux-parity-ppl-64: start"
@@ -259,9 +305,31 @@ jobs:
           }
 
           $buildSpecPlaceholder = 'icon-editor-ppl-linux64'
-          $analyzerOutput = (& docker run --rm $linuxImage /bin/bash -lc "echo buildspec=$buildSpecPlaceholder && echo vi_analyzer=pass")
+          $containerCommand = @'
+          set -euo pipefail
+          if [ "${LINUX_ENABLE_CICD_FEATURES}" = "true" ]; then
+            export EnableCICDFeaturesForLabVIEW=TRUE
+          fi
+          if [ ! -x "${LINUX_LABVIEW_PATH}" ]; then
+            echo "Missing LabVIEW executable path: ${LINUX_LABVIEW_PATH}" >&2
+            exit 1
+          fi
+          LABVIEWCLI_ARGS=()
+          if [ "${LINUX_HEADLESS_REQUIRED}" = "true" ]; then
+            LABVIEWCLI_ARGS+=("-Headless")
+          fi
+          LabVIEWCLI -OperationName "${LINUX_CLI_OPERATION}" -LabVIEWPath "${LINUX_LABVIEW_PATH}" "${LABVIEWCLI_ARGS[@]}" -Help
+          echo "buildspec=icon-editor-ppl-linux64"
+          echo "vi_analyzer=pass"
+          '@
+          $analyzerOutput = (& docker run --rm `
+            -e "LINUX_ENABLE_CICD_FEATURES=$([string]$env:LINUX_ENABLE_CICD_FEATURES)" `
+            -e "LINUX_HEADLESS_REQUIRED=$([string]$env:LINUX_HEADLESS_REQUIRED)" `
+            -e "LINUX_LABVIEW_PATH=$([string]$env:LINUX_LABVIEW_PATH)" `
+            -e "LINUX_CLI_OPERATION=$([string]$env:LINUX_CLI_OPERATION)" `
+            $linuxImage /bin/bash -lc $containerCommand)
           if ($LASTEXITCODE -ne 0) {
-            throw "Linux parity build-spec execution failed for image '$linuxImage'."
+            throw "Linux parity LabVIEWCLI smoke execution failed for image '$linuxImage'."
           }
 
           $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/ppl-64'
@@ -274,6 +342,10 @@ jobs:
             raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
             linux_image = $linuxImage
             build_spec = $buildSpecPlaceholder
+            labview_cli_operation = [string]$env:LINUX_CLI_OPERATION
+            linux_labview_path = [string]$env:LINUX_LABVIEW_PATH
+            linux_headless_required = [string]$env:LINUX_HEADLESS_REQUIRED
+            linux_enable_cicd_features = [string]$env:LINUX_ENABLE_CICD_FEATURES
             vi_analyzer = 'pass'
             execution_log = @($analyzerOutput)
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -351,12 +423,16 @@ jobs:
           name: linux-parity-ppl-64-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/parity/linux/vip/inputs/linux-parity-ppl-64
 
-      - name: Run Linux VIP parity lane via VIPM API/CLI path
+      - name: Run Linux VIP parity lane via LabVIEWCLI smoke path
         shell: pwsh
         env:
           LINUX_IMAGE: ${{ needs.resolve-linux-context.outputs.linux_image }}
           RESOLVED_LINUX_TAG: ${{ needs.resolve-linux-context.outputs.resolved_linux_tag }}
           RAW_LVCONTAINER_TAG: ${{ needs.resolve-linux-context.outputs.raw_lvcontainer_tag }}
+          LINUX_LABVIEW_PATH: ${{ needs.resolve-linux-context.outputs.linux_labview_path }}
+          LINUX_CLI_OPERATION: ${{ needs.resolve-linux-context.outputs.linux_cli_operation }}
+          LINUX_HEADLESS_REQUIRED: ${{ needs.resolve-linux-context.outputs.linux_headless_required }}
+          LINUX_ENABLE_CICD_FEATURES: ${{ needs.resolve-linux-context.outputs.linux_enable_cicd_features }}
           WINDOWS_HOST_EXECUTION_MODE: ${{ needs.resolve-linux-context.outputs.windows_host_execution_mode }}
           WINDOWS_HOST_NATIVE_LABVIEW_VERSION: ${{ steps.resolve-prereq-artifacts.outputs.windows_prereq_native_labview_version }}
           WINDOWS_PREREQ_X86_ARTIFACT_NAME: ${{ steps.resolve-prereq-artifacts.outputs.windows_prereq_x86_artifact_name }}
@@ -416,21 +492,52 @@ jobs:
               throw 'Release notes are missing from Linux parity VIP prerequisites.'
             }
 
-            $vipmProbe = (& docker run --rm $linuxImage /bin/bash -lc "command -v vipm-cli || command -v vipm || command -v vipc || true").Trim()
-            if ([string]::IsNullOrWhiteSpace($vipmProbe)) {
-              throw 'vipm_api_unavailable: VIPM API/CLI endpoint is not available in the Linux parity image.'
+            $linuxLabviewPath = [string]$env:LINUX_LABVIEW_PATH
+            if ([string]::IsNullOrWhiteSpace($linuxLabviewPath)) {
+              throw 'Linux LabVIEW executable path is empty.'
             }
 
-            $vipExecutionLogPath = Join-Path $logRoot 'vip-execution.log'
-            $vipExecutionOutput = @(
-              "driver=vipm-api"
-              "vipm_command=$vipmProbe"
+            $labviewCliSmokeLogPath = Join-Path $logRoot 'labviewcli-smoke.log'
+            $labviewCliContainerCommand = @'
+            set -euo pipefail
+            if [ "${LINUX_ENABLE_CICD_FEATURES}" = "true" ]; then
+              export EnableCICDFeaturesForLabVIEW=TRUE
+            fi
+            if [ ! -x "${LINUX_LABVIEW_PATH}" ]; then
+              echo "Missing LabVIEW executable path: ${LINUX_LABVIEW_PATH}" >&2
+              exit 1
+            fi
+            LABVIEWCLI_ARGS=()
+            if [ "${LINUX_HEADLESS_REQUIRED}" = "true" ]; then
+              LABVIEWCLI_ARGS+=("-Headless")
+            fi
+            LabVIEWCLI -OperationName "${LINUX_CLI_OPERATION}" -LabVIEWPath "${LINUX_LABVIEW_PATH}" "${LABVIEWCLI_ARGS[@]}" -Help
+            '@
+            $labviewCliOutput = (& docker run --rm `
+              -e "LINUX_ENABLE_CICD_FEATURES=$([string]$env:LINUX_ENABLE_CICD_FEATURES)" `
+              -e "LINUX_HEADLESS_REQUIRED=$([string]$env:LINUX_HEADLESS_REQUIRED)" `
+              -e "LINUX_LABVIEW_PATH=$linuxLabviewPath" `
+              -e "LINUX_CLI_OPERATION=$([string]$env:LINUX_CLI_OPERATION)" `
+              $linuxImage /bin/bash -lc $labviewCliContainerCommand)
+            if ($LASTEXITCODE -ne 0) {
+              throw "labviewcli_smoke_failure: Linux LabVIEWCLI smoke execution failed for image '$linuxImage'."
+            }
+
+            $labviewCliLogLines = @(
+              "driver=labviewcli-smoke"
+              "labview_cli_operation=$([string]$env:LINUX_CLI_OPERATION)"
+              "labview_path=$linuxLabviewPath"
+              "headless_required=$([string]$env:LINUX_HEADLESS_REQUIRED)"
+              "enable_cicd_features=$([string]$env:LINUX_ENABLE_CICD_FEATURES)"
               "mode=signal-only"
               "raw_lvcontainer_tag=$([string]$env:RAW_LVCONTAINER_TAG)"
               "resolved_linux_tag=$([string]$env:RESOLVED_LINUX_TAG)"
               "linux_image=$linuxImage"
             )
-            $vipExecutionOutput | Set-Content -LiteralPath $vipExecutionLogPath -Encoding utf8
+            if ($null -ne $labviewCliOutput) {
+              $labviewCliLogLines += @($labviewCliOutput | ForEach-Object { [string]$_ })
+            }
+            $labviewCliLogLines | Set-Content -LiteralPath $labviewCliSmokeLogPath -Encoding utf8
 
             $vipPath = Join-Path $artifactRoot 'lv_icon_parity.vip'
             Set-Content -LiteralPath $vipPath -Value 'signal-only linux parity vip output' -Encoding ascii
@@ -443,7 +550,7 @@ jobs:
               windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
               raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
               resolved_linux_tag = [string]$env:RESOLVED_LINUX_TAG
-              driver = 'vipm-api'
+              driver = 'labviewcli-smoke'
               required_ppl_bitness = @('32', '64')
               ppl_prerequisites = $requiredPplPaths
               windows_prereq_artifacts = @{
@@ -452,7 +559,11 @@ jobs:
               }
               vipb_path = $vipbCandidate[0].FullName
               release_notes_path = $releaseNotesCandidate[0].FullName
-              vipm_endpoint = $vipmProbe
+              labview_cli_operation = [string]$env:LINUX_CLI_OPERATION
+              linux_labview_path = $linuxLabviewPath
+              linux_headless_required = [string]$env:LINUX_HEADLESS_REQUIRED
+              linux_enable_cicd_features = [string]$env:LINUX_ENABLE_CICD_FEATURES
+              labviewcli_smoke_log = $labviewCliSmokeLogPath
               artifact_role = 'signal-only'
               non_promotable = $true
               output_vip_path = $vipPath
@@ -462,8 +573,8 @@ jobs:
             } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding utf8
           } catch {
             $errorMessage = [string]$_.Exception.Message
-            if ($errorMessage -match '^vipm_api_unavailable:') {
-              $failureClassification = 'vipm_api_unavailable'
+            if ($errorMessage -match '^labviewcli_smoke_failure:') {
+              $failureClassification = 'linux_labviewcli_smoke_failure'
             } else {
               $failureClassification = 'linux_vip_parity_failure'
             }
@@ -477,7 +588,11 @@ jobs:
               windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
               raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
               resolved_linux_tag = [string]$env:RESOLVED_LINUX_TAG
-              driver = 'vipm-api'
+              driver = 'labviewcli-smoke'
+              labview_cli_operation = [string]$env:LINUX_CLI_OPERATION
+              linux_labview_path = [string]$env:LINUX_LABVIEW_PATH
+              linux_headless_required = [string]$env:LINUX_HEADLESS_REQUIRED
+              linux_enable_cicd_features = [string]$env:LINUX_ENABLE_CICD_FEATURES
               required_ppl_bitness = @('32', '64')
               windows_prereq_artifacts = @{
                 x86 = [string]$env:WINDOWS_PREREQ_X86_ARTIFACT_NAME

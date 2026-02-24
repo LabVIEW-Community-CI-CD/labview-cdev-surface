@@ -48,12 +48,17 @@
       "windows_host_native_labview_version": "2025q3",
       "linux_vip_build": {
         "enabled": true,
-        "driver": "vipm-api",
+        "driver": "labviewcli-smoke",
         "required_ppl_bitness": [
           "32",
           "64"
         ],
-        "artifact_role": "signal-only"
+        "artifact_role": "signal-only",
+        "labview_cli_operation": "MassCompile",
+        "linux_2025q3": {
+          "labview_path": "/usr/local/natinst/LabVIEW-2025-64/labview",
+          "enable_cicd_features_env": "EnableCICDFeaturesForLabVIEW=TRUE"
+        }
       },
       "required_check_rollout": {
         "linux_parity_required": false,

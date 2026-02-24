@@ -43,6 +43,10 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'locked_linux_image'
         $script:coreWorkflowContent | Should -Match 'windows_host_execution_mode'
         $script:coreWorkflowContent | Should -Match 'windows_host_native_labview_version'
+        $script:coreWorkflowContent | Should -Match 'linux_labview_path'
+        $script:coreWorkflowContent | Should -Match 'linux_cli_operation'
+        $script:coreWorkflowContent | Should -Match 'linux_headless_required'
+        $script:coreWorkflowContent | Should -Match 'linux_enable_cicd_features'
         $script:coreWorkflowContent | Should -Match 'sibling-windows-to-linux'
         $script:coreWorkflowContent | Should -Match '\.lvcontainer'
         $script:coreWorkflowContent | Should -Match '2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c'
@@ -63,8 +67,10 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'windows-host-prereq-x64'
         $script:coreWorkflowContent | Should -Match 'lv_icon_x86\.lvlibp'
         $script:coreWorkflowContent | Should -Match 'lv_icon_x64\.lvlibp'
-        $script:coreWorkflowContent | Should -Match 'vipm_api_unavailable'
-        $script:coreWorkflowContent | Should -Match "driver = 'vipm-api'"
+        $script:coreWorkflowContent | Should -Match 'EnableCICDFeaturesForLabVIEW=TRUE'
+        $script:coreWorkflowContent | Should -Match 'LabVIEWCLI -OperationName'
+        $script:coreWorkflowContent | Should -Match "driver = 'labviewcli-smoke'"
+        $script:coreWorkflowContent | Should -Not -Match 'command -v vipm'
         $script:coreWorkflowContent | Should -Match 'windows_prereq_artifacts'
         $script:coreWorkflowContent | Should -Match 'artifact_role = ''signal-only'''
         $script:coreWorkflowContent | Should -Match 'artifacts/parity/linux/vip/\*'
