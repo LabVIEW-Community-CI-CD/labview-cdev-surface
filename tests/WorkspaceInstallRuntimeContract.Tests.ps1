@@ -22,7 +22,10 @@ Describe 'Workspace install runtime contract' {
     }
 
     It 'fails fast on missing dependencies and enforces deterministic pinned_sha checks' {
-        $script:scriptContent | Should -Match 'foreach \(\$commandName in @\(''pwsh'', ''git'', ''gh'', ''g-cli''\)\)'
+        $script:scriptContent | Should -Match "Get-Command 'powershell'"
+        $script:scriptContent | Should -Match "Get-Command 'pwsh'"
+        $script:scriptContent | Should -Match "Required command 'powershell' \(or fallback 'pwsh'\)"
+        $script:scriptContent | Should -Match 'foreach \(\$commandName in @\(''git'', ''gh'', ''g-cli''\)\)'
         $script:scriptContent | Should -Match 'invalid pinned_sha'
         $script:scriptContent | Should -Match 'head_sha_mismatch'
         $script:scriptContent | Should -Match 'remote_mismatch_'

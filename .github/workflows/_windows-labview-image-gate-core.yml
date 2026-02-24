@@ -194,7 +194,6 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $env:Path = @(
-            'C:\host-tools\PowerShell7',
             'C:\host-tools\Git\cmd',
             'C:\host-tools\GitHubCLI',
             'C:\host-tools\G-CLI\bin',
@@ -205,7 +204,7 @@ jobs:
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
 
-          $requiredCommands = @('powershell', 'pwsh', 'git', 'gh')
+          $requiredCommands = @('powershell', 'git', 'gh')
           $missingCommands = @()
           foreach ($name in $requiredCommands) {
             if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
@@ -321,11 +320,10 @@ jobs:
             }
           }
 
-          $hostPwshRoot = 'C:\Program Files\PowerShell\7'
           $hostGitRoot = 'C:\Program Files\Git'
           $hostGhRoot = 'C:\Program Files\GitHub CLI'
           $hostGCliRoot = 'C:\Program Files\G-CLI'
-          foreach ($hostToolRoot in @($hostPwshRoot, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
+          foreach ($hostToolRoot in @($hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
             if (-not (Test-Path -LiteralPath $hostToolRoot -PathType Container)) {
               throw "Required host tool root is missing for container bind mount: $hostToolRoot"
             }
@@ -338,7 +336,6 @@ jobs:
             --env "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness" `
             --env "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmd" `
             --mount "type=bind,source=${env:GITHUB_WORKSPACE},target=C:\workspace" `
-            --mount "type=bind,source=$hostPwshRoot,target=C:\host-tools\PowerShell7,readonly" `
             --mount "type=bind,source=$hostGitRoot,target=C:\host-tools\Git,readonly" `
             --mount "type=bind,source=$hostGhRoot,target=C:\host-tools\GitHubCLI,readonly" `
             --mount "type=bind,source=$hostGCliRoot,target=C:\host-tools\G-CLI,readonly" `

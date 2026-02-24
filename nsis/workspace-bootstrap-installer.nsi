@@ -52,16 +52,9 @@ Section "Install"
   File /r "${PAYLOAD_DIR}\*"
   CreateDirectory "${WORKSPACE_ROOT}\artifacts"
 
-  StrCpy $1 ""
-  IfFileExists "$PROGRAMFILES64\PowerShell\7\pwsh.exe" 0 +2
-    StrCpy $1 "$PROGRAMFILES64\PowerShell\7\pwsh.exe"
-  ${If} $1 == ""
-    IfFileExists "$PROGRAMFILES\PowerShell\7\pwsh.exe" 0 +2
-      StrCpy $1 "$PROGRAMFILES\PowerShell\7\pwsh.exe"
-  ${EndIf}
-  ${If} $1 == ""
-    StrCpy $1 "pwsh"
-  ${EndIf}
+  StrCpy $1 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$1" +2 0
+    StrCpy $1 "powershell"
 
   FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" w
   FileWrite $2 "workspace_root=${WORKSPACE_ROOT}$\r$\n"

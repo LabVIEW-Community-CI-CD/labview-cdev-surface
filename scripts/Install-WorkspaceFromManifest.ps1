@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -52,6 +52,55 @@ function Write-InstallerFeedback {
     )
 
     Write-Host ("[workspace-installer] {0}" -f $Message)
+}
+
+function Get-PreferredPowerShellExecutable {
+    [CmdletBinding()]
+    param()
+
+    # Prefer Windows PowerShell on Windows containers; fall back to pwsh when needed.
+    $preferredCommands = @('powershell', 'pwsh')
+    foreach ($commandName in $preferredCommands) {
+        $cmd = Get-Command -Name $commandName -ErrorAction SilentlyContinue
+        if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace([string]$cmd.Source)) {
+            return [string]$cmd.Source
+        }
+    }
+
+    throw "Neither 'powershell' nor 'pwsh' was found on PATH."
+}
+
+function Invoke-PowerShellFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PowerShellExecutable,
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath,
+        [Parameter()]
+        [string[]]$ScriptArguments = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        throw "PowerShell script not found: $ScriptPath"
+    }
+
+    $invocationArgs = @(
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $ScriptPath
+    )
+    if ($null -ne $ScriptArguments -and $ScriptArguments.Count -gt 0) {
+        $invocationArgs += @($ScriptArguments)
+    }
+
+    & $PowerShellExecutable @invocationArgs
+    if ($null -eq $LASTEXITCODE) {
+        return 0
+    }
+    return [int]$LASTEXITCODE
 }
 
 function Add-PostActionSequenceEntry {
@@ -538,6 +587,8 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         [Parameter(Mandatory = $true)]
         [string]$RunnerCliPath,
         [Parameter(Mandatory = $true)]
+        [string]$PowerShellExecutable,
+        [Parameter(Mandatory = $true)]
         [string]$IconEditorRepoPath,
         [Parameter(Mandatory = $true)]
         [string]$PinnedSha,
@@ -560,6 +611,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         status = 'pending'
         message = ''
         runner_cli_path = $RunnerCliPath
+        powershell_executable = $PowerShellExecutable
         repo_path = $IconEditorRepoPath
         required_labview_year = $RequiredLabviewYear
         required_bitness = $RequiredBitness
@@ -582,6 +634,9 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
     try {
         if (-not (Test-Path -LiteralPath $RunnerCliPath -PathType Leaf)) {
             throw "runner-cli executable not found: $RunnerCliPath"
+        }
+        if ([string]::IsNullOrWhiteSpace($PowerShellExecutable)) {
+            throw 'PowerShell executable is required for VIP harness script execution.'
         }
         if (-not (Test-Path -LiteralPath $IconEditorRepoPath -PathType Container)) {
             throw "Icon editor repository path not found: $IconEditorRepoPath"
@@ -705,8 +760,6 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             throw "Invoke-VipBuild.ps1 was not found: $invokeVipBuildScriptPath"
         }
         $baseVipBuildArgs = @(
-            '-NoProfile',
-            '-File', $invokeVipBuildScriptPath,
             '-SupportedBitness', $RequiredBitness,
             '-RepoRoot', $IconEditorRepoPath,
             '-VIPBPath', $vipbPath,
@@ -729,11 +782,13 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         for ($vipBuildAttempt = 1; $vipBuildAttempt -le $maxVipBuildAttempts; $vipBuildAttempt++) {
             $attemptTimeoutSeconds = if ($vipBuildAttempt -eq 1) { '1200' } else { '1800' }
             $nativeVipBuildArgs = @($baseVipBuildArgs + @('-VipmTimeoutSeconds', $attemptTimeoutSeconds))
-            $result.command.vip_build = @('pwsh', @($nativeVipBuildArgs))
+            $result.command.vip_build = @($PowerShellExecutable, '-File', $invokeVipBuildScriptPath, @($nativeVipBuildArgs))
 
             Write-InstallerFeedback -Message ("Running native VIP build harness via Invoke-VipBuild.ps1 (ExecutionLabVIEWYear=2020 contract). attempt={0}/{1} vipm_timeout_seconds={2}" -f $vipBuildAttempt, $maxVipBuildAttempts, $attemptTimeoutSeconds)
-            & pwsh @nativeVipBuildArgs
-            $result.exit_code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+            $result.exit_code = Invoke-PowerShellFile `
+                -PowerShellExecutable $PowerShellExecutable `
+                -ScriptPath $invokeVipBuildScriptPath `
+                -ScriptArguments @($nativeVipBuildArgs)
 
             if ($result.exit_code -eq 0) {
                 $vipBuildSucceeded = $true
@@ -942,10 +997,34 @@ try {
     Ensure-Directory -Path (Split-Path -Parent $resolvedOutputPath)
 
     Write-InstallerFeedback -Message 'Checking required commands on PATH.'
-    foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli')) {
+    $powershellCmd = Get-Command 'powershell' -ErrorAction SilentlyContinue
+    $pwshCmd = Get-Command 'pwsh' -ErrorAction SilentlyContinue
+    $runtimePowerShellExecutable = ''
+    try {
+        $runtimePowerShellExecutable = Get-PreferredPowerShellExecutable
+    } catch {
+        $runtimePowerShellExecutable = ''
+    }
+
+    foreach ($commandName in @('powershell', 'pwsh')) {
+        $cmd = if ($commandName -eq 'powershell') { $powershellCmd } else { $pwshCmd }
+        $check = [ordered]@{
+            command = $commandName
+            required = if ($commandName -eq 'powershell') { $true } else { $false }
+            present = To-Bool ($null -ne $cmd)
+            path = if ($null -ne $cmd) { $cmd.Source } else { '' }
+        }
+        $dependencyChecks += [pscustomobject]$check
+    }
+    if ([string]::IsNullOrWhiteSpace($runtimePowerShellExecutable)) {
+        $errors += "Required command 'powershell' (or fallback 'pwsh') was not found on PATH."
+    }
+
+    foreach ($commandName in @('git', 'gh', 'g-cli')) {
         $cmd = Get-Command $commandName -ErrorAction SilentlyContinue
         $check = [ordered]@{
             command = $commandName
+            required = $true
             present = To-Bool ($null -ne $cmd)
             path = if ($null -ne $cmd) { $cmd.Source } else { '' }
         }
@@ -1561,6 +1640,7 @@ try {
                     Write-InstallerFeedback -Message 'Running runner-cli VI Package harness gate.'
                     $vipResult = Invoke-RunnerCliVipPackageHarnessCheck `
                         -RunnerCliPath $runnerCliExePath `
+                        -PowerShellExecutable $runtimePowerShellExecutable `
                         -IconEditorRepoPath $iconEditorRepoPath `
                         -PinnedSha $iconEditorPinnedSha `
                         -RequiredLabviewYear ([string]$requiredLabviewYear) `
@@ -1623,8 +1703,15 @@ try {
     if ((Test-Path -LiteralPath $assertScriptPath -PathType Leaf) -and (Test-Path -LiteralPath $workspaceManifestPath -PathType Leaf)) {
         Write-InstallerFeedback -Message 'Running workspace governance audit.'
         $governanceAudit.invoked = $true
-        & pwsh -NoProfile -File $assertScriptPath -WorkspaceRoot $resolvedWorkspaceRoot -ManifestPath $workspaceManifestPath -Mode Audit -OutputPath $auditOutputPath
-        $governanceAudit.exit_code = $LASTEXITCODE
+        $governanceAudit.exit_code = Invoke-PowerShellFile `
+            -PowerShellExecutable $runtimePowerShellExecutable `
+            -ScriptPath $assertScriptPath `
+            -ScriptArguments @(
+                '-WorkspaceRoot', $resolvedWorkspaceRoot,
+                '-ManifestPath', $workspaceManifestPath,
+                '-Mode', 'Audit',
+                '-OutputPath', $auditOutputPath
+            )
 
         if (Test-Path -LiteralPath $auditOutputPath -PathType Leaf) {
             $auditReport = Get-Content -LiteralPath $auditOutputPath -Raw | ConvertFrom-Json -ErrorAction Stop
