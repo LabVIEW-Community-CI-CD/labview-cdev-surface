@@ -862,10 +862,29 @@ jobs:
 
           $containerName = "lvie-gate-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $containerName = $containerName.ToLowerInvariant()
+          $dockerDnsRaw = '${{ vars.LABVIEW_WINDOWS_DOCKER_DNS }}'
+          if ([string]::IsNullOrWhiteSpace($dockerDnsRaw)) {
+            $dockerDnsRaw = '8.8.8.8'
+          }
+          $dockerDnsServers = @($dockerDnsRaw.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          if ($dockerDnsServers.Count -eq 0) {
+            $dockerDnsServers = @('8.8.8.8')
+          }
+          $dnsIpv4Pattern = '^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$'
+          foreach ($dnsServer in $dockerDnsServers) {
+            if ($dnsServer -notmatch $dnsIpv4Pattern) {
+              throw "Invalid LABVIEW_WINDOWS_DOCKER_DNS value '$dnsServer'. Expected comma-separated IPv4 addresses."
+            }
+          }
           $dockerArgs = @(
             'run',
             '--name', $containerName,
-            "--isolation=$dockerIsolation",
+            "--isolation=$dockerIsolation"
+          )
+          foreach ($dnsServer in $dockerDnsServers) {
+            $dockerArgs += @('--dns', $dnsServer)
+          }
+          $dockerArgs += @(
             '--env', 'VIPM_COMMUNITY_EDITION=true',
             '--env', 'LVIE_OFFLINE_GIT_MODE=true',
             '--env', "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$requiredYear",
@@ -917,6 +936,7 @@ jobs:
                 docker_exit_code = $dockerExitCode
                 docker_isolation = $dockerIsolation
                 docker_image = $labviewImage
+                docker_dns_servers = @($dockerDnsServers)
                 lvcontainer_raw = [string]$env:LVIE_PARITY_LVCONTAINER_RAW
                 lvcontainer_windows_tag = [string]$env:LVIE_PARITY_WINDOWS_TAG
                 selected_ppl_bitness = $singlePplBitness
