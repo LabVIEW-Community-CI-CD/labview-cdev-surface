@@ -67,7 +67,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostGhRoot,target=C:\\host-tools\\GitHubCLI,readonly"'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostGCliRoot,target=C:\\host-tools\\G-CLI,readonly"'
         $script:coreWorkflowContent | Should -Match 'Install-WorkspaceFromManifest\.ps1'
-        $script:coreWorkflowContent | Should -Match '-Deterministic \$true'
+        $script:coreWorkflowContent | Should -Match '-Deterministic 1'
+        $script:coreWorkflowContent | Should -Not -Match '-Deterministic \$true'
         $script:coreWorkflowContent | Should -Not -Match '-Deterministic:\$true'
         $script:coreWorkflowContent | Should -Match 'workspace-install-latest\.json'
         $script:coreWorkflowContent | Should -Match "ppl_capability_checks\.'32'\.status"
