@@ -181,6 +181,10 @@ Describe 'Workspace surface contract' {
     It 'keeps gate bootstrap scripts compatible with Windows PowerShell' {
         $script:buildInstallerScriptContent | Should -Not -Match '^#Requires -Version 7\.0'
         $script:bundleRunnerCliScriptContent | Should -Not -Match '^#Requires -Version 7\.0'
+        $script:buildInstallerScriptContent | Should -Match "Get-Command 'Get-FileHash'"
+        $script:buildInstallerScriptContent | Should -Match '\[System\.Security\.Cryptography\.SHA256\]::Create\(\)'
+        $script:bundleRunnerCliScriptContent | Should -Match "Get-Command 'Get-FileHash'"
+        $script:bundleRunnerCliScriptContent | Should -Match '\[System\.Security\.Cryptography\.SHA256\]::Create\(\)'
     }
 
     It 'keeps canonical payload manifest aligned with repository manifest' {
