@@ -37,8 +37,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Falling back to Hyper-V isolation'
         $script:coreWorkflowContent | Should -Match '--isolation=\$dockerIsolation'
         $script:coreWorkflowContent | Should -Match 'automatic engine switching is disabled for non-interactive CI'
-        $script:coreWorkflowContent | Should -Match "\$requiredCommands = @\('powershell', 'pwsh', 'git', 'gh', 'g-cli'\)"
-        $script:coreWorkflowContent | Should -Match 'Container image missing required commands'
+        $script:coreWorkflowContent | Should -Match "\$requiredCommands = @\('powershell', 'pwsh', 'git', 'gh'\)"
+        $script:coreWorkflowContent | Should -Match 'Container runtime missing required commands after host-tool mount'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostPwshRoot,target=C:\\host-tools\\PowerShell7,readonly"'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostGitRoot,target=C:\\host-tools\\Git,readonly"'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostGhRoot,target=C:\\host-tools\\GitHubCLI,readonly"'

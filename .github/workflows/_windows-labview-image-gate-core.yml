@@ -169,7 +169,7 @@ jobs:
             $env:Path
           ) -join ';'
 
-          $requiredCommands = @('powershell', 'pwsh', 'git', 'gh', 'g-cli')
+          $requiredCommands = @('powershell', 'pwsh', 'git', 'gh')
           $missingCommands = @()
           foreach ($name in $requiredCommands) {
             if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
@@ -177,7 +177,7 @@ jobs:
             }
           }
           if ($missingCommands.Count -gt 0) {
-            throw "Container image missing required commands: $($missingCommands -join ', ')"
+            throw "Container runtime missing required commands after host-tool mount: $($missingCommands -join ', ')"
           }
 
           $installerProcess = Start-Process `
