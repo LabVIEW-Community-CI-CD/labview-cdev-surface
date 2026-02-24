@@ -485,6 +485,8 @@ function Invoke-RunnerCliPplCapabilityCheck {
         [string]$PinnedSha,
         [Parameter(Mandatory = $true)]
         [string]$RequiredLabviewYear,
+        [Parameter()]
+        [string]$ExpectedExecutionLabviewYear = '',
         [Parameter(Mandatory = $true)]
         [ValidateSet('32', '64')]
         [string]$RequiredBitness
@@ -498,6 +500,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
         runner_cli_path = $RunnerCliPath
         repo_path = $IconEditorRepoPath
         required_labview_year = $RequiredLabviewYear
+        expected_execution_labview_year = ''
         required_bitness = $RequiredBitness
         output_ppl_path = Join-Path $IconEditorRepoPath 'resource\plugins\lv_icon.lvlibp'
         output_ppl_snapshot_path = Join-Path $statusRoot ("workspace-installer-ppl-{0}.lvlibp" -f $RequiredBitness)
@@ -520,6 +523,16 @@ function Invoke-RunnerCliPplCapabilityCheck {
             throw "Pinned SHA is invalid for capability check: $PinnedSha"
         }
 
+        $effectiveExecutionLabviewYear = if ([string]::IsNullOrWhiteSpace($ExpectedExecutionLabviewYear)) {
+            [string]$RequiredLabviewYear
+        } else {
+            [string]$ExpectedExecutionLabviewYear
+        }
+        if ($effectiveExecutionLabviewYear -notmatch '^\d{4}$') {
+            throw "Expected execution LabVIEW year '$effectiveExecutionLabviewYear' is invalid. Expected a 4-digit year."
+        }
+        $result.expected_execution_labview_year = $effectiveExecutionLabviewYear
+
         Ensure-Directory -Path $statusRoot
         $logsRoot = Join-Path -Path $IconEditorRepoPath -ChildPath 'builds\logs'
         $preExistingExecuteBuildSpecLogs = @()
@@ -530,9 +543,9 @@ function Invoke-RunnerCliPplCapabilityCheck {
             )
         }
 
-        $labviewRoot = Get-LabVIEWInstallRoot -VersionYear $RequiredLabviewYear -Bitness $RequiredBitness
+        $labviewRoot = Get-LabVIEWInstallRoot -VersionYear $effectiveExecutionLabviewYear -Bitness $RequiredBitness
         if ([string]::IsNullOrWhiteSpace($labviewRoot)) {
-            throw "LabVIEW $RequiredLabviewYear ($RequiredBitness-bit) is required for runner-cli PPL capability but was not found."
+            throw "LabVIEW $effectiveExecutionLabviewYear ($RequiredBitness-bit) is required for runner-cli PPL capability execution but was not found."
         }
         $result.labview_install_root = $labviewRoot
 
@@ -563,7 +576,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
 
         $logAlignment = Test-PplBuildLabVIEWVersionAlignment `
             -IconEditorRepoPath $IconEditorRepoPath `
-            -RequiredLabviewYear ([string]$RequiredLabviewYear) `
+            -RequiredLabviewYear ([string]$effectiveExecutionLabviewYear) `
             -PreExistingExecuteBuildSpecLogs @($preExistingExecuteBuildSpecLogs)
         $result.buildspec_log_path = [string]$logAlignment.buildspec_log_path
         $result.detected_labview_executable = [string]$logAlignment.detected_labview_executable
@@ -573,7 +586,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
         }
 
         $result.status = 'pass'
-        $result.message = "runner-cli PPL capability check passed for LabVIEW $RequiredLabviewYear x$RequiredBitness."
+        $result.message = "runner-cli PPL capability check passed (source LabVIEW $RequiredLabviewYear, execution LabVIEW $effectiveExecutionLabviewYear, x$RequiredBitness)."
     } catch {
         if ($null -eq $result.exit_code) {
             $result.exit_code = 1
@@ -933,6 +946,7 @@ $pplCapabilityChecks = [ordered]@{
         runner_cli_path = ''
         repo_path = ''
         required_labview_year = '2020'
+        expected_execution_labview_year = '2020'
         required_bitness = '32'
         output_ppl_path = ''
         output_ppl_snapshot_path = ''
@@ -949,6 +963,7 @@ $pplCapabilityChecks = [ordered]@{
         runner_cli_path = ''
         repo_path = ''
         required_labview_year = '2020'
+        expected_execution_labview_year = '2020'
         required_bitness = '64'
         output_ppl_path = ''
         output_ppl_snapshot_path = ''
@@ -1233,6 +1248,16 @@ try {
         $requiredLabviewYear = $requiredLabviewYearOverride
     }
 
+    $pplExpectedExecutionLabviewYear = [string]$env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR
+    if ([string]::IsNullOrWhiteSpace($pplExpectedExecutionLabviewYear)) {
+        $pplExpectedExecutionLabviewYear = $requiredLabviewYear
+    } else {
+        if ($pplExpectedExecutionLabviewYear -notmatch '^\d{4}$') {
+            throw "Invalid LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR override '$pplExpectedExecutionLabviewYear'. Expected a 4-digit year."
+        }
+        Write-InstallerFeedback -Message ("Overriding expected PPL execution LabVIEW year from environment: {0}" -f $pplExpectedExecutionLabviewYear)
+    }
+
     $singlePplBitnessOverride = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
     if (-not [string]::IsNullOrWhiteSpace($singlePplBitnessOverride)) {
         if ($singlePplBitnessOverride -notin @('32', '64')) {
@@ -1290,6 +1315,7 @@ try {
 
     foreach ($bitness in $requiredPplBitnesses) {
         $pplCapabilityChecks[$bitness].required_labview_year = $requiredLabviewYear
+        $pplCapabilityChecks[$bitness].expected_execution_labview_year = $pplExpectedExecutionLabviewYear
         $pplCapabilityChecks[$bitness].required_bitness = $bitness
     }
     $vipPackageBuildCheck.required_labview_year = $requiredLabviewYear
@@ -1739,6 +1765,7 @@ try {
                             -IconEditorRepoPath $iconEditorRepoPath `
                             -PinnedSha $iconEditorPinnedSha `
                             -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                            -ExpectedExecutionLabviewYear ([string]$pplExpectedExecutionLabviewYear) `
                             -RequiredBitness $bitness
 
                         if ([string]$capabilityResult.status -ne 'pass') {
@@ -1752,6 +1779,7 @@ try {
                                 -IconEditorRepoPath $iconEditorRepoPath `
                                 -PinnedSha $iconEditorPinnedSha `
                                 -RequiredLabviewYear ([string]$requiredLabviewYear) `
+                                -ExpectedExecutionLabviewYear ([string]$pplExpectedExecutionLabviewYear) `
                                 -RequiredBitness $bitness
 
                             if ([string]$retryCapabilityResult.status -eq 'pass') {
@@ -1769,6 +1797,7 @@ try {
                             runner_cli_path = [string]$capabilityResult.runner_cli_path
                             repo_path = [string]$capabilityResult.repo_path
                             required_labview_year = [string]$capabilityResult.required_labview_year
+                            expected_execution_labview_year = [string]$capabilityResult.expected_execution_labview_year
                             required_bitness = [string]$capabilityResult.required_bitness
                             output_ppl_path = [string]$capabilityResult.output_ppl_path
                             output_ppl_snapshot_path = [string]$capabilityResult.output_ppl_snapshot_path

@@ -320,6 +320,7 @@ jobs:
           $env:LVIE_INSTALLER_EXECUTION_PROFILE = 'host-release'
           $env:LVIE_WORKTREE_ROOT = 'C:\dev'
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
+          $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:SELECTED_PPL_BITNESS
 
           $installerProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
@@ -546,6 +547,7 @@ jobs:
         timeout-minutes: 150
         env:
           PARITY_REQUIRED_YEAR: ${{ needs.resolve-parity-context.outputs.lvcontainer_year }}
+          RELEASE_REQUIRED_YEAR: ${{ needs.resolve-parity-context.outputs.release_required_year }}
           SELECTED_PPL_BITNESS: ${{ needs.resolve-parity-context.outputs.selected_ppl_bitness }}
           PARITY_BUILD_SPEC_MARKER: ${{ needs.resolve-parity-context.outputs.build_spec_marker }}
         run: |
@@ -561,6 +563,7 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $env:Path = @(
+            'C:\host-tools\PowerShell7',
             'C:\host-tools\Git\cmd',
             'C:\host-tools\GitHubCLI',
             'C:\host-tools\G-CLI\bin',
@@ -572,6 +575,7 @@ jobs:
           $env:LVIE_INSTALLER_EXECUTION_PROFILE = 'container-parity'
           $env:LVIE_WORKTREE_ROOT = 'C:\dev'
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
+          $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = [string]$env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
           $labviewX86NipkgInstallCmdB64 = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64
           if (-not [string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmdB64)) {
@@ -588,7 +592,7 @@ jobs:
           $env:LVIE_PARITY_BUILD_SPEC_KIND = 'ppl'
           $env:LVIE_PARITY_BUILD_SPEC_PLACEHOLDER = 'srcdist'
 
-          $requiredCommands = @('powershell', 'git', 'gh', 'g-cli')
+          $requiredCommands = @('powershell', 'pwsh', 'git', 'gh', 'g-cli')
           $missingCommands = @()
           foreach ($name in $requiredCommands) {
             if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
@@ -671,7 +675,7 @@ jobs:
           $viAnalyzerReportsRoot = 'builds\vi-analyzer\windows-container-gate'
           & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $viAnalyzerScript `
             -WorkspaceRoot $iconEditorRoot `
-            -LabVIEWVersion ([string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR) `
+            -LabVIEWVersion ([string]$env:PARITY_REQUIRED_YEAR) `
             -LabVIEWBitness $selectedPplBitness `
             -ReportsRoot $viAnalyzerReportsRoot `
             -StatusPath $viAnalyzerStatusPath
@@ -711,8 +715,12 @@ jobs:
             $dockerIsolation = 'process'
           }
 
-          $requiredYear = [string]$env:PARITY_REQUIRED_YEAR
+          $requiredYear = [string]$env:RELEASE_REQUIRED_YEAR
           if ([string]::IsNullOrWhiteSpace($requiredYear)) {
+            throw 'RELEASE_REQUIRED_YEAR is empty.'
+          }
+          $parityExecutionYear = [string]$env:PARITY_REQUIRED_YEAR
+          if ([string]::IsNullOrWhiteSpace($parityExecutionYear)) {
             throw 'PARITY_REQUIRED_YEAR is empty.'
           }
 
@@ -724,14 +732,14 @@ jobs:
           $labviewX86NipkgInstallCmd = '${{ vars.LABVIEW_X86_NIPKG_INSTALL_CMD }}'
           if ([string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmd)) {
             $nipkgExe = '"C:\Program Files\National Instruments\NI Package Manager\nipkg.exe"'
-            if ($requiredYear -eq '2026') {
+            if ($parityExecutionYear -eq '2026') {
               $labviewX86NipkgInstallCmd = @(
                 "$nipkgExe feed-add https://download.ni.com/support/nipkg/products/ni-l/ni-labview-2026-x86/26.1/released --name=ni-labview-2026-core-x86-en-2026-q1-released",
                 "$nipkgExe feed-add https://download.ni.com/support/nipkg/products/ni-l/ni-labview-2026-x86/26.1/released-critical --name=ni-labview-2026-core-x86-en-2026-q1-released-critical",
                 "$nipkgExe update",
                 "$nipkgExe install --accept-eulas --yes --include-recommended ni-labview-2026-core-x86-en"
               ) -join ' && '
-            } elseif ($requiredYear -eq '2020') {
+            } elseif ($parityExecutionYear -eq '2020') {
               $labviewX86NipkgInstallCmd = @(
                 "$nipkgExe feed-add https://download.ni.com/support/nipkg/products/ni-l/ni-labview-2020-x86/20.0/released --name=ni-labview-2020-core-x86-en-2020-released",
                 "$nipkgExe feed-add https://download.ni.com/support/nipkg/products/ni-l/ni-labview-2020-x86/20.0/released-critical --name=ni-labview-2020-core-x86-en-2020-released-critical",
@@ -750,10 +758,11 @@ jobs:
           $hostDevRoot = 'C:\dev'
           $hostLabview2020x64Root = 'C:\Program Files\National Instruments\LabVIEW 2020'
           $hostLabview2020x86Root = 'C:\Program Files (x86)\National Instruments\LabVIEW 2020'
+          $hostPwshRoot = 'C:\Program Files\PowerShell\7'
           $hostGitRoot = 'C:\Program Files\Git'
           $hostGhRoot = 'C:\Program Files\GitHub CLI'
           $hostGCliRoot = 'C:\Program Files\G-CLI'
-          foreach ($hostToolRoot in @($hostDevRoot, $hostLabview2020x64Root, $hostLabview2020x86Root, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
+          foreach ($hostToolRoot in @($hostDevRoot, $hostLabview2020x64Root, $hostLabview2020x86Root, $hostPwshRoot, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
             if (-not (Test-Path -LiteralPath $hostToolRoot -PathType Container)) {
               throw "Required host tool root is missing for container bind mount: $hostToolRoot"
             }
@@ -831,10 +840,12 @@ jobs:
           $hostGitMountSource = Join-Path $hostMountRoot 'Git'
           $hostGhMountSource = Join-Path $hostMountRoot 'GitHubCLI'
           $hostGCliMountSource = Join-Path $hostMountRoot 'G-CLI'
+          $hostPwshMountSource = Join-Path $hostMountRoot 'PowerShell7'
           foreach ($junction in @(
             @{ path = $hostGitMountSource; target = $hostGitRoot },
             @{ path = $hostGhMountSource; target = $hostGhRoot },
-            @{ path = $hostGCliMountSource; target = $hostGCliRoot }
+            @{ path = $hostGCliMountSource; target = $hostGCliRoot },
+            @{ path = $hostPwshMountSource; target = $hostPwshRoot }
           )) {
             if (Test-Path -LiteralPath $junction.path) {
               Remove-Item -LiteralPath $junction.path -Force
@@ -851,8 +862,10 @@ jobs:
             '--env', 'VIPM_COMMUNITY_EDITION=true',
             '--env', 'LVIE_OFFLINE_GIT_MODE=true',
             '--env', "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$requiredYear",
+            '--env', "LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR=$parityExecutionYear",
             '--env', "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness",
             '--env', "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD_B64=$labviewX86NipkgInstallCmdB64",
+            '--env', "PARITY_REQUIRED_YEAR=$parityExecutionYear",
             '--env', "LVIE_PARITY_LVCONTAINER_RAW=$env:LVIE_PARITY_LVCONTAINER_RAW",
             '--env', "LVIE_PARITY_WINDOWS_TAG=$env:LVIE_PARITY_WINDOWS_TAG",
             '--env', "PARITY_BUILD_SPEC_MARKER=$env:PARITY_BUILD_SPEC_MARKER"
@@ -860,6 +873,7 @@ jobs:
           $dockerMountSpecs = @(
             "type=bind,source=$($env:GITHUB_WORKSPACE),target=C:\workspace",
             "type=bind,source=$hostDevRoot,target=C:\dev",
+            "type=bind,source=$hostPwshMountSource,target=C:\host-tools\PowerShell7,readonly",
             "type=bind,source=$hostGitMountSource,target=C:\host-tools\Git,readonly",
             "type=bind,source=$hostGhMountSource,target=C:\host-tools\GitHubCLI,readonly",
             "type=bind,source=$hostGCliMountSource,target=C:\host-tools\G-CLI,readonly"

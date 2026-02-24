@@ -65,6 +65,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''host-release'''
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''container-parity'''
         $script:coreWorkflowContent | Should -Match 'LVIE_WORKTREE_ROOT = ''C:\\dev'''
+        $script:coreWorkflowContent | Should -Match 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = \[string\]\$env:RELEASE_REQUIRED_YEAR'
+        $script:coreWorkflowContent | Should -Match 'RELEASE_REQUIRED_YEAR:\s*\$\{\{\s*needs\.resolve-parity-context\.outputs\.release_required_year\s*\}\}'
     }
 
     It 'enforces release-vs-parity post-action roles and vi analyzer parity execution' {
@@ -88,7 +90,11 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'containerCmdEncoded'
         $script:coreWorkflowContent | Should -Match '''powershell'', ''-NoProfile'', ''-EncodedCommand'', \$containerCmdEncoded'
         $script:coreWorkflowContent | Should -Not -Match '''powershell'', ''-NoProfile'', ''-Command'', \$containerCmd'
+        $script:coreWorkflowContent | Should -Match '\$requiredCommands = @\(''powershell'', ''pwsh'', ''git'', ''gh'', ''g-cli''\)'
         $script:coreWorkflowContent | Should -Match 'Join-Path \$artifactRoot ''host-mounts'''
+        $script:coreWorkflowContent | Should -Match '--env'', "LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR=\$parityExecutionYear"'
+        $script:coreWorkflowContent | Should -Match '--env'', "PARITY_REQUIRED_YEAR=\$parityExecutionYear"'
+        $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostPwshMountSource,target=C:\\host-tools\\PowerShell7,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGitMountSource,target=C:\\host-tools\\Git,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGhMountSource,target=C:\\host-tools\\GitHubCLI,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGCliMountSource,target=C:\\host-tools\\G-CLI,readonly'
