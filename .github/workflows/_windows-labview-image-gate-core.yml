@@ -53,8 +53,7 @@ jobs:
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
-            -Runtime 'win-x64' `
-            -Deterministic 1
+            -Runtime 'win-x64'
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build runner-cli bundle for windows image gate."
           }
@@ -99,8 +98,7 @@ jobs:
             -OutputPath $installerPath `
             -WorkspaceRootDefault 'C:\workspace\gate-dev' `
             -RequiredLabviewYear $requiredLabviewYear `
-            -NsisRoot $nsisRoot `
-            -Deterministic 1
+            -NsisRoot $nsisRoot
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build installer for windows image gate."
           }
