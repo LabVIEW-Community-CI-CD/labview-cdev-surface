@@ -96,7 +96,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
-            -WorkspaceRootDefault 'C:\workspace\gate-dev' `
+            -WorkspaceRootDefault 'C:\dev' `
             -RequiredLabviewYear $requiredLabviewYear `
             -NsisRoot $nsisRoot
           if ($LASTEXITCODE -ne 0) {
@@ -220,11 +220,11 @@ jobs:
             -ArgumentList '/S' `
             -Wait `
             -PassThru
-          $launchLogPath = "C:\workspace\gate-dev\artifacts\workspace-installer-launch.log"
+          $launchLogPath = "C:\dev\artifacts\workspace-installer-launch.log"
           if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
             Copy-Item -LiteralPath $launchLogPath -Destination "C:\workspace\artifacts\windows-image-gate\workspace-installer-launch.log" -Force
           }
-          $installReportPath = "C:\workspace\gate-dev\artifacts\workspace-install-latest.json"
+          $installReportPath = "C:\dev\artifacts\workspace-install-latest.json"
           $installReportArtifactPath = "C:\workspace\artifacts\windows-image-gate\workspace-install-latest.json"
           $installReport = $null
           if (Test-Path -LiteralPath $installReportPath -PathType Leaf) {

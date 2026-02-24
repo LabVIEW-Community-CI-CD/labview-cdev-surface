@@ -47,6 +47,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'LVIE_OFFLINE_GIT_MODE'
         $script:coreWorkflowContent | Should -Match 'LVIE_OFFLINE_GIT_MODE=true'
         $script:coreWorkflowContent | Should -Match '-RequiredLabviewYear \$requiredLabviewYear'
+        $script:coreWorkflowContent | Should -Match "-WorkspaceRootDefault 'C:\\dev'"
+        $script:coreWorkflowContent | Should -Not -Match 'C:\\workspace\\gate-dev'
         $script:coreWorkflowContent | Should -Match 'LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD'
         $script:coreWorkflowContent | Should -Match 'LVIE_GATE_REQUIRED_LABVIEW_YEAR'
         $script:coreWorkflowContent | Should -Match 'LVIE_GATE_SINGLE_PPL_BITNESS'
