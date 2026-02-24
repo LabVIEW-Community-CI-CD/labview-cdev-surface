@@ -123,6 +123,28 @@
         "ppl_capability_checks.64",
         "vip_package_build_check"
       ]
+    },
+    "container_parity_contract": {
+      "linux_tag_strategy": "sibling-windows-to-linux",
+      "allowed_linux_tags": [
+        "2025q3-linux"
+      ],
+      "locked_linux_image": "nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c",
+      "windows_host_execution_mode": "native",
+      "windows_host_native_labview_version": "2025q3",
+      "linux_vip_build": {
+        "enabled": true,
+        "driver": "vipm-api",
+        "required_ppl_bitness": [
+          "32",
+          "64"
+        ],
+        "artifact_role": "signal-only"
+      },
+      "required_check_rollout": {
+        "linux_parity_required": false,
+        "promotion_condition": "single_green_run"
+      }
     }
   },
   "managed_repos": [

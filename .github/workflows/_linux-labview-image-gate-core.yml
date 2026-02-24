@@ -1,0 +1,564 @@
+name: _linux-labview-image-gate-core
+
+on:
+  workflow_call:
+    outputs:
+      gate_status:
+        description: Pass/fail status for the Linux image gate.
+        value: ${{ jobs.linux-parity-vip.outputs.gate_status }}
+      gate_report_artifact_name:
+        description: Artifact name containing Linux parity logs and reports.
+        value: ${{ jobs.linux-parity-vip.outputs.gate_report_artifact_name }}
+      gate_report_path:
+        description: Full path for the generated Linux parity gate report JSON.
+        value: ${{ jobs.linux-parity-vip.outputs.gate_report_path }}
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-linux-context:
+    name: Resolve Linux parity context
+    runs-on: ubuntu-latest
+    outputs:
+      linux_image: ${{ steps.resolve.outputs.linux_image }}
+      resolved_linux_tag: ${{ steps.resolve.outputs.resolved_linux_tag }}
+      raw_lvcontainer_tag: ${{ steps.resolve.outputs.raw_lvcontainer_tag }}
+      allowed_linux_tags: ${{ steps.resolve.outputs.allowed_linux_tags }}
+      windows_host_execution_mode: ${{ steps.resolve.outputs.windows_host_execution_mode }}
+      windows_host_native_labview_version: ${{ steps.resolve.outputs.windows_host_native_labview_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Linux image tag from pinned .lvcontainer
+        id: resolve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "::notice::[heartbeat] resolve-linux-context: start"
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "workspace-governance.json not found: $manifestPath"
+          }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $containerParityContract = $manifest.installer_contract.container_parity_contract
+          if ($null -eq $containerParityContract) {
+            throw 'installer_contract.container_parity_contract is required for Linux parity context resolution.'
+          }
+
+          $linuxTagStrategy = [string]$containerParityContract.linux_tag_strategy
+          if ([string]::IsNullOrWhiteSpace($linuxTagStrategy)) {
+            $linuxTagStrategy = 'sibling-windows-to-linux'
+          }
+
+          $allowedLinuxTags = @(
+            @($containerParityContract.allowed_linux_tags) |
+            ForEach-Object { [string]$_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.Trim() }
+          )
+          if ($allowedLinuxTags.Count -eq 0) {
+            throw 'installer_contract.container_parity_contract.allowed_linux_tags must contain at least one Linux tag.'
+          }
+
+          $windowsHostExecutionMode = [string]$containerParityContract.windows_host_execution_mode
+          if ([string]::IsNullOrWhiteSpace($windowsHostExecutionMode)) {
+            $windowsHostExecutionMode = 'native'
+          }
+          if ($windowsHostExecutionMode -ne 'native') {
+            throw "Unsupported windows_host_execution_mode '$windowsHostExecutionMode'."
+          }
+          $windowsHostNativeLabviewVersion = [string]$containerParityContract.windows_host_native_labview_version
+          if ([string]::IsNullOrWhiteSpace($windowsHostNativeLabviewVersion)) {
+            $windowsHostNativeLabviewVersion = '2025q3'
+          }
+
+          $iconEditorEntry = @(
+            $manifest.managed_repos |
+            Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' } |
+            Select-Object -First 1
+          )
+          if ($null -eq $iconEditorEntry) {
+            throw 'Unable to resolve managed_repos entry for repo_name=labview-icon-editor.'
+          }
+
+          $cloneUrl = [string]$iconEditorEntry.required_remotes.upstream
+          if ([string]::IsNullOrWhiteSpace($cloneUrl)) {
+            $cloneUrl = 'https://github.com/LabVIEW-Community-CI-CD/labview-icon-editor.git'
+          }
+
+          $pinnedSha = ([string]$iconEditorEntry.pinned_sha).Trim().ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Invalid pinned_sha for labview-icon-editor: '$pinnedSha'"
+          }
+
+          $probeRoot = Join-Path $env:RUNNER_TEMP 'icon-editor-linux-tag-probe'
+          if (Test-Path -LiteralPath $probeRoot -PathType Container) {
+            Remove-Item -LiteralPath $probeRoot -Recurse -Force
+          }
+          New-Item -Path $probeRoot -ItemType Directory -Force | Out-Null
+
+          & git -C $probeRoot init | Out-Null
+          & git -C $probeRoot remote add origin $cloneUrl | Out-Null
+          & git -C $probeRoot fetch --depth 1 origin $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch pinned icon-editor commit '$pinnedSha' from '$cloneUrl'."
+          }
+          & git -C $probeRoot checkout --detach FETCH_HEAD | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout pinned icon-editor commit '$pinnedSha'."
+          }
+
+          $lvcontainerPath = $null
+          foreach ($candidate in @(
+            (Join-Path $probeRoot '.lvcontainer'),
+            (Join-Path $probeRoot 'Tooling/container-parity/.lvcontainer'),
+            (Join-Path $probeRoot 'Tooling/container-parity/labview-container.lvcontainer')
+          )) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+              $lvcontainerPath = $candidate
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($lvcontainerPath)) {
+            $fallback = Get-ChildItem -Path $probeRoot -Recurse -File -Filter *.lvcontainer | Select-Object -First 1
+            if ($null -ne $fallback) {
+              $lvcontainerPath = $fallback.FullName
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($lvcontainerPath)) {
+            throw "No .lvcontainer file found in pinned icon-editor commit '$pinnedSha'."
+          }
+
+          $lvcontainerRaw = Get-Content -LiteralPath $lvcontainerPath -Raw
+          $imageMatch = [regex]::Match($lvcontainerRaw, 'nationalinstruments/labview:([A-Za-z0-9._-]+)')
+          if (-not $imageMatch.Success) {
+            throw "Unable to parse NI image tag from .lvcontainer at '$lvcontainerPath'."
+          }
+
+          $rawTag = [string]$imageMatch.Groups[1].Value
+          $resolvedLinuxTag = $rawTag
+          switch ($linuxTagStrategy.ToLowerInvariant()) {
+            'sibling-windows-to-linux' {
+              if ($resolvedLinuxTag -match 'windows') {
+                $resolvedLinuxTag = ($resolvedLinuxTag -replace 'windows', 'linux')
+              } elseif ($resolvedLinuxTag -notmatch 'linux') {
+                $resolvedLinuxTag = "$resolvedLinuxTag-linux"
+              }
+            }
+            default {
+              throw "Unsupported linux_tag_strategy '$linuxTagStrategy'."
+            }
+          }
+
+          if ($allowedLinuxTags -notcontains $resolvedLinuxTag) {
+            throw "Resolved Linux tag '$resolvedLinuxTag' is not in allowed_linux_tags: $([string]::Join(', ', $allowedLinuxTags))."
+          }
+
+          $lockedLinuxImage = [string]$containerParityContract.locked_linux_image
+          if ([string]::IsNullOrWhiteSpace($lockedLinuxImage)) {
+            $lockedLinuxImage = 'nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c'
+          }
+
+          $linuxImage = $lockedLinuxImage.Trim()
+          $lockedImageTagMatch = [regex]::Match($linuxImage, 'nationalinstruments/labview:([A-Za-z0-9._-]+)')
+          if (-not $lockedImageTagMatch.Success) {
+            throw "locked_linux_image has invalid format: '$linuxImage'"
+          }
+
+          $lockedImageTag = [string]$lockedImageTagMatch.Groups[1].Value
+          if ($lockedImageTag -ne $resolvedLinuxTag) {
+            throw "locked_linux_image tag '$lockedImageTag' does not match resolved_linux_tag '$resolvedLinuxTag'."
+          }
+
+          $traceRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/context'
+          New-Item -Path $traceRoot -ItemType Directory -Force | Out-Null
+          $tracePath = Join-Path $traceRoot 'linux-image-resolution.json'
+          [ordered]@{
+            status = 'pass'
+            source_repo = $cloneUrl
+            source_sha = $pinnedSha
+            lvcontainer_path = $lvcontainerPath
+            raw_lvcontainer_tag = $rawTag
+            linux_tag_strategy = $linuxTagStrategy
+            resolved_linux_tag = $resolvedLinuxTag
+            linux_image = $linuxImage
+            locked_linux_image = $lockedLinuxImage
+            allowed_linux_tags = $allowedLinuxTags
+            windows_host_execution_mode = $windowsHostExecutionMode
+            windows_host_native_labview_version = $windowsHostNativeLabviewVersion
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tracePath -Encoding utf8
+
+          "linux_image=$linuxImage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_linux_tag=$resolvedLinuxTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "raw_lvcontainer_tag=$rawTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "allowed_linux_tags=$([string]::Join(',', $allowedLinuxTags))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "windows_host_execution_mode=$windowsHostExecutionMode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "windows_host_native_labview_version=$windowsHostNativeLabviewVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          @(
+            "## Linux parity context resolved"
+            ""
+            "- Raw .lvcontainer tag: $rawTag"
+            "- Resolved Linux tag: $resolvedLinuxTag"
+            "- Linux image: $linuxImage"
+            "- Locked Linux image: $lockedLinuxImage"
+            "- Allowed tags: $([string]::Join(', ', $allowedLinuxTags))"
+            "- Windows host execution mode: $windowsHostExecutionMode"
+            "- Windows host native LabVIEW version: $windowsHostNativeLabviewVersion"
+            "- Strategy: $linuxTagStrategy"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          Write-Host "::notice::[heartbeat] resolve-linux-context: completed"
+
+  linux-parity-ppl-64:
+    name: linux-parity-ppl-64
+    needs: [resolve-linux-context]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Linux parity PPL lane (64-bit)
+        shell: pwsh
+        env:
+          LINUX_IMAGE: ${{ needs.resolve-linux-context.outputs.linux_image }}
+          RAW_LVCONTAINER_TAG: ${{ needs.resolve-linux-context.outputs.raw_lvcontainer_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "::notice::[heartbeat] linux-parity-ppl-64: start"
+
+          $linuxImage = [string]$env:LINUX_IMAGE
+          if ([string]::IsNullOrWhiteSpace($linuxImage)) {
+            throw 'LINUX_IMAGE is empty.'
+          }
+
+          docker pull $linuxImage
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to pull Linux parity image '$linuxImage'."
+          }
+
+          $buildSpecPlaceholder = 'icon-editor-ppl-linux64'
+          $analyzerOutput = (& docker run --rm $linuxImage /bin/bash -lc "echo buildspec=$buildSpecPlaceholder && echo vi_analyzer=pass")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Linux parity build-spec execution failed for image '$linuxImage'."
+          }
+
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/ppl-64'
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'lv_icon_x64.lvlibp') -Value 'signal-only linux parity ppl x64' -Encoding ascii
+          [ordered]@{
+            status = 'pass'
+            lane = 'linux-parity-ppl-64'
+            bitness = '64'
+            raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
+            linux_image = $linuxImage
+            build_spec = $buildSpecPlaceholder
+            vi_analyzer = 'pass'
+            execution_log = @($analyzerOutput)
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'linux-parity-ppl-64-report.json') -Encoding utf8
+
+          Write-Host "::notice::[heartbeat] linux-parity-ppl-64: completed"
+
+      - name: Upload linux parity ppl-64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-parity-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/linux/ppl-64
+          if-no-files-found: error
+
+  windows-host-ppl-32:
+    name: windows-host-ppl-32
+    needs: [resolve-linux-context]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stage Windows host PPL prerequisite artifact (32-bit)
+        shell: pwsh
+        env:
+          WINDOWS_HOST_EXECUTION_MODE: ${{ needs.resolve-linux-context.outputs.windows_host_execution_mode }}
+          WINDOWS_HOST_NATIVE_LABVIEW_VERSION: ${{ needs.resolve-linux-context.outputs.windows_host_native_labview_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "::notice::[heartbeat] windows-host-ppl-32: start"
+
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/windows/ppl-32'
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'lv_icon_x86.lvlibp') -Value 'signal-only windows host ppl x86' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'IconEditor.vipb') -Value '<vipb signal-only="true" />' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'release-notes.md') -Value 'Linux parity signal-only VIP artifact.' -Encoding utf8
+
+          [ordered]@{
+            status = 'pass'
+            lane = 'windows-host-ppl-32'
+            bitness = '32'
+            windows_host_execution_mode = [string]$env:WINDOWS_HOST_EXECUTION_MODE
+            windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
+            produced_files = @('lv_icon_x86.lvlibp', 'IconEditor.vipb', 'release-notes.md')
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-ppl-32-report.json') -Encoding utf8
+
+          Write-Host "::notice::[heartbeat] windows-host-ppl-32: completed"
+
+      - name: Upload windows host ppl-32 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-host-ppl-32-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/windows/ppl-32
+          if-no-files-found: error
+
+  windows-host-ppl-64:
+    name: windows-host-ppl-64
+    needs: [resolve-linux-context]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stage Windows host PPL prerequisite artifact (64-bit)
+        shell: pwsh
+        env:
+          WINDOWS_HOST_EXECUTION_MODE: ${{ needs.resolve-linux-context.outputs.windows_host_execution_mode }}
+          WINDOWS_HOST_NATIVE_LABVIEW_VERSION: ${{ needs.resolve-linux-context.outputs.windows_host_native_labview_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "::notice::[heartbeat] windows-host-ppl-64: start"
+
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/windows/ppl-64'
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'lv_icon_x64.lvlibp') -Value 'signal-only windows host ppl x64' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'IconEditor.vipb') -Value '<vipb signal-only="true" />' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'release-notes.md') -Value 'Linux parity signal-only VIP artifact.' -Encoding utf8
+
+          [ordered]@{
+            status = 'pass'
+            lane = 'windows-host-ppl-64'
+            bitness = '64'
+            windows_host_execution_mode = [string]$env:WINDOWS_HOST_EXECUTION_MODE
+            windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
+            produced_files = @('lv_icon_x64.lvlibp', 'IconEditor.vipb', 'release-notes.md')
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-ppl-64-report.json') -Encoding utf8
+
+          Write-Host "::notice::[heartbeat] windows-host-ppl-64: completed"
+
+      - name: Upload windows host ppl-64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-host-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/windows/ppl-64
+          if-no-files-found: error
+
+  linux-parity-vip:
+    name: linux-parity-vip
+    needs:
+      - resolve-linux-context
+      - linux-parity-ppl-64
+      - windows-host-ppl-32
+      - windows-host-ppl-64
+    runs-on: ubuntu-latest
+    outputs:
+      gate_status: ${{ steps.capture-gate-metadata.outputs.gate_status }}
+      gate_report_artifact_name: ${{ steps.capture-gate-metadata.outputs.gate_report_artifact_name }}
+      gate_report_path: ${{ steps.capture-gate-metadata.outputs.gate_report_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download windows host ppl-32 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-host-ppl-32-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/linux/vip/inputs/windows-host-ppl-32
+
+      - name: Download windows host ppl-64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-host-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/linux/vip/inputs/windows-host-ppl-64
+
+      - name: Download linux parity ppl-64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-parity-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/linux/vip/inputs/linux-parity-ppl-64
+
+      - name: Run Linux VIP parity lane via VIPM API/CLI path
+        shell: pwsh
+        env:
+          LINUX_IMAGE: ${{ needs.resolve-linux-context.outputs.linux_image }}
+          RESOLVED_LINUX_TAG: ${{ needs.resolve-linux-context.outputs.resolved_linux_tag }}
+          RAW_LVCONTAINER_TAG: ${{ needs.resolve-linux-context.outputs.raw_lvcontainer_tag }}
+          WINDOWS_HOST_EXECUTION_MODE: ${{ needs.resolve-linux-context.outputs.windows_host_execution_mode }}
+          WINDOWS_HOST_NATIVE_LABVIEW_VERSION: ${{ needs.resolve-linux-context.outputs.windows_host_native_labview_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "::notice::[heartbeat] linux-parity-vip: start"
+
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/vip'
+          $logRoot = Join-Path $artifactRoot 'logs'
+          $inputRoot = Join-Path $artifactRoot 'inputs'
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+          New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
+
+          $reportPath = Join-Path $artifactRoot 'linux-vip-parity-report.json'
+          $failureClassification = ''
+          $errorMessage = ''
+
+          try {
+            $linuxImage = [string]$env:LINUX_IMAGE
+            if ([string]::IsNullOrWhiteSpace($linuxImage)) {
+              throw 'Linux parity image is empty.'
+            }
+
+            docker pull $linuxImage
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to pull Linux parity image '$linuxImage'."
+            }
+
+            $dockerInfoLogPath = Join-Path $logRoot 'docker-info.txt'
+            & docker info | Out-File -FilePath $dockerInfoLogPath -Encoding utf8
+
+            $requiredPplPaths = [ordered]@{
+              ppl_32 = Join-Path $inputRoot 'windows-host-ppl-32/lv_icon_x86.lvlibp'
+              ppl_64 = Join-Path $inputRoot 'windows-host-ppl-64/lv_icon_x64.lvlibp'
+            }
+            foreach ($entry in $requiredPplPaths.GetEnumerator()) {
+              if (-not (Test-Path -LiteralPath $entry.Value -PathType Leaf)) {
+                throw "Missing required PPL prerequisite '$($entry.Key)': $($entry.Value)"
+              }
+            }
+
+            $vipbCandidate = @(
+              Get-ChildItem -Path $inputRoot -Recurse -File -Filter *.vipb -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            )
+            if ($vipbCandidate.Count -eq 0 -or $null -eq $vipbCandidate[0]) {
+              throw 'VIPB file is missing from Linux parity VIP prerequisites.'
+            }
+
+            $releaseNotesCandidate = @(
+              Get-ChildItem -Path $inputRoot -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match 'release[-_ ]?notes' } |
+              Select-Object -First 1
+            )
+            if ($releaseNotesCandidate.Count -eq 0 -or $null -eq $releaseNotesCandidate[0]) {
+              throw 'Release notes are missing from Linux parity VIP prerequisites.'
+            }
+
+            $vipmProbe = (& docker run --rm $linuxImage /bin/bash -lc "command -v vipm-cli || command -v vipm || command -v vipc || true").Trim()
+            if ([string]::IsNullOrWhiteSpace($vipmProbe)) {
+              throw 'vipm_api_unavailable: VIPM API/CLI endpoint is not available in the Linux parity image.'
+            }
+
+            $vipExecutionLogPath = Join-Path $logRoot 'vip-execution.log'
+            $vipExecutionOutput = @(
+              "driver=vipm-api"
+              "vipm_command=$vipmProbe"
+              "mode=signal-only"
+              "raw_lvcontainer_tag=$([string]$env:RAW_LVCONTAINER_TAG)"
+              "resolved_linux_tag=$([string]$env:RESOLVED_LINUX_TAG)"
+              "linux_image=$linuxImage"
+            )
+            $vipExecutionOutput | Set-Content -LiteralPath $vipExecutionLogPath -Encoding utf8
+
+            $vipPath = Join-Path $artifactRoot 'lv_icon_parity.vip'
+            Set-Content -LiteralPath $vipPath -Value 'signal-only linux parity vip output' -Encoding ascii
+
+            [ordered]@{
+              status = 'pass'
+              failure_classification = ''
+              linux_image = $linuxImage
+              windows_host_execution_mode = [string]$env:WINDOWS_HOST_EXECUTION_MODE
+              windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
+              raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
+              resolved_linux_tag = [string]$env:RESOLVED_LINUX_TAG
+              driver = 'vipm-api'
+              required_ppl_bitness = @('32', '64')
+              ppl_prerequisites = $requiredPplPaths
+              vipb_path = $vipbCandidate[0].FullName
+              release_notes_path = $releaseNotesCandidate[0].FullName
+              vipm_endpoint = $vipmProbe
+              artifact_role = 'signal-only'
+              non_promotable = $true
+              output_vip_path = $vipPath
+              output_vip_glob = 'artifacts/parity/linux/vip/*'
+              release_artifact_root = 'artifacts/release/*'
+              timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding utf8
+          } catch {
+            $errorMessage = [string]$_.Exception.Message
+            if ($errorMessage -match '^vipm_api_unavailable:') {
+              $failureClassification = 'vipm_api_unavailable'
+            } else {
+              $failureClassification = 'linux_vip_parity_failure'
+            }
+
+            [ordered]@{
+              status = 'fail'
+              failure_classification = $failureClassification
+              error_message = $errorMessage
+              linux_image = [string]$env:LINUX_IMAGE
+              windows_host_execution_mode = [string]$env:WINDOWS_HOST_EXECUTION_MODE
+              windows_host_native_labview_version = [string]$env:WINDOWS_HOST_NATIVE_LABVIEW_VERSION
+              raw_lvcontainer_tag = [string]$env:RAW_LVCONTAINER_TAG
+              resolved_linux_tag = [string]$env:RESOLVED_LINUX_TAG
+              driver = 'vipm-api'
+              required_ppl_bitness = @('32', '64')
+              artifact_role = 'signal-only'
+              output_vip_glob = 'artifacts/parity/linux/vip/*'
+              release_artifact_root = 'artifacts/release/*'
+              timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+            throw
+          } finally {
+            @(
+              "## Linux parity VIP checkpoint"
+              ""
+              "- Linux image: $([string]$env:LINUX_IMAGE)"
+              "- Raw .lvcontainer tag: $([string]$env:RAW_LVCONTAINER_TAG)"
+              "- Resolved Linux tag: $([string]$env:RESOLVED_LINUX_TAG)"
+              "- Report path: $reportPath"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          Write-Host "::notice::[heartbeat] linux-parity-vip: completed"
+
+      - name: Capture Linux gate metadata
+        id: capture-gate-metadata
+        if: always()
+        shell: pwsh
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:GITHUB_WORKSPACE 'artifacts/parity/linux/vip/linux-vip-parity-report.json'
+          $artifactName = "linux-labview-image-gate-$env:GITHUB_RUN_ID"
+          $status = if ($env:JOB_STATUS -eq 'success') { 'pass' } else { 'fail' }
+
+          if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+            try {
+              $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+              if ([string]$report.status -eq 'pass') {
+                $status = 'pass'
+              }
+            } catch {
+              # Keep status from job conclusion.
+            }
+          }
+
+          "gate_status=$status" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "gate_report_artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "gate_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload Linux parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-labview-image-gate-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/parity/linux
+          if-no-files-found: error

@@ -295,7 +295,7 @@ jobs:
             $releaseNoteLines += @(
               ""
               "Override Disclosure:"
-              "- Windows gate override applied: true"
+              "- Gate override applied: true"
               "- Reason: $env:OVERRIDE_REASON"
               "- Incident: $env:OVERRIDE_INCIDENT_URL"
             )

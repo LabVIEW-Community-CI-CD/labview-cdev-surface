@@ -98,6 +98,7 @@ Add-Check -Scope 'manifest' -Name 'has_installer_contract_provenance' -Passed ($
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_canary' -Passed ($installerContractMembers -contains 'canary') -Detail 'installer_contract.canary'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_cli_bundle' -Passed ($installerContractMembers -contains 'cli_bundle') -Detail 'installer_contract.cli_bundle'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_harness' -Passed ($installerContractMembers -contains 'harness') -Detail 'installer_contract.harness'
+Add-Check -Scope 'manifest' -Name 'has_installer_contract_container_parity_contract' -Passed ($installerContractMembers -contains 'container_parity_contract') -Detail 'installer_contract.container_parity_contract'
 if ($installerContractMembers -contains 'reproducibility') {
     Add-Check -Scope 'manifest' -Name 'reproducibility_required_true' -Passed ([bool]$manifest.installer_contract.reproducibility.required) -Detail "required=$($manifest.installer_contract.reproducibility.required)"
     Add-Check -Scope 'manifest' -Name 'reproducibility_strict_hash_match_true' -Passed ([bool]$manifest.installer_contract.reproducibility.strict_hash_match) -Detail "strict_hash_match=$($manifest.installer_contract.reproducibility.strict_hash_match)"
@@ -134,6 +135,20 @@ if ($installerContractMembers -contains 'harness') {
     foreach ($requiredPostaction in @('ppl_capability_checks.32', 'ppl_capability_checks.64', 'vip_package_build_check')) {
         Add-Check -Scope 'manifest' -Name "harness_required_postaction:$requiredPostaction" -Passed (@($harness.required_postactions) -contains $requiredPostaction) -Detail ([string]::Join(',', @($harness.required_postactions)))
     }
+}
+if ($installerContractMembers -contains 'container_parity_contract') {
+    $containerParity = $manifest.installer_contract.container_parity_contract
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_tag_strategy' -Passed ([string]$containerParity.linux_tag_strategy -eq 'sibling-windows-to-linux') -Detail ([string]$containerParity.linux_tag_strategy)
+    Add-Check -Scope 'manifest' -Name 'container_parity_allowed_linux_tags' -Passed (@($containerParity.allowed_linux_tags) -contains '2025q3-linux') -Detail ([string]::Join(',', @($containerParity.allowed_linux_tags)))
+    Add-Check -Scope 'manifest' -Name 'container_parity_locked_linux_image' -Passed ([string]$containerParity.locked_linux_image -eq 'nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c') -Detail ([string]$containerParity.locked_linux_image)
+    Add-Check -Scope 'manifest' -Name 'container_parity_windows_host_execution_mode' -Passed ([string]$containerParity.windows_host_execution_mode -eq 'native') -Detail ([string]$containerParity.windows_host_execution_mode)
+    Add-Check -Scope 'manifest' -Name 'container_parity_windows_host_native_labview_version' -Passed ([string]$containerParity.windows_host_native_labview_version -eq '2025q3') -Detail ([string]$containerParity.windows_host_native_labview_version)
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_vip_enabled' -Passed ([bool]$containerParity.linux_vip_build.enabled) -Detail ([string]$containerParity.linux_vip_build.enabled)
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_vip_driver' -Passed ([string]$containerParity.linux_vip_build.driver -eq 'vipm-api') -Detail ([string]$containerParity.linux_vip_build.driver)
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_vip_bitness_32' -Passed (@($containerParity.linux_vip_build.required_ppl_bitness) -contains '32') -Detail ([string]::Join(',', @($containerParity.linux_vip_build.required_ppl_bitness)))
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_vip_bitness_64' -Passed (@($containerParity.linux_vip_build.required_ppl_bitness) -contains '64') -Detail ([string]::Join(',', @($containerParity.linux_vip_build.required_ppl_bitness)))
+    Add-Check -Scope 'manifest' -Name 'container_parity_linux_vip_artifact_role' -Passed ([string]$containerParity.linux_vip_build.artifact_role -eq 'signal-only') -Detail ([string]$containerParity.linux_vip_build.artifact_role)
+    Add-Check -Scope 'manifest' -Name 'container_parity_required_check_rollout' -Passed ([string]$containerParity.required_check_rollout.promotion_condition -eq 'single_green_run') -Detail ([string]$containerParity.required_check_rollout.promotion_condition)
 }
 
 $requiredSchemaFields = @(
