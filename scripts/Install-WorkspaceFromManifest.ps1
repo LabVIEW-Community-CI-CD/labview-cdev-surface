@@ -314,7 +314,7 @@ function Invoke-VipcApplyWithVipmCli {
 
         $vipmOutput = & $result.vipm_cli_path @vipmArgs 2>&1
         if ($null -ne $vipmOutput) {
-            $vipmOutput | Out-Host
+            $vipmOutput
         }
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
@@ -498,7 +498,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        & $RunnerCliPath @commandArgs | Out-Host
+        & $RunnerCliPath @commandArgs
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
             throw "runner-cli ppl build failed with exit code $($result.exit_code)."
@@ -640,7 +640,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vipc_assert = @($vipcAssertArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vipc assert.'
-        & $RunnerCliPath @vipcAssertArgs | Out-Host
+        & $RunnerCliPath @vipcAssertArgs
         $vipcAssertExit = $LASTEXITCODE
         if ($vipcAssertExit -ne 0) {
             $mismatchAssessment = Get-VipcMismatchAssessment `
@@ -668,7 +668,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after non-blocking remediation attempt.'
-                & $RunnerCliPath @vipcAssertArgs | Out-Host
+                & $RunnerCliPath @vipcAssertArgs
                 if ($LASTEXITCODE -ne 0) {
                     $postApplyAssessment = Get-VipcMismatchAssessment `
                         -VipcAuditPath $vipcAuditPath `
@@ -692,7 +692,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-                & $RunnerCliPath @vipcAssertArgs | Out-Host
+                & $RunnerCliPath @vipcAssertArgs
                 if ($LASTEXITCODE -ne 0) {
                     throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
                 }
@@ -732,7 +732,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
             $result.command.vip_build = @('pwsh', @($nativeVipBuildArgs))
 
             Write-InstallerFeedback -Message ("Running native VIP build harness via Invoke-VipBuild.ps1 (ExecutionLabVIEWYear=2020 contract). attempt={0}/{1} vipm_timeout_seconds={2}" -f $vipBuildAttempt, $maxVipBuildAttempts, $attemptTimeoutSeconds)
-            & pwsh @nativeVipBuildArgs | Out-Host
+            & pwsh @nativeVipBuildArgs
             $result.exit_code = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
 
             if ($result.exit_code -eq 0) {
