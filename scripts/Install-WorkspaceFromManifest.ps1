@@ -96,7 +96,10 @@ function Invoke-PowerShellFile {
         $invocationArgs += @($ScriptArguments)
     }
 
-    & $PowerShellExecutable @invocationArgs
+    $commandOutput = & $PowerShellExecutable @invocationArgs 2>&1
+    foreach ($line in @($commandOutput)) {
+        Write-Host $line
+    }
     if ($null -eq $LASTEXITCODE) {
         return 0
     }
@@ -547,7 +550,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        & $RunnerCliPath @commandArgs
+        & $RunnerCliPath @commandArgs | ForEach-Object { Write-Host $_ }
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
             throw "runner-cli ppl build failed with exit code $($result.exit_code)."
@@ -695,7 +698,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vipc_assert = @($vipcAssertArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vipc assert.'
-        & $RunnerCliPath @vipcAssertArgs
+        & $RunnerCliPath @vipcAssertArgs | ForEach-Object { Write-Host $_ }
         $vipcAssertExit = $LASTEXITCODE
         if ($vipcAssertExit -ne 0) {
             $mismatchAssessment = Get-VipcMismatchAssessment `
@@ -723,7 +726,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after non-blocking remediation attempt.'
-                & $RunnerCliPath @vipcAssertArgs
+                & $RunnerCliPath @vipcAssertArgs | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -ne 0) {
                     $postApplyAssessment = Get-VipcMismatchAssessment `
                         -VipcAuditPath $vipcAuditPath `
@@ -747,7 +750,7 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-                & $RunnerCliPath @vipcAssertArgs
+                & $RunnerCliPath @vipcAssertArgs | ForEach-Object { Write-Host $_ }
                 if ($LASTEXITCODE -ne 0) {
                     throw "runner-cli vipc assert failed after apply with exit code $LASTEXITCODE."
                 }
