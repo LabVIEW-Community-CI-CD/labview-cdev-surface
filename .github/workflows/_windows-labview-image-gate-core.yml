@@ -367,6 +367,7 @@ jobs:
               throw "Required host tool root is missing for container bind mount: $hostToolRoot"
             }
           }
+          $containerCmdEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($containerCmd))
 
           $dockerArgs = @(
             'run',
@@ -385,7 +386,7 @@ jobs:
             '--mount', "type=bind,source=$hostGhRoot,target=C:\host-tools\GitHubCLI,readonly",
             '--mount', "type=bind,source=$hostGCliRoot,target=C:\host-tools\G-CLI,readonly",
             $labviewImage,
-            'powershell', '-NoProfile', '-Command', $containerCmd
+            'powershell', '-NoProfile', '-EncodedCommand', $containerCmdEncoded
           )
           & docker @dockerArgs
           if ($LASTEXITCODE -ne 0) {
