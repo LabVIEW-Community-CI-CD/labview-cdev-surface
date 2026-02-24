@@ -176,7 +176,13 @@ jobs:
           New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
-          & powershell -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
+          $pwshCmd = Get-Command 'pwsh' -ErrorAction SilentlyContinue
+          if ($null -eq $pwshCmd -or [string]::IsNullOrWhiteSpace($pwshCmd.Source)) {
+            throw 'PowerShell 7 (pwsh) is required on the host runner for payload bootstrap scripts.'
+          }
+          $pwshExe = $pwshCmd.Source
+
+          & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
@@ -198,7 +204,7 @@ jobs:
           $nsisRoot = '${{ vars.NSIS_ROOT }}'
           if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
 
-          & powershell -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
+          & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
             -WorkspaceRootDefault 'C:\workspace\gate-dev-release' `
@@ -342,7 +348,13 @@ jobs:
           New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
-          & powershell -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
+          $pwshCmd = Get-Command 'pwsh' -ErrorAction SilentlyContinue
+          if ($null -eq $pwshCmd -or [string]::IsNullOrWhiteSpace($pwshCmd.Source)) {
+            throw 'PowerShell 7 (pwsh) is required on the host runner for payload bootstrap scripts.'
+          }
+          $pwshExe = $pwshCmd.Source
+
+          & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest.ps1" `
             -ManifestPath (Join-Path $payloadRoot 'workspace-governance/workspace-governance.json') `
             -OutputRoot (Join-Path $payloadRoot 'tools/runner-cli/win-x64') `
             -RepoName 'labview-icon-editor' `
@@ -361,7 +373,7 @@ jobs:
           $nsisRoot = '${{ vars.NSIS_ROOT }}'
           if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
 
-          & powershell -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
+          & $pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller.ps1" `
             -PayloadRoot $payloadRoot `
             -OutputPath $installerPath `
             -WorkspaceRootDefault 'C:\workspace\gate-dev-parity' `

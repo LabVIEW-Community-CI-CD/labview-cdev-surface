@@ -54,10 +54,14 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Windows Container Parity \(\$\{\{\s*needs\.resolve-parity-context\.outputs\.lvcontainer_raw\s*\}\}\s*\|\s*b\$\{\{\s*needs\.resolve-parity-context\.outputs\.selected_ppl_bitness\s*\}\}\s*\|'
     }
 
-    It 'keeps windows powershell-first surface and avoids pwsh hard dependency' {
+    It 'keeps windows powershell-first surface and constrains pwsh use to host bootstrap scripts' {
         $script:coreWorkflowContent | Should -Match 'shell:\s*powershell'
         $script:coreWorkflowContent | Should -Not -Match 'shell:\s*pwsh'
         $script:coreWorkflowContent | Should -Not -Match '&\s*pwsh\s+-NoProfile\s+-File'
+        $script:coreWorkflowContent | Should -Match "Get-Command 'pwsh' -ErrorAction SilentlyContinue"
+        $script:coreWorkflowContent | Should -Match 'PowerShell 7 \(pwsh\) is required on the host runner for payload bootstrap scripts'
+        $script:coreWorkflowContent | Should -Match '& \$pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "\$env:GITHUB_WORKSPACE/scripts/Build-RunnerCliBundleFromManifest\.ps1"'
+        $script:coreWorkflowContent | Should -Match '& \$pwshExe -NoProfile -ExecutionPolicy RemoteSigned -File "\$env:GITHUB_WORKSPACE/scripts/Build-WorkspaceBootstrapInstaller\.ps1"'
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''host-release'''
         $script:coreWorkflowContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE = ''container-parity'''
     }
