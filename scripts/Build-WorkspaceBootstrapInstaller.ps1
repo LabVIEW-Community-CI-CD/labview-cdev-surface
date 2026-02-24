@@ -72,6 +72,33 @@ function Convert-ToEpochIso8601 {
     return [DateTimeOffset]::FromUnixTimeSeconds($EpochSeconds).UtcDateTime.ToString('o')
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File not found for hashing: $Path"
+    }
+
+    $hashCmd = Get-Command 'Get-FileHash' -ErrorAction SilentlyContinue
+    if ($null -ne $hashCmd) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $sha.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant())
+}
+
 function Resolve-SourceDateEpoch {
     param(
         [Parameter(Mandatory = $true)][string]$PayloadRoot,
@@ -251,7 +278,7 @@ try {
                 -LabviewYear $RequiredLabviewYear `
                 -DeterministicBuild $Deterministic `
                 -EpochSeconds $epoch
-            $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hash = Get-Sha256Hex -Path $outputPath
             $buildResults += [pscustomobject]@{
                 build_index = $index
                 output_path = $outputPath
@@ -300,7 +327,7 @@ try {
             if (-not [string]::IsNullOrWhiteSpace($reportDir)) {
                 New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
             }
-            $outputHash = (Get-FileHash -LiteralPath $resolvedOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $outputHash = Get-Sha256Hex -Path $resolvedOutputPath
             [ordered]@{
                 status = 'pass'
                 deterministic = [bool]$Deterministic
