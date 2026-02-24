@@ -1044,6 +1044,12 @@ try {
         throw "Manifest does not contain managed_repos entries: $resolvedManifestPath"
     }
 
+    $offlineGitModeRaw = [string]$env:LVIE_OFFLINE_GIT_MODE
+    $offlineGitMode = ($offlineGitModeRaw -match '^(1|true|yes)$')
+    if ($offlineGitMode) {
+        Write-InstallerFeedback -Message 'LVIE_OFFLINE_GIT_MODE is enabled; git network fetch/clone operations will be skipped.'
+    }
+
     $requiredLabviewYear = '2020'
     $requiredPplBitnesses = @('32', '64')
     $requiredVipBitness = '64'
@@ -1207,6 +1213,9 @@ try {
                 if ($Mode -eq 'Verify') {
                     throw "Repository path missing in Verify mode: $repoPath"
                 }
+                if ($offlineGitMode) {
+                    throw "Repository path missing in offline git mode: $repoPath"
+                }
 
                 $originUrl = [string]$repo.required_remotes.origin
                 if ([string]::IsNullOrWhiteSpace($originUrl)) {
@@ -1293,15 +1302,22 @@ try {
             }
 
             if (-not [string]::IsNullOrWhiteSpace($defaultBranch)) {
-                $fetchOutput = & git -C $repoPath fetch --no-tags origin $defaultBranch 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to fetch origin/$defaultBranch for '$repoPath'. $([string]::Join("`n", @($fetchOutput)))"
-                }
+                if ($offlineGitMode) {
+                    & git -C $repoPath cat-file -e "$pinnedSha`^{commit}" 2>$null
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Pinned SHA '$pinnedSha' is not present in local object database for '$repoPath' while offline git mode is enabled."
+                    }
+                } else {
+                    $fetchOutput = & git -C $repoPath fetch --no-tags origin $defaultBranch 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to fetch origin/$defaultBranch for '$repoPath'. $([string]::Join("`n", @($fetchOutput)))"
+                    }
 
-                & git -C $repoPath show-ref --verify "refs/remotes/origin/$defaultBranch" *> $null
-                if ($LASTEXITCODE -ne 0) {
-                    $repoResult.status = 'fail'
-                    $repoResult.issues += 'default_branch_missing_on_origin'
+                    & git -C $repoPath show-ref --verify "refs/remotes/origin/$defaultBranch" *> $null
+                    if ($LASTEXITCODE -ne 0) {
+                        $repoResult.status = 'fail'
+                        $repoResult.issues += 'default_branch_missing_on_origin'
+                    }
                 }
             }
 
@@ -1700,7 +1716,10 @@ try {
     $workspaceManifestPath = Join-Path $resolvedWorkspaceRoot 'workspace-governance.json'
     $auditOutputPath = [string]$governanceAudit.report_path
 
-    if ((Test-Path -LiteralPath $assertScriptPath -PathType Leaf) -and (Test-Path -LiteralPath $workspaceManifestPath -PathType Leaf)) {
+    if ($offlineGitMode) {
+        $governanceAudit.status = 'skipped'
+        $governanceAudit.message = 'Workspace governance audit skipped because LVIE_OFFLINE_GIT_MODE is enabled.'
+    } elseif ((Test-Path -LiteralPath $assertScriptPath -PathType Leaf) -and (Test-Path -LiteralPath $workspaceManifestPath -PathType Leaf)) {
         Write-InstallerFeedback -Message 'Running workspace governance audit.'
         $governanceAudit.invoked = $true
         $governanceAudit.exit_code = Invoke-PowerShellFile `

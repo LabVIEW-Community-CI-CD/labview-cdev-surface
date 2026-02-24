@@ -41,6 +41,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Container runtime missing required commands after host-tool mount'
         $script:coreWorkflowContent | Should -Match "VIPM_COMMUNITY_EDITION = 'true'"
         $script:coreWorkflowContent | Should -Match '--env "VIPM_COMMUNITY_EDITION=true"'
+        $script:coreWorkflowContent | Should -Match 'LVIE_OFFLINE_GIT_MODE'
+        $script:coreWorkflowContent | Should -Match '--env "LVIE_OFFLINE_GIT_MODE=true"'
         $script:coreWorkflowContent | Should -Match '-RequiredLabviewYear \$requiredLabviewYear'
         $script:coreWorkflowContent | Should -Match 'LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD'
         $script:coreWorkflowContent | Should -Match 'LVIE_GATE_REQUIRED_LABVIEW_YEAR'

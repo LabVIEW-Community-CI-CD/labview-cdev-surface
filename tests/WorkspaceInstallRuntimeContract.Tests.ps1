@@ -30,6 +30,8 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'head_sha_mismatch'
         $script:scriptContent | Should -Match 'remote_mismatch_'
         $script:scriptContent | Should -Match 'branch_identity_mismatch'
+        $script:scriptContent | Should -Match 'LVIE_OFFLINE_GIT_MODE'
+        $script:scriptContent | Should -Match 'Repository path missing in offline git mode'
     }
 
     It 'copies governance payload to workspace root, validates runner-cli bundle, and runs governance audit' {

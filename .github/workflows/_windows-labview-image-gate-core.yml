@@ -200,6 +200,7 @@ jobs:
             $env:Path
           ) -join ';'
           $env:VIPM_COMMUNITY_EDITION = 'true'
+          $env:LVIE_OFFLINE_GIT_MODE = [string]$env:LVIE_OFFLINE_GIT_MODE
           $env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD
           $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
@@ -346,6 +347,7 @@ jobs:
           docker run --rm `
             --isolation=$dockerIsolation `
             --env "VIPM_COMMUNITY_EDITION=true" `
+            --env "LVIE_OFFLINE_GIT_MODE=true" `
             --env "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$gateRequiredLabviewYear" `
             --env "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness" `
             --env "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmd" `
