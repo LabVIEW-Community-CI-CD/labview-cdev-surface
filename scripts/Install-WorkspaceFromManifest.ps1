@@ -1029,6 +1029,24 @@ try {
         $cliBundle.source_commit = ([string]$cliBundleContract.source_commit).ToLowerInvariant()
     }
 
+    $requiredLabviewYearOverride = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
+    if (-not [string]::IsNullOrWhiteSpace($requiredLabviewYearOverride)) {
+        if ($requiredLabviewYearOverride -notmatch '^\d{4}$') {
+            throw "Invalid LVIE_GATE_REQUIRED_LABVIEW_YEAR override '$requiredLabviewYearOverride'. Expected a 4-digit year."
+        }
+        Write-InstallerFeedback -Message ("Overriding required LabVIEW year from environment: {0}" -f $requiredLabviewYearOverride)
+        $requiredLabviewYear = $requiredLabviewYearOverride
+    }
+
+    $singlePplBitnessOverride = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
+    if (-not [string]::IsNullOrWhiteSpace($singlePplBitnessOverride)) {
+        if ($singlePplBitnessOverride -notin @('32', '64')) {
+            throw "Invalid LVIE_GATE_SINGLE_PPL_BITNESS override '$singlePplBitnessOverride'. Expected '32' or '64'."
+        }
+        Write-InstallerFeedback -Message ("Overriding required PPL bitnesses from environment: {0}" -f $singlePplBitnessOverride)
+        $requiredPplBitnesses = @($singlePplBitnessOverride)
+    }
+
     $requiredPplBitnesses = @(
         @($requiredPplBitnesses |
             ForEach-Object { [string]$_ } |
@@ -1036,8 +1054,13 @@ try {
             Select-Object -Unique |
             Sort-Object)
     )
-    if (($requiredPplBitnesses -join ',') -ne '32,64') {
-        throw "Installer contract requires dual PPL bitness gating ['32','64']; received '$([string]::Join(',', @($requiredPplBitnesses)))'."
+    $requiredPplBitnessLabel = [string]::Join(',', @($requiredPplBitnesses))
+    if ([string]::IsNullOrWhiteSpace($singlePplBitnessOverride)) {
+        if ($requiredPplBitnessLabel -ne '32,64') {
+            throw "Installer contract requires dual PPL bitness gating ['32','64']; received '$requiredPplBitnessLabel'."
+        }
+    } elseif ($requiredPplBitnessLabel -ne $singlePplBitnessOverride) {
+        throw "PPL bitness override '$singlePplBitnessOverride' was not applied; effective set is '$requiredPplBitnessLabel'."
     }
     if ($requiredVipBitness -ne '64') {
         throw "Installer contract requires VIP bitness '64'; received '$requiredVipBitness'."

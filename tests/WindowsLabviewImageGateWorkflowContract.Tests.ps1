@@ -43,6 +43,10 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '--env "VIPM_COMMUNITY_EDITION=true"'
         $script:coreWorkflowContent | Should -Match '-RequiredLabviewYear \$requiredLabviewYear'
         $script:coreWorkflowContent | Should -Match 'LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD'
+        $script:coreWorkflowContent | Should -Match 'LVIE_GATE_REQUIRED_LABVIEW_YEAR'
+        $script:coreWorkflowContent | Should -Match 'LVIE_GATE_SINGLE_PPL_BITNESS'
+        $script:coreWorkflowContent | Should -Match '--env "LVIE_GATE_REQUIRED_LABVIEW_YEAR=\$gateRequiredLabviewYear"'
+        $script:coreWorkflowContent | Should -Match '--env "LVIE_GATE_SINGLE_PPL_BITNESS=\$singlePplBitness"'
         $script:coreWorkflowContent | Should -Match '--env "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=\$labviewX86NipkgInstallCmd"'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostPwshRoot,target=C:\\host-tools\\PowerShell7,readonly"'
         $script:coreWorkflowContent | Should -Match '--mount "type=bind,source=\$hostGitRoot,target=C:\\host-tools\\Git,readonly"'
@@ -52,6 +56,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'workspace-install-latest\.json'
         $script:coreWorkflowContent | Should -Match "ppl_capability_checks\.'32'\.status"
         $script:coreWorkflowContent | Should -Match "ppl_capability_checks\.'64'\.status"
+        $script:coreWorkflowContent | Should -Match 'selected_ppl_bitness'
+        $script:coreWorkflowContent | Should -Match 'selected_ppl_status'
         $script:coreWorkflowContent | Should -Match 'vip_package_build_check\.status'
         $script:coreWorkflowContent | Should -Match 'gate_status'
         $script:coreWorkflowContent | Should -Match 'gate_report_artifact_name'

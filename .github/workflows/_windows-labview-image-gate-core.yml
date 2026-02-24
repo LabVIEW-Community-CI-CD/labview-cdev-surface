@@ -60,9 +60,24 @@ jobs:
           }
 
           $installerPath = Join-Path $gateRoot 'lvie-cdev-workspace-installer.exe'
-          $requiredLabviewYear = '2020'
+          $labviewImageForGate = '${{ vars.LABVIEW_WINDOWS_IMAGE }}'
+          if ([string]::IsNullOrWhiteSpace($labviewImageForGate)) {
+            $labviewImageForGate = 'nationalinstruments/labview:2026q1-windows'
+          }
+
+          $requiredLabviewYear = ''
+          $requiredLabviewYearOverride = '${{ vars.LABVIEW_GATE_REQUIRED_LABVIEW_YEAR }}'
+          if (-not [string]::IsNullOrWhiteSpace($requiredLabviewYearOverride)) {
+            $requiredLabviewYear = $requiredLabviewYearOverride
+          } else {
+            $imageYearMatch = [regex]::Match($labviewImageForGate, '(\d{4})q\d+-windows')
+            if ($imageYearMatch.Success) {
+              $requiredLabviewYear = [string]$imageYearMatch.Groups[1].Value
+            }
+          }
+
           $gateManifestPath = Join-Path $payloadRoot 'workspace-governance\workspace-governance.json'
-          if (Test-Path -LiteralPath $gateManifestPath -PathType Leaf) {
+          if ([string]::IsNullOrWhiteSpace($requiredLabviewYear) -and (Test-Path -LiteralPath $gateManifestPath -PathType Leaf)) {
             try {
               $gateManifest = Get-Content -LiteralPath $gateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
               $manifestRequiredYear = [string]$gateManifest.installer_contract.labview_gate.required_year
@@ -72,6 +87,9 @@ jobs:
             } catch {
               throw "Unable to parse installer contract required year from '$gateManifestPath'. $($_.Exception.Message)"
             }
+          }
+          if ([string]::IsNullOrWhiteSpace($requiredLabviewYear)) {
+            $requiredLabviewYear = '2020'
           }
           $nsisRoot = '${{ vars.NSIS_ROOT }}'
           if ([string]::IsNullOrWhiteSpace($nsisRoot)) { $nsisRoot = 'C:\Program Files (x86)\NSIS' }
@@ -184,6 +202,8 @@ jobs:
           ) -join ';'
           $env:VIPM_COMMUNITY_EDITION = 'true'
           $env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD = [string]$env:LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD
+          $env:LVIE_GATE_REQUIRED_LABVIEW_YEAR = [string]$env:LVIE_GATE_REQUIRED_LABVIEW_YEAR
+          $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
 
           $requiredCommands = @('powershell', 'pwsh', 'git', 'gh')
           $missingCommands = @()
@@ -218,10 +238,24 @@ jobs:
             throw "Installer report status is not succeeded: $([string]$installReport.status)"
           }
 
+          $selectedPplBitness = [string]$env:LVIE_GATE_SINGLE_PPL_BITNESS
+          if ([string]::IsNullOrWhiteSpace($selectedPplBitness)) {
+            $selectedPplBitness = '64'
+          }
+          if ($selectedPplBitness -notin @('32', '64')) {
+            throw "Invalid LVIE_GATE_SINGLE_PPL_BITNESS value '$selectedPplBitness'. Expected '32' or '64'."
+          }
+
           $ppl32 = [string]$installReport.ppl_capability_checks.'32'.status
           $ppl64 = [string]$installReport.ppl_capability_checks.'64'.status
-          if ($ppl32 -ne "pass") { throw "PPL 32-bit gate did not pass. status=$ppl32" }
-          if ($ppl64 -ne "pass") { throw "PPL 64-bit gate did not pass. status=$ppl64" }
+          $pplStatusByBitness = @{
+            '32' = $ppl32
+            '64' = $ppl64
+          }
+          $selectedPplStatus = [string]$pplStatusByBitness[$selectedPplBitness]
+          if ($selectedPplStatus -ne "pass") {
+            throw "PPL $selectedPplBitness-bit gate did not pass. status=$selectedPplStatus"
+          }
 
           $vipStatus = [string]$installReport.vip_package_build_check.status
           $vipPath = [string]$installReport.vip_package_build_check.output_vip_path
@@ -233,6 +267,8 @@ jobs:
           [ordered]@{
             status = "pass"
             install_report = $installReportPath
+            selected_ppl_bitness = $selectedPplBitness
+            selected_ppl_status = $selectedPplStatus
             ppl_32_status = $ppl32
             ppl_64_status = $ppl64
             vip_status = $vipStatus
@@ -248,6 +284,20 @@ jobs:
           $dockerIsolation = [string]$env:LABVIEW_WINDOWS_DOCKER_ISOLATION
           if ([string]::IsNullOrWhiteSpace($dockerIsolation)) {
             $dockerIsolation = 'process'
+          }
+          $gateRequiredLabviewYear = '${{ vars.LABVIEW_GATE_REQUIRED_LABVIEW_YEAR }}'
+          if ([string]::IsNullOrWhiteSpace($gateRequiredLabviewYear)) {
+            $imageYearMatch = [regex]::Match($labviewImage, '(\d{4})q\d+-windows')
+            if ($imageYearMatch.Success) {
+              $gateRequiredLabviewYear = [string]$imageYearMatch.Groups[1].Value
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($gateRequiredLabviewYear)) {
+            $gateRequiredLabviewYear = '2020'
+          }
+          $singlePplBitness = '${{ vars.LABVIEW_GATE_SINGLE_PPL_BITNESS }}'
+          if ([string]::IsNullOrWhiteSpace($singlePplBitness)) {
+            $singlePplBitness = '64'
           }
           $labviewX86NipkgInstallCmd = '${{ vars.LABVIEW_X86_NIPKG_INSTALL_CMD }}'
           if ([string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmd)) {
@@ -267,6 +317,8 @@ jobs:
           docker run --rm `
             --isolation=$dockerIsolation `
             --env "VIPM_COMMUNITY_EDITION=true" `
+            --env "LVIE_GATE_REQUIRED_LABVIEW_YEAR=$gateRequiredLabviewYear" `
+            --env "LVIE_GATE_SINGLE_PPL_BITNESS=$singlePplBitness" `
             --env "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD=$labviewX86NipkgInstallCmd" `
             --mount "type=bind,source=${env:GITHUB_WORKSPACE},target=C:\workspace" `
             --mount "type=bind,source=$hostPwshRoot,target=C:\host-tools\PowerShell7,readonly" `

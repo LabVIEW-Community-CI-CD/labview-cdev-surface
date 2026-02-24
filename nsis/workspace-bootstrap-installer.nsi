@@ -86,8 +86,10 @@ Section "Install"
   FileWrite $2 "x86_nipkg_env=${X86_NIPKG_ENV}$\r$\n"
   FileWrite $2 "x86_nipkg_cmd=$5$\r$\n"
   FileClose $2
+  StrCpy $6 "0"
   ${If} $5 == ""
-    StrCpy $5 "$\"C:\Program Files\National Instruments\NI Package Manager\nipkg.exe$\" install --accept-eulas --yes --include-recommended ni-labview-${REQUIRED_LABVIEW_YEAR}-core-en-x86"
+    StrCpy $5 "$\"C:\Program Files\National Instruments\NI Package Manager\nipkg.exe$\" install --accept-eulas --yes --include-recommended ni-labview-${REQUIRED_LABVIEW_YEAR}-core-x86-en"
+    StrCpy $6 "1"
     FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
     FileWrite $2 "x86_nipkg_status=using_default_command$\r$\n"
     FileWrite $2 "x86_nipkg_cmd=$5$\r$\n"
@@ -98,8 +100,20 @@ Section "Install"
   FileWrite $2 "x86_nipkg_exit_code=$0$\r$\n"
   FileClose $2
   ${If} $0 != 0
-    SetErrorLevel $0
-    Abort
+    ${If} $6 == "1"
+      StrCpy $5 "$\"C:\Program Files\National Instruments\NI Package Manager\nipkg.exe$\" install --accept-eulas --yes --include-recommended ni-labview-${REQUIRED_LABVIEW_YEAR}-core-en-x86"
+      FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
+      FileWrite $2 "x86_nipkg_fallback_cmd=$5$\r$\n"
+      FileClose $2
+      ExecWait '"$SYSDIR\cmd.exe" /c "$5 >> "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" 2>&1"' $0
+      FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
+      FileWrite $2 "x86_nipkg_fallback_exit_code=$0$\r$\n"
+      FileClose $2
+    ${EndIf}
+    ${If} $0 != 0
+      SetErrorLevel $0
+      Abort
+    ${EndIf}
   ${EndIf}
   IfFileExists "$4" labview_x86_ready 0
   SetErrorLevel 194
