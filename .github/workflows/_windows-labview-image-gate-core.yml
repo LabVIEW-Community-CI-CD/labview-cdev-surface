@@ -434,7 +434,9 @@ jobs:
 
           $viAnalyzerMarkers = @(
             (Join-Path $labviewRoot 'vi.lib\addons\analyzer'),
-            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer')
+            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer'),
+            (Join-Path $labviewRoot 'resource\Framework\Providers\VI_Analyzer'),
+            (Join-Path $labviewRoot 'project\_VI Analyzer')
           )
           $viAnalyzerInstalled = $false
           foreach ($markerPath in $viAnalyzerMarkers) {
@@ -446,6 +448,7 @@ jobs:
 
           $viAnalyzerInstallAttempted = $false
           $viAnalyzerInstallCommand = ''
+          $viAnalyzerInstallLogPath = ''
           if (-not $viAnalyzerInstalled) {
             $viAnalyzerInstallAttempted = $true
             $viAnalyzerInstallCommand = '${{ vars.LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD }}'
@@ -454,11 +457,19 @@ jobs:
               if (-not (Test-Path -LiteralPath $nipkgExe -PathType Leaf)) {
                 throw "VI Analyzer is missing and NI Package Manager is unavailable at '$nipkgExe'."
               }
-              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-vi-analyzer-toolkit"
+              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-labview-vi-analyzer-toolkit-lic"
             }
-            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', $viAnalyzerInstallCommand) -NoNewWindow -Wait -PassThru
+            $viAnalyzerInstallLogPath = Join-Path $artifactRoot 'vi-analyzer-install.log'
+            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', "$viAnalyzerInstallCommand > `"$viAnalyzerInstallLogPath`" 2>&1") -NoNewWindow -Wait -PassThru
             if ([int]$viAnalyzerInstallProcess.ExitCode -ne 0) {
-              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              $installTail = ''
+              if (Test-Path -LiteralPath $viAnalyzerInstallLogPath -PathType Leaf) {
+                $installTail = (Get-Content -LiteralPath $viAnalyzerInstallLogPath -Tail 40 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+              }
+              if ([string]::IsNullOrWhiteSpace($installTail)) {
+                throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              }
+              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode). log_tail=$installTail"
             }
           }
 
@@ -473,6 +484,7 @@ jobs:
             native_labview_root = $labviewRoot
             vi_analyzer_install_attempted = $viAnalyzerInstallAttempted
             vi_analyzer_install_command = $viAnalyzerInstallCommand
+            vi_analyzer_install_log = $viAnalyzerInstallLogPath
             produced_files = @('lv_icon_x86.lvlibp', 'IconEditor.vipb', 'release-notes.md')
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-linux-prereq-x86-report.json') -Encoding utf8
@@ -516,7 +528,9 @@ jobs:
 
           $viAnalyzerMarkers = @(
             (Join-Path $labviewRoot 'vi.lib\addons\analyzer'),
-            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer')
+            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer'),
+            (Join-Path $labviewRoot 'resource\Framework\Providers\VI_Analyzer'),
+            (Join-Path $labviewRoot 'project\_VI Analyzer')
           )
           $viAnalyzerInstalled = $false
           foreach ($markerPath in $viAnalyzerMarkers) {
@@ -528,6 +542,7 @@ jobs:
 
           $viAnalyzerInstallAttempted = $false
           $viAnalyzerInstallCommand = ''
+          $viAnalyzerInstallLogPath = ''
           if (-not $viAnalyzerInstalled) {
             $viAnalyzerInstallAttempted = $true
             $viAnalyzerInstallCommand = '${{ vars.LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD }}'
@@ -536,11 +551,19 @@ jobs:
               if (-not (Test-Path -LiteralPath $nipkgExe -PathType Leaf)) {
                 throw "VI Analyzer is missing and NI Package Manager is unavailable at '$nipkgExe'."
               }
-              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-vi-analyzer-toolkit"
+              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-labview-vi-analyzer-toolkit-lic"
             }
-            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', $viAnalyzerInstallCommand) -NoNewWindow -Wait -PassThru
+            $viAnalyzerInstallLogPath = Join-Path $artifactRoot 'vi-analyzer-install.log'
+            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', "$viAnalyzerInstallCommand > `"$viAnalyzerInstallLogPath`" 2>&1") -NoNewWindow -Wait -PassThru
             if ([int]$viAnalyzerInstallProcess.ExitCode -ne 0) {
-              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              $installTail = ''
+              if (Test-Path -LiteralPath $viAnalyzerInstallLogPath -PathType Leaf) {
+                $installTail = (Get-Content -LiteralPath $viAnalyzerInstallLogPath -Tail 40 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+              }
+              if ([string]::IsNullOrWhiteSpace($installTail)) {
+                throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              }
+              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode). log_tail=$installTail"
             }
           }
 
@@ -555,6 +578,7 @@ jobs:
             native_labview_root = $labviewRoot
             vi_analyzer_install_attempted = $viAnalyzerInstallAttempted
             vi_analyzer_install_command = $viAnalyzerInstallCommand
+            vi_analyzer_install_log = $viAnalyzerInstallLogPath
             produced_files = @('lv_icon_x64.lvlibp', 'IconEditor.vipb', 'release-notes.md')
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-linux-prereq-x64-report.json') -Encoding utf8
