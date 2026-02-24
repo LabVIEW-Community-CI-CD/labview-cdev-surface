@@ -59,12 +59,12 @@
     },
     "cli_bundle": {
       "repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
-      "version": "0.1.0",
-      "source_commit": "e2245e5936ef75551e6cfb918e4029b107511f0f",
+      "version": "0.1.1",
+      "source_commit": "ab9d1588724b05b69cc067b56fecf385704d0dea",
       "asset_win": "cdev-cli-win-x64.zip",
-      "asset_win_sha256": "d25d292b23b5b688b6c2313379ec660f0e2d20d270de084dc7065fdc7a1f5989",
+      "asset_win_sha256": "9e2c0d487edf206bfd0a28b1ccd14b8482ce7cab2772a2f49e2b606599add002",
       "asset_linux": "cdev-cli-linux-x64.tar.gz",
-      "asset_linux_sha256": "c296b2c6e6f64778ecf0ee414b136a93bc6e4d35e3112d5406b30fea11f0ee09",
+      "asset_linux_sha256": "4f10400428100110d6b68f20c87409a172627ab068df0614632325b3ae882f92",
       "payload_root": "tools\\cdev-cli",
       "entrypoint_win": "tools\\cdev-cli\\win-x64\\cdev-cli\\scripts\\Invoke-CdevCli.ps1",
       "entrypoint_linux": "tools/cdev-cli/linux-x64/cdev-cli/scripts/Invoke-CdevCli.ps1"
@@ -390,3 +390,4 @@
     }
   ]
 }
+
