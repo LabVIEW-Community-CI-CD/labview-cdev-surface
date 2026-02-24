@@ -96,6 +96,7 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '--env'', "LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR=\$parityExecutionYear"'
         $script:coreWorkflowContent | Should -Match '--env'', "PARITY_REQUIRED_YEAR=\$parityExecutionYear"'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostPwshMountSource,target=C:\\host-tools\\PowerShell7,readonly'
+        $script:coreWorkflowContent | Should -Match 'windows-image-gate/parity/host-mounts/\*\*'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGitMountSource,target=C:\\host-tools\\Git,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGhMountSource,target=C:\\host-tools\\GitHubCLI,readonly'
         $script:coreWorkflowContent | Should -Match 'type=bind,source=\$hostGCliMountSource,target=C:\\host-tools\\G-CLI,readonly'

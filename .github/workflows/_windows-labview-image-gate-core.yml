@@ -958,14 +958,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-labview-image-gate-parity-${{ github.run_id }}
-          path: ${{ github.workspace }}/artifacts/windows-image-gate/parity
+          path: |
+            ${{ github.workspace }}/artifacts/windows-image-gate/parity
+            !${{ github.workspace }}/artifacts/windows-image-gate/parity/host-mounts/**
           if-no-files-found: error
       - name: Upload container parity gate artifacts (attempt 2)
         if: always() && steps.upload_container_parity_artifacts_attempt_1.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: windows-labview-image-gate-parity-${{ github.run_id }}
-          path: ${{ github.workspace }}/artifacts/windows-image-gate/parity
+          path: |
+            ${{ github.workspace }}/artifacts/windows-image-gate/parity
+            !${{ github.workspace }}/artifacts/windows-image-gate/parity/host-mounts/**
           if-no-files-found: error
 
   gate-summary:
