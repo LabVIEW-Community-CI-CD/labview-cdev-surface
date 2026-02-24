@@ -376,8 +376,17 @@ jobs:
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-release-gate-report.json') -Encoding utf8
 
-      - name: Upload host release gate artifacts
+      - name: Upload host release gate artifacts (attempt 1)
         if: always()
+        id: upload_host_release_artifacts_attempt_1
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-labview-image-gate-release-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate/release
+          if-no-files-found: error
+      - name: Upload host release gate artifacts (attempt 2)
+        if: always() && steps.upload_host_release_artifacts_attempt_1.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: windows-labview-image-gate-release-${{ github.run_id }}
@@ -942,8 +951,17 @@ jobs:
             }
           }
 
-      - name: Upload container parity gate artifacts
+      - name: Upload container parity gate artifacts (attempt 1)
         if: always()
+        id: upload_container_parity_artifacts_attempt_1
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-labview-image-gate-parity-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate/parity
+          if-no-files-found: error
+      - name: Upload container parity gate artifacts (attempt 2)
+        if: always() && steps.upload_container_parity_artifacts_attempt_1.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: windows-labview-image-gate-parity-${{ github.run_id }}
