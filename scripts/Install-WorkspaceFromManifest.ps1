@@ -547,8 +547,14 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        $runnerCliPplOutput = & $RunnerCliPath @commandArgs 2>&1
-        $result.exit_code = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $runnerCliPplOutput = & $RunnerCliPath @commandArgs 2>&1
+            $result.exit_code = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         if ($null -ne $runnerCliPplOutput) {
             $runnerCliPplOutput | ForEach-Object { Write-Host ([string]$_) }
         }
@@ -698,8 +704,14 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
         )
         $result.command.vipc_assert = @($vipcAssertArgs)
         Write-InstallerFeedback -Message 'Running runner-cli vipc assert.'
-        $vipcAssertOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
-        $vipcAssertExit = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $vipcAssertOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
+            $vipcAssertExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         if ($null -ne $vipcAssertOutput) {
             $vipcAssertOutput | ForEach-Object { Write-Host ([string]$_) }
         }
@@ -729,8 +741,14 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after non-blocking remediation attempt.'
-                $vipcAssertPostRemediationOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
-                $vipcAssertPostRemediationExit = $LASTEXITCODE
+                $previousErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    $vipcAssertPostRemediationOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
+                    $vipcAssertPostRemediationExit = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
                 if ($null -ne $vipcAssertPostRemediationOutput) {
                     $vipcAssertPostRemediationOutput | ForEach-Object { Write-Host ([string]$_) }
                 }
@@ -757,8 +775,14 @@ function Invoke-RunnerCliVipPackageHarnessCheck {
                 }
 
                 Write-InstallerFeedback -Message 'Re-running runner-cli vipc assert after apply.'
-                $vipcAssertPostApplyOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
-                $vipcAssertPostApplyExit = $LASTEXITCODE
+                $previousErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    $vipcAssertPostApplyOutput = & $RunnerCliPath @vipcAssertArgs 2>&1
+                    $vipcAssertPostApplyExit = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
                 if ($null -ne $vipcAssertPostApplyOutput) {
                     $vipcAssertPostApplyOutput | ForEach-Object { Write-Host ([string]$_) }
                 }
