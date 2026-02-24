@@ -600,7 +600,74 @@ jobs:
           $env:LVIE_PARITY_BUILD_SPEC_KIND = 'ppl'
           $env:LVIE_PARITY_BUILD_SPEC_PLACEHOLDER = 'srcdist'
 
-          $requiredCommands = @('powershell', 'pwsh', 'git', 'gh', 'g-cli')
+          $artifactRoot = "C:\workspace\artifacts\windows-image-gate\parity"
+          if (-not (Test-Path -LiteralPath $artifactRoot -PathType Container)) {
+            New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+          }
+          $phaseCheckpointsPath = Join-Path $artifactRoot 'phase-checkpoints.log'
+          if (Test-Path -LiteralPath $phaseCheckpointsPath -PathType Leaf) {
+            Remove-Item -LiteralPath $phaseCheckpointsPath -Force
+          }
+
+          function Write-PhaseCheckpoint {
+            param(
+              [Parameter(Mandatory = $true)][string]$Phase,
+              [Parameter()][string]$Status = 'info',
+              [Parameter()][string]$Message = ''
+            )
+
+            $entry = [ordered]@{
+              timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+              phase = $Phase
+              status = $Status
+              message = $Message
+            } | ConvertTo-Json -Compress
+            Add-Content -LiteralPath $phaseCheckpointsPath -Value $entry -Encoding utf8
+            Write-Host "phase=$Phase status=$Status message=$Message"
+          }
+
+          function Get-PositiveIntOrDefault {
+            param(
+              [Parameter()][string]$RawValue,
+              [Parameter(Mandatory = $true)][int]$DefaultValue
+            )
+
+            $parsed = 0
+            if ([int]::TryParse([string]$RawValue, [ref]$parsed) -and $parsed -gt 0) {
+              return $parsed
+            }
+            return $DefaultValue
+          }
+
+          function Copy-FileWithTimeout {
+            param(
+              [Parameter(Mandatory = $true)][string]$SourcePath,
+              [Parameter(Mandatory = $true)][string]$DestinationPath,
+              [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+            )
+
+            $copyJob = Start-Job -ScriptBlock {
+              param($src, $dst)
+              if (Test-Path -LiteralPath $src -PathType Leaf) {
+                Copy-Item -LiteralPath $src -Destination $dst -Force
+              }
+            } -ArgumentList $SourcePath, $DestinationPath
+            try {
+              $completed = Wait-Job -Id $copyJob.Id -Timeout $TimeoutSeconds
+              if ($null -eq $completed) {
+                throw "postphase_copy_timeout: timeout_seconds=$TimeoutSeconds source=$SourcePath"
+              }
+              Receive-Job -Id $copyJob.Id | Out-Null
+            } finally {
+              Remove-Job -Id $copyJob.Id -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+          }
+
+          $installerTimeoutMinutes = Get-PositiveIntOrDefault -RawValue ([string]$env:LVIE_PARITY_INSTALLER_TIMEOUT_MINUTES) -DefaultValue 90
+          $viAnalyzerTimeoutMinutes = Get-PositiveIntOrDefault -RawValue ([string]$env:LVIE_PARITY_VI_ANALYZER_TIMEOUT_MINUTES) -DefaultValue 45
+          $postphaseCopyTimeoutSeconds = Get-PositiveIntOrDefault -RawValue ([string]$env:LVIE_PARITY_POSTPHASE_COPY_TIMEOUT_SECONDS) -DefaultValue 300
+
+          $requiredCommands = @('powershell', 'git', 'gh', 'g-cli')
           $missingCommands = @()
           foreach ($name in $requiredCommands) {
             if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
@@ -629,19 +696,31 @@ jobs:
             }
           }
 
-          $installerProcess = Start-Process -FilePath "C:\workspace\artifacts\windows-image-gate\parity\lvie-cdev-workspace-installer.exe" -ArgumentList '/S' -Wait -PassThru
+          Write-PhaseCheckpoint -Phase 'installer_start' -Status 'info' -Message "timeout_minutes=$installerTimeoutMinutes"
+          $installerProcess = Start-Process -FilePath "C:\workspace\artifacts\windows-image-gate\parity\lvie-cdev-workspace-installer.exe" -ArgumentList '/S' -PassThru
+          $installerExited = $installerProcess.WaitForExit($installerTimeoutMinutes * 60 * 1000)
+          if (-not $installerExited) {
+            try {
+              $installerProcess.Kill()
+            } catch {}
+            Write-PhaseCheckpoint -Phase 'installer_timeout' -Status 'fail' -Message "timeout_minutes=$installerTimeoutMinutes"
+            throw "installer_timeout: workspace installer exceeded timeout_minutes=$installerTimeoutMinutes."
+          }
+          Write-PhaseCheckpoint -Phase 'installer_done' -Status 'info' -Message "exit_code=$([int]$installerProcess.ExitCode)"
 
           $workspaceRoot = 'C:\workspace\gate-dev-parity'
           $workspaceArtifactsRoot = Join-Path $workspaceRoot 'artifacts'
           $launchLogPath = Join-Path $workspaceArtifactsRoot 'workspace-installer-launch.log'
           $installReportPath = Join-Path $workspaceArtifactsRoot 'workspace-install-latest.json'
 
+          Write-PhaseCheckpoint -Phase 'postphase_copy_start' -Status 'info' -Message "timeout_seconds=$postphaseCopyTimeoutSeconds"
           if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
-            Copy-Item -LiteralPath $launchLogPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\workspace-installer-launch.log" -Force
+            Copy-FileWithTimeout -SourcePath $launchLogPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\workspace-installer-launch.log" -TimeoutSeconds $postphaseCopyTimeoutSeconds
           }
           if (Test-Path -LiteralPath $installReportPath -PathType Leaf) {
-            Copy-Item -LiteralPath $installReportPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\workspace-install-latest.json" -Force
+            Copy-FileWithTimeout -SourcePath $installReportPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\workspace-install-latest.json" -TimeoutSeconds $postphaseCopyTimeoutSeconds
           }
+          Write-PhaseCheckpoint -Phase 'postphase_copy_done' -Status 'info' -Message 'installer logs copied'
 
           if ([int]$installerProcess.ExitCode -ne 0) {
             throw "Installer failed with exit code $([int]$installerProcess.ExitCode)."
@@ -681,21 +760,39 @@ jobs:
 
           $viAnalyzerStatusPath = 'builds\status\vi-analyzer-summary.parity.windows.gate.json'
           $viAnalyzerReportsRoot = 'builds\vi-analyzer\windows-container-gate'
-          & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $viAnalyzerScript `
-            -WorkspaceRoot $iconEditorRoot `
-            -LabVIEWVersion ([string]$env:PARITY_REQUIRED_YEAR) `
-            -LabVIEWBitness $selectedPplBitness `
-            -ReportsRoot $viAnalyzerReportsRoot `
-            -StatusPath $viAnalyzerStatusPath
-          if ($LASTEXITCODE -ne 0) {
-            throw "Container parity VI Analyzer failed with exit code $LASTEXITCODE."
+          $viAnalyzerArgs = @(
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $viAnalyzerScript,
+            '-WorkspaceRoot', $iconEditorRoot,
+            '-LabVIEWVersion', ([string]$env:PARITY_REQUIRED_YEAR),
+            '-LabVIEWBitness', $selectedPplBitness,
+            '-ReportsRoot', $viAnalyzerReportsRoot,
+            '-StatusPath', $viAnalyzerStatusPath
+          )
+          Write-PhaseCheckpoint -Phase 'vi_analyzer_start' -Status 'info' -Message "timeout_minutes=$viAnalyzerTimeoutMinutes"
+          $viAnalyzerProcess = Start-Process -FilePath 'powershell' -ArgumentList $viAnalyzerArgs -PassThru
+          $viAnalyzerExited = $viAnalyzerProcess.WaitForExit($viAnalyzerTimeoutMinutes * 60 * 1000)
+          if (-not $viAnalyzerExited) {
+            try {
+              $viAnalyzerProcess.Kill()
+            } catch {}
+            Write-PhaseCheckpoint -Phase 'vi_analyzer_timeout' -Status 'fail' -Message "timeout_minutes=$viAnalyzerTimeoutMinutes"
+            throw "vi_analyzer_timeout: VI Analyzer exceeded timeout_minutes=$viAnalyzerTimeoutMinutes."
           }
+          if ([int]$viAnalyzerProcess.ExitCode -ne 0) {
+            throw "Container parity VI Analyzer failed with exit code $([int]$viAnalyzerProcess.ExitCode)."
+          }
+          Write-PhaseCheckpoint -Phase 'vi_analyzer_done' -Status 'info' -Message "exit_code=$([int]$viAnalyzerProcess.ExitCode)"
 
           $resolvedViAnalyzerStatusPath = Join-Path $iconEditorRoot $viAnalyzerStatusPath
           if (-not (Test-Path -LiteralPath $resolvedViAnalyzerStatusPath -PathType Leaf)) {
             throw "Container parity VI Analyzer status file missing: $resolvedViAnalyzerStatusPath"
           }
-          Copy-Item -LiteralPath $resolvedViAnalyzerStatusPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\vi-analyzer-summary.parity.windows.gate.json" -Force
+          Copy-FileWithTimeout -SourcePath $resolvedViAnalyzerStatusPath -Destination "C:\workspace\artifacts\windows-image-gate\parity\vi-analyzer-summary.parity.windows.gate.json" -TimeoutSeconds $postphaseCopyTimeoutSeconds
+          Write-PhaseCheckpoint -Phase 'finalize_done' -Status 'pass' -Message 'parity report and VI Analyzer status persisted'
 
           [ordered]@{
             status = 'pass'
@@ -737,6 +834,19 @@ jobs:
             $singlePplBitness = '64'
           }
 
+          $containerScriptTimeoutMinutes = 140
+          $installerTimeoutMinutes = 90
+          $viAnalyzerTimeoutMinutes = 45
+          $postphaseCopyTimeoutSeconds = 300
+          [int]::TryParse('${{ vars.LVIE_PARITY_CONTAINER_SCRIPT_TIMEOUT_MINUTES }}', [ref]$containerScriptTimeoutMinutes) | Out-Null
+          [int]::TryParse('${{ vars.LVIE_PARITY_INSTALLER_TIMEOUT_MINUTES }}', [ref]$installerTimeoutMinutes) | Out-Null
+          [int]::TryParse('${{ vars.LVIE_PARITY_VI_ANALYZER_TIMEOUT_MINUTES }}', [ref]$viAnalyzerTimeoutMinutes) | Out-Null
+          [int]::TryParse('${{ vars.LVIE_PARITY_POSTPHASE_COPY_TIMEOUT_SECONDS }}', [ref]$postphaseCopyTimeoutSeconds) | Out-Null
+          if ($containerScriptTimeoutMinutes -lt 30) { $containerScriptTimeoutMinutes = 30 }
+          if ($installerTimeoutMinutes -lt 5) { $installerTimeoutMinutes = 5 }
+          if ($viAnalyzerTimeoutMinutes -lt 5) { $viAnalyzerTimeoutMinutes = 5 }
+          if ($postphaseCopyTimeoutSeconds -lt 30) { $postphaseCopyTimeoutSeconds = 30 }
+
           $labviewX86NipkgInstallCmd = '${{ vars.LABVIEW_X86_NIPKG_INSTALL_CMD }}'
           if ([string]::IsNullOrWhiteSpace($labviewX86NipkgInstallCmd)) {
             $nipkgExe = '"C:\Program Files\National Instruments\NI Package Manager\nipkg.exe"'
@@ -770,10 +880,14 @@ jobs:
           $hostGitRoot = 'C:\Program Files\Git'
           $hostGhRoot = 'C:\Program Files\GitHub CLI'
           $hostGCliRoot = 'C:\Program Files\G-CLI'
-          foreach ($hostToolRoot in @($hostDevRoot, $hostLabview2020x64Root, $hostLabview2020x86Root, $hostPwshRoot, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
+          foreach ($hostToolRoot in @($hostDevRoot, $hostLabview2020x64Root, $hostLabview2020x86Root, $hostGitRoot, $hostGhRoot, $hostGCliRoot)) {
             if (-not (Test-Path -LiteralPath $hostToolRoot -PathType Container)) {
               throw "Required host tool root is missing for container bind mount: $hostToolRoot"
             }
+          }
+          $hasHostPwshRoot = Test-Path -LiteralPath $hostPwshRoot -PathType Container
+          if (-not $hasHostPwshRoot) {
+            Write-Warning "Host PowerShell 7 root is not present at '$hostPwshRoot'. Continuing with Windows PowerShell-first container surface."
           }
           $manifestPath = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.json'
           if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
@@ -851,13 +965,18 @@ jobs:
           foreach ($junction in @(
             @{ path = $hostGitMountSource; target = $hostGitRoot },
             @{ path = $hostGhMountSource; target = $hostGhRoot },
-            @{ path = $hostGCliMountSource; target = $hostGCliRoot },
-            @{ path = $hostPwshMountSource; target = $hostPwshRoot }
+            @{ path = $hostGCliMountSource; target = $hostGCliRoot }
           )) {
             if (Test-Path -LiteralPath $junction.path) {
               Remove-Item -LiteralPath $junction.path -Force
             }
             New-Item -Path $junction.path -ItemType Junction -Target $junction.target -Force | Out-Null
+          }
+          if ($hasHostPwshRoot) {
+            if (Test-Path -LiteralPath $hostPwshMountSource) {
+              Remove-Item -LiteralPath $hostPwshMountSource -Force
+            }
+            New-Item -Path $hostPwshMountSource -ItemType Junction -Target $hostPwshRoot -Force | Out-Null
           }
 
           $containerName = "lvie-gate-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
@@ -894,16 +1013,21 @@ jobs:
             '--env', "PARITY_REQUIRED_YEAR=$parityExecutionYear",
             '--env', "LVIE_PARITY_LVCONTAINER_RAW=$env:LVIE_PARITY_LVCONTAINER_RAW",
             '--env', "LVIE_PARITY_WINDOWS_TAG=$env:LVIE_PARITY_WINDOWS_TAG",
-            '--env', "PARITY_BUILD_SPEC_MARKER=$env:PARITY_BUILD_SPEC_MARKER"
+            '--env', "PARITY_BUILD_SPEC_MARKER=$env:PARITY_BUILD_SPEC_MARKER",
+            '--env', "LVIE_PARITY_INSTALLER_TIMEOUT_MINUTES=$installerTimeoutMinutes",
+            '--env', "LVIE_PARITY_VI_ANALYZER_TIMEOUT_MINUTES=$viAnalyzerTimeoutMinutes",
+            '--env', "LVIE_PARITY_POSTPHASE_COPY_TIMEOUT_SECONDS=$postphaseCopyTimeoutSeconds"
           )
           $dockerMountSpecs = @(
             "type=bind,source=$($env:GITHUB_WORKSPACE),target=C:\workspace",
             "type=bind,source=$hostDevRoot,target=C:\dev",
-            "type=bind,source=$hostPwshMountSource,target=C:\host-tools\PowerShell7,readonly",
             "type=bind,source=$hostGitMountSource,target=C:\host-tools\Git,readonly",
             "type=bind,source=$hostGhMountSource,target=C:\host-tools\GitHubCLI,readonly",
             "type=bind,source=$hostGCliMountSource,target=C:\host-tools\G-CLI,readonly"
           )
+          if ($hasHostPwshRoot) {
+            $dockerMountSpecs += "type=bind,source=$hostPwshMountSource,target=C:\host-tools\PowerShell7,readonly"
+          }
           foreach ($dockerMountSpec in $dockerMountSpecs) {
             $dockerArgs += @('--mount', $dockerMountSpec)
           }
@@ -912,27 +1036,110 @@ jobs:
             'powershell', '-NoProfile', '-EncodedCommand', $containerCmdEncoded
           )
 
-          $dockerExitCode = 0
+          $dockerStdoutPath = Join-Path $artifactRoot 'docker-run-stdout.log'
+          $dockerStderrPath = Join-Path $artifactRoot 'docker-run-stderr.log'
+          if (Test-Path -LiteralPath $dockerStdoutPath -PathType Leaf) { Remove-Item -LiteralPath $dockerStdoutPath -Force }
+          if (Test-Path -LiteralPath $dockerStderrPath -PathType Leaf) { Remove-Item -LiteralPath $dockerStderrPath -Force }
+
+          $dockerProcess = $null
+          $containerScriptNonExit = $false
+          $heartbeatIntervalSeconds = 60
+          $heartbeatPollSeconds = 15
+          $lastHeartbeatUtc = [DateTime]::MinValue
+          $deadlineUtc = (Get-Date).ToUniversalTime().AddMinutes($containerScriptTimeoutMinutes)
+
           try {
-            & docker @dockerArgs
-            $dockerExitCode = $LASTEXITCODE
+            $dockerProcess = Start-Process -FilePath 'docker' -ArgumentList $dockerArgs -PassThru -RedirectStandardOutput $dockerStdoutPath -RedirectStandardError $dockerStderrPath
+
+            while (-not $dockerProcess.HasExited) {
+              Start-Sleep -Seconds $heartbeatPollSeconds
+              $dockerProcess.Refresh()
+              $nowUtc = (Get-Date).ToUniversalTime()
+
+              if ($nowUtc -ge $deadlineUtc) {
+                $containerScriptNonExit = $true
+                Write-Warning "container_script_non_exit: docker run exceeded timeout_minutes=$containerScriptTimeoutMinutes."
+                try {
+                  Stop-Process -Id $dockerProcess.Id -Force
+                } catch {
+                  Write-Warning "Failed to stop docker process id=$($dockerProcess.Id). $($_.Exception.Message)"
+                }
+                break
+              }
+
+              if (($nowUtc - $lastHeartbeatUtc).TotalSeconds -ge $heartbeatIntervalSeconds) {
+                $elapsedSeconds = [int](($nowUtc - $dockerProcess.StartTime.ToUniversalTime()).TotalSeconds)
+                $state = (& docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.StartedAt}}' $containerName 2>$null)
+                if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$state)) {
+                  $state = 'container_not_visible'
+                }
+                Write-Host "::notice::windows_container_parity_heartbeat elapsed_seconds=$elapsedSeconds timeout_minutes=$containerScriptTimeoutMinutes state=$state image=$labviewImage isolation=$dockerIsolation"
+
+                $phasePath = Join-Path $artifactRoot 'phase-checkpoints.log'
+                if (Test-Path -LiteralPath $phasePath -PathType Leaf) {
+                  $recentPhases = Get-Content -LiteralPath $phasePath -Tail 3
+                  foreach ($phaseEntry in @($recentPhases)) {
+                    Write-Host "::notice::phase_checkpoint $phaseEntry"
+                  }
+                }
+                $lastHeartbeatUtc = $nowUtc
+              }
+            }
+
+            if ($null -ne $dockerProcess -and -not $dockerProcess.HasExited) {
+              try {
+                Wait-Process -Id $dockerProcess.Id -Timeout 30
+              } catch {}
+            }
+
+            $dockerExitCode = if ($containerScriptNonExit) { 124 } else { [int]$dockerProcess.ExitCode }
+            $containerLogsPath = Join-Path $artifactRoot 'container-console.log'
+            if (Test-Path -LiteralPath $dockerStdoutPath -PathType Leaf) {
+              Get-Content -LiteralPath $dockerStdoutPath | Set-Content -LiteralPath $containerLogsPath -Encoding utf8
+            } else {
+              Set-Content -LiteralPath $containerLogsPath -Value '' -Encoding utf8
+            }
+            if (Test-Path -LiteralPath $dockerStderrPath -PathType Leaf) {
+              Add-Content -LiteralPath $containerLogsPath -Value ''
+              Add-Content -LiteralPath $containerLogsPath -Value '--- stderr ---'
+              Get-Content -LiteralPath $dockerStderrPath | Add-Content -LiteralPath $containerLogsPath -Encoding utf8
+            }
+
+            $phasePath = Join-Path $artifactRoot 'phase-checkpoints.log'
+            $failureReason = if ($containerScriptNonExit) { 'container_script_non_exit' } else { 'container_boot_failure' }
+            if (Test-Path -LiteralPath $phasePath -PathType Leaf) {
+              $phaseContent = Get-Content -LiteralPath $phasePath -Raw
+              foreach ($signature in @('installer_timeout', 'vi_analyzer_timeout', 'postphase_copy_timeout', 'container_script_non_exit')) {
+                if ($phaseContent -match $signature) {
+                  $failureReason = $signature
+                  break
+                }
+              }
+            }
+
+            $classificationPath = Join-Path $artifactRoot 'container-execution-classification.json'
+            [ordered]@{
+              status = if ($dockerExitCode -eq 0) { 'pass' } else { 'fail' }
+              reason = if ($dockerExitCode -eq 0) { 'none' } else { $failureReason }
+              docker_exit_code = $dockerExitCode
+              docker_timeout_minutes = $containerScriptTimeoutMinutes
+              installer_timeout_minutes = $installerTimeoutMinutes
+              vi_analyzer_timeout_minutes = $viAnalyzerTimeoutMinutes
+              postphase_copy_timeout_seconds = $postphaseCopyTimeoutSeconds
+              docker_isolation = $dockerIsolation
+              docker_image = $labviewImage
+              lvcontainer_raw = [string]$env:LVIE_PARITY_LVCONTAINER_RAW
+              lvcontainer_windows_tag = [string]$env:LVIE_PARITY_WINDOWS_TAG
+              selected_ppl_bitness = $singlePplBitness
+              phase_checkpoints_path = $phasePath
+              timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $classificationPath -Encoding utf8
 
             if ($dockerExitCode -ne 0) {
               Write-Warning "Container parity gate failed. Collecting host fallback diagnostics."
-
-              $containerLogsPath = Join-Path $artifactRoot 'container-console.log'
-              try {
-                $containerLogs = & docker logs $containerName 2>&1
-                if ($null -ne $containerLogs) {
-                  $containerLogs | Set-Content -LiteralPath $containerLogsPath -Encoding utf8
-                }
-              } catch {
-                Write-Warning "Failed to collect docker logs for container '$containerName'. $($_.Exception.Message)"
-              }
-
               $fallbackDiagnostics = [ordered]@{
                 status = 'fail'
-                reason = 'container_boot_failure'
+                reason = $failureReason
                 docker_exit_code = $dockerExitCode
                 docker_isolation = $dockerIsolation
                 docker_image = $labviewImage
@@ -940,11 +1147,14 @@ jobs:
                 lvcontainer_raw = [string]$env:LVIE_PARITY_LVCONTAINER_RAW
                 lvcontainer_windows_tag = [string]$env:LVIE_PARITY_WINDOWS_TAG
                 selected_ppl_bitness = $singlePplBitness
+                phase_checkpoints_path = $phasePath
+                classification_path = $classificationPath
                 timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
                 host_probe = [ordered]@{
                   host_dev_root_exists = (Test-Path -LiteralPath $hostDevRoot -PathType Container)
                   host_labview_2020_x64_exists = (Test-Path -LiteralPath $hostLabview2020x64Root -PathType Container)
                   host_labview_2020_x86_exists = (Test-Path -LiteralPath $hostLabview2020x86Root -PathType Container)
+                  host_powershell7_exists = $hasHostPwshRoot
                   host_git_exists = (Test-Path -LiteralPath $hostGitRoot -PathType Container)
                   host_gh_exists = (Test-Path -LiteralPath $hostGhRoot -PathType Container)
                   host_gcli_exists = (Test-Path -LiteralPath $hostGCliRoot -PathType Container)
@@ -960,7 +1170,7 @@ jobs:
               $fallbackPath = Join-Path $artifactRoot 'container-fallback-diagnostics.json'
               $fallbackDiagnostics | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $fallbackPath -Encoding utf8
 
-              throw "Windows container parity gate failed with exit code $dockerExitCode."
+              throw "Windows container parity gate failed with exit code $dockerExitCode. reason=$failureReason"
             }
           } finally {
             try {

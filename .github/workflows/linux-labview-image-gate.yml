@@ -1,0 +1,13 @@
+name: linux-labview-image-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-labview-image-gate:
+    name: Linux LabVIEW Image Gate
+    uses: ./.github/workflows/_linux-labview-image-gate-core.yml
+    secrets: inherit

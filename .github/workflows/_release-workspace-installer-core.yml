@@ -115,6 +115,23 @@ jobs:
           New-Item -Path (Join-Path $payloadRoot 'scripts') -ItemType Directory -Force | Out-Null
           New-Item -Path (Join-Path $payloadRoot 'tools\runner-cli\win-x64') -ItemType Directory -Force | Out-Null
 
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "Workspace manifest is missing: $manifestPath"
+          }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $releaseArtifactRoot = [string]$manifest.installer_contract.release_build_contract.artifact_root
+          $parityArtifactRoot = [string]$manifest.installer_contract.container_parity_contract.artifact_root
+          if ([string]::IsNullOrWhiteSpace($releaseArtifactRoot)) { $releaseArtifactRoot = 'artifacts\release' }
+          if ([string]::IsNullOrWhiteSpace($parityArtifactRoot)) { $parityArtifactRoot = 'artifacts\parity' }
+
+          if ($releaseArtifactRoot -eq $parityArtifactRoot) {
+            throw "Invalid contract: release and parity artifact roots are identical ('$releaseArtifactRoot')."
+          }
+          if ($releaseArtifactRoot -match '(?i)(^|[\\/])parity([\\/]|$)') {
+            throw "Invalid contract: release artifact root must not point to parity path. release_artifact_root='$releaseArtifactRoot'"
+          }
+
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/Install-WorkspaceFromManifest.ps1" -Destination (Join-Path $payloadRoot 'scripts/Install-WorkspaceFromManifest.ps1') -Force
 
           $bundleRunnerCliScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/Build-RunnerCliBundleFromManifest.ps1'
@@ -255,6 +272,10 @@ jobs:
           $installCommand = [string]$metadata.install_command
           if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
             throw "Installer metadata is missing required fields."
+          }
+          $assetPathNormalized = [string]$assetPath
+          if ($assetPathNormalized -match '(?i)[\\/](artifacts)[\\/](parity)([\\/]|$)') {
+            throw "Parity artifact path was selected for release publish input: $assetPathNormalized"
           }
 
           $allowExistingTag = $false

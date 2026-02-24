@@ -61,11 +61,17 @@ jobs:
     uses: ./.github/workflows/_windows-labview-image-gate-core.yml
     secrets: inherit
 
+  linux_gate:
+    name: Linux Gate
+    needs: [repo_guard]
+    uses: ./.github/workflows/_linux-labview-image-gate-core.yml
+    secrets: inherit
+
   gate_policy:
     name: Gate Policy
     runs-on: ubuntu-latest
     if: ${{ always() }}
-    needs: [repo_guard, windows_gate]
+    needs: [repo_guard, windows_gate, linux_gate]
     outputs:
       override_applied: ${{ steps.evaluate.outputs.override_applied }}
       override_reason: ${{ steps.evaluate.outputs.override_reason }}
@@ -76,7 +82,8 @@ jobs:
         shell: pwsh
         env:
           REPO_GUARD_RESULT: ${{ needs.repo_guard.result }}
-          GATE_RESULT: ${{ needs.windows_gate.result }}
+          WINDOWS_GATE_RESULT: ${{ needs.windows_gate.result }}
+          LINUX_GATE_RESULT: ${{ needs.linux_gate.result }}
           ALLOW_GATE_OVERRIDE: ${{ inputs.allow_gate_override }}
           OVERRIDE_REASON_INPUT: ${{ inputs.override_reason }}
           OVERRIDE_INCIDENT_URL_INPUT: ${{ inputs.override_incident_url }}
@@ -84,7 +91,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $repoGuardResult = [string]$env:REPO_GUARD_RESULT
-          $gateResult = [string]$env:GATE_RESULT
+          $windowsGateResult = [string]$env:WINDOWS_GATE_RESULT
+          $linuxGateResult = [string]$env:LINUX_GATE_RESULT
           $allowOverride = [System.Convert]::ToBoolean([string]$env:ALLOW_GATE_OVERRIDE)
           $overrideReason = [string]$env:OVERRIDE_REASON_INPUT
           $overrideIncidentUrl = [string]$env:OVERRIDE_INCIDENT_URL_INPUT
@@ -93,11 +101,11 @@ jobs:
           if ($repoGuardResult -ne 'success') {
             throw "Repository guard did not succeed. Blocking release publish."
           }
-          if ($gateResult -eq 'success') {
-            Write-Host 'Windows gate passed. Release publish is allowed.'
+          if ($windowsGateResult -eq 'success' -and $linuxGateResult -eq 'success') {
+            Write-Host 'Windows and Linux gates passed. Release publish is allowed.'
           } else {
             if (-not $allowOverride) {
-              throw "Gate failed and override is not enabled. Blocking release publish."
+              throw "One or more gates failed and override is not enabled. Blocking release publish."
             }
 
             if ([string]::IsNullOrWhiteSpace($overrideReason)) {
@@ -109,12 +117,13 @@ jobs:
             }
 
             $overrideApplied = $true
-            Write-Host "::warning::Windows gate failed but controlled override is active. Reason: $overrideReason. Incident: $overrideIncidentUrl"
+            Write-Host "::warning::One or more gates failed but controlled override is active. windows_gate=$windowsGateResult linux_gate=$linuxGateResult Reason: $overrideReason. Incident: $overrideIncidentUrl"
 
             @(
               "## Controlled Override Applied"
               ""
-              "- Gate result: $gateResult"
+              "- Windows gate result: $windowsGateResult"
+              "- Linux gate result: $linuxGateResult"
               "- Reason: $overrideReason"
               "- Incident: $overrideIncidentUrl"
             ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
