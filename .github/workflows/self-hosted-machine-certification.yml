@@ -1,0 +1,374 @@
+name: Self-Hosted Machine Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional branch or SHA to evaluate. Defaults to workflow ref.
+        required: false
+        type: string
+      setup_name:
+        description: Logical setup profile name for evidence.
+        required: false
+        default: manual-dispatch
+        type: string
+      runner_labels_csv:
+        description: Comma-separated runner labels used for certification job routing.
+        required: true
+        default: 'self-hosted,windows,self-hosted-windows-lv,headless'
+        type: string
+      runner_labels_json:
+        description: Optional JSON array override for runner labels.
+        required: false
+        default: ''
+        type: string
+      expected_labview_year:
+        description: LabVIEW year required by machine preflight checks.
+        required: true
+        default: '2020'
+        type: string
+      docker_context:
+        description: Docker context expected by machine preflight checks.
+        required: true
+        default: 'desktop-linux'
+        type: string
+      switch_docker_context:
+        description: Switch Docker Desktop context before machine preflight.
+        required: false
+        default: true
+        type: boolean
+      start_docker_desktop_if_needed:
+        description: Start Docker Desktop automatically when engine is not reachable.
+        required: false
+        default: true
+        type: boolean
+      skip_host_ini_mutation:
+        description: Skip host LabVIEW.ini updates during matrix execution.
+        required: false
+        default: true
+        type: boolean
+      skip_override_phase:
+        description: Skip unofficial override verification phase in matrix execution.
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - cert/self-hosted-machine-certification-evidence
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: self-hosted-machine-certification-${{ github.ref }}-${{ github.event.inputs.setup_name || 'push-matrix' }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-setups:
+    name: Resolve certification setups
+    runs-on: ubuntu-latest
+    outputs:
+      setups_json: ${{ steps.resolve.outputs.setups_json }}
+    steps:
+      - id: resolve
+        name: Build setup matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            jq -nc \
+              --arg setup_name "${{ github.event.inputs.setup_name }}" \
+              --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
+              --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
+              --arg year "${{ github.event.inputs.expected_labview_year }}" \
+              --arg docker_context "${{ github.event.inputs.docker_context }}" \
+              --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
+              --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
+              --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
+              --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
+              --arg target_ref "${{ github.event.inputs.ref }}" \
+              '[{
+                setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
+                runner_labels_json: (
+                  if ($labels_json | length) > 0 then $labels_json
+                  else ($labels_csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | tojson)
+                  end
+                ),
+                expected_labview_year: $year,
+                docker_context: $docker_context,
+                switch_docker_context: $switch_context,
+                start_docker_desktop_if_needed: $startup_docker,
+                skip_host_ini_mutation: $skip_ini,
+                skip_override_phase: $skip_override,
+                target_ref: $target_ref
+              }]' > matrix.json
+          else
+            jq -nc '[
+              {
+                setup_name: "legacy-2020-desktop-linux",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"linux-gate-windows-ready\"]",
+                expected_labview_year: "2020",
+                docker_context: "desktop-linux",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              },
+              {
+                setup_name: "legacy-2020-desktop-windows",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cdev-surface-windows-gate\"]",
+                expected_labview_year: "2020",
+                docker_context: "desktop-windows",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              }
+            ]' > matrix.json
+          fi
+
+          echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
+
+  certify:
+    name: Self-Hosted Machine Certification (${{ matrix.setup_name }})
+    needs: resolve-setups
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve-setups.outputs.setups_json) }}
+    runs-on: ${{ fromJson(matrix.runner_labels_json) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow_dispatch ref override
+        if: ${{ matrix.target_ref != '' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & git fetch --prune origin "${{ matrix.target_ref }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch requested ref '${{ matrix.target_ref }}'."
+          }
+
+          & git checkout --force FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout requested ref '${{ matrix.target_ref }}'."
+          }
+
+      - id: runner-metadata
+        name: Capture runner metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadataRoot = Join-Path $env:RUNNER_TEMP ("machine-certification-{0}" -f '${{ matrix.setup_name }}')
+          New-Item -Path $metadataRoot -ItemType Directory -Force | Out-Null
+          $metadataPath = Join-Path $metadataRoot 'runner-metadata.json'
+
+          $runnerWorkspace = [string]$env:RUNNER_WORKSPACE
+          $activeRunnerRoot = ''
+          if (-not [string]::IsNullOrWhiteSpace($runnerWorkspace) -and (Test-Path -LiteralPath $runnerWorkspace -PathType Container)) {
+            $activeRunnerRoot = Split-Path -Path (Split-Path -Path $runnerWorkspace -Parent) -Parent
+          }
+
+          $sessionName = [string]$env:SESSIONNAME
+          if ([string]::IsNullOrWhiteSpace($sessionName)) {
+            $sessionName = 'unknown'
+          }
+
+          [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            repository = [string]$env:GITHUB_REPOSITORY
+            workflow = [string]$env:GITHUB_WORKFLOW
+            run_id = [string]$env:GITHUB_RUN_ID
+            run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            setup_name = '${{ matrix.setup_name }}'
+            runner_name = [string]$env:RUNNER_NAME
+            runner_os = [string]$env:RUNNER_OS
+            runner_arch = [string]$env:RUNNER_ARCH
+            runner_workspace = $runnerWorkspace
+            runner_root = $activeRunnerRoot
+            runner_labels_json = '${{ matrix.runner_labels_json }}'
+            session_name = $sessionName
+            user_interactive = [System.Environment]::UserInteractive
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding utf8
+
+          "metadata_root=$metadataRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "metadata_path=$metadataPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: machine-preflight
+        name: Assert machine preflight pack
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'machine-preflight-report.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Assert-InstallerHarnessMachinePreflight.ps1" `
+            -ExpectedLabviewYear '${{ matrix.expected_labview_year }}' `
+            -DockerContext '${{ matrix.docker_context }}' `
+            -DockerCheckSeverity error `
+            -StartDockerDesktopIfNeeded:$([System.Convert]::ToBoolean('${{ matrix.start_docker_desktop_if_needed }}')) `
+            -SwitchDockerContext:$([System.Convert]::ToBoolean('${{ matrix.switch_docker_context }}')) `
+            -OutputPath $reportPath
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw "Machine preflight checks failed."
+          }
+          "report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: seed-contract
+        name: Resolve pinned icon-editor seed contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "Manifest missing: $manifestPath"
+          }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $iconEditorRepo = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
+          if ($null -eq $iconEditorRepo) {
+            throw "Managed repo 'labview-icon-editor' not found in manifest."
+          }
+
+          $pinnedSha = ([string]$iconEditorRepo.pinned_sha).ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Pinned SHA for icon-editor is invalid: '$pinnedSha'"
+          }
+
+          $upstreamUrl = [string]$iconEditorRepo.required_remotes.upstream
+          $originUrl = [string]$iconEditorRepo.required_remotes.origin
+          $cloneUrl = if (-not [string]::IsNullOrWhiteSpace($upstreamUrl)) { $upstreamUrl } else { $originUrl }
+          if ([string]::IsNullOrWhiteSpace($cloneUrl)) {
+            throw "No upstream/origin URL found for managed repo 'labview-icon-editor'."
+          }
+
+          $cloneRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'icon-editor-seed'
+          if (Test-Path -LiteralPath $cloneRoot -PathType Container) {
+            Remove-Item -LiteralPath $cloneRoot -Recurse -Force
+          }
+          & git clone --no-checkout --filter=blob:none $cloneUrl $cloneRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to clone icon-editor seed repository from '$cloneUrl'."
+          }
+
+          & git -C $cloneRoot fetch --depth=1 origin $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch pinned SHA '$pinnedSha' from '$cloneUrl'."
+          }
+
+          & git -C $cloneRoot checkout --force $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout pinned SHA '$pinnedSha' in '$cloneRoot'."
+          }
+
+          $seedContractPath = Join-Path $cloneRoot 'Tooling\labviewcli-port-contract.json'
+          if (-not (Test-Path -LiteralPath $seedContractPath -PathType Leaf)) {
+            throw "Seed contract missing at pinned SHA '$pinnedSha': $seedContractPath"
+          }
+
+          "clone_root=$cloneRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "seed_contract_path=$seedContractPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "icon_editor_pinned_sha=$pinnedSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: port-matrix
+        name: Run end-to-end port matrix
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'port-matrix'
+          $params = @{
+            SeedContractPath = '${{ steps.seed-contract.outputs.seed_contract_path }}'
+            OutputPath = $outputRoot
+          }
+
+          if ([System.Convert]::ToBoolean('${{ matrix.skip_host_ini_mutation }}')) {
+            $params.SkipHostIniMutation = $true
+          }
+          if ([System.Convert]::ToBoolean('${{ matrix.skip_override_phase }}')) {
+            $params.SkipOverridePhase = $true
+          }
+
+          & "$env:GITHUB_WORKSPACE\scripts\Invoke-EndToEndPortMatrixLocal.ps1" @params
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invoke-EndToEndPortMatrixLocal.ps1 failed with exit code $LASTEXITCODE."
+          }
+
+          $matrixSummaryPath = Join-Path $outputRoot 'artifacts\port-matrix-summary.json'
+          if (-not (Test-Path -LiteralPath $matrixSummaryPath -PathType Leaf)) {
+            throw "Port matrix summary not found: $matrixSummaryPath"
+          }
+
+          "matrix_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "matrix_summary_path=$matrixSummaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: certification-summary
+        name: Write certification summary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $summaryPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'self-hosted-machine-certification-report.json'
+          $matrixSummary = Get-Content -LiteralPath '${{ steps.port-matrix.outputs.matrix_summary_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $preflightReport = Get-Content -LiteralPath '${{ steps.machine-preflight.outputs.report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+
+          $certification = [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            repository = [string]$env:GITHUB_REPOSITORY
+            workflow = [string]$env:GITHUB_WORKFLOW
+            run_id = [string]$env:GITHUB_RUN_ID
+            run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            setup_name = '${{ matrix.setup_name }}'
+            runner_name = [string]$env:RUNNER_NAME
+            requested_runner_labels_json = '${{ matrix.runner_labels_json }}'
+            icon_editor_pinned_sha = '${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}'
+            expected_labview_year = '${{ matrix.expected_labview_year }}'
+            docker_context = '${{ matrix.docker_context }}'
+            matrix = $matrixSummary.summary
+            machine_preflight_status = [string]$preflightReport.status
+            certified = (
+              [string]$preflightReport.status -eq 'succeeded' -and
+              [int]$matrixSummary.summary.strict_failures -eq 0 -and
+              [int]$matrixSummary.summary.override_failures -eq 0 -and
+              @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
+            )
+          }
+
+          $certification | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+
+          @(
+            "## Self-Hosted Machine Certification",
+            "",
+            "- setup: $($certification.setup_name)",
+            "- runner: $($certification.runner_name)",
+            "- labels: $($certification.requested_runner_labels_json)",
+            "- icon-editor pinned sha: $($certification.icon_editor_pinned_sha)",
+            "- strict failures: $($matrixSummary.summary.strict_failures)",
+            "- override failures: $($matrixSummary.summary.override_failures)",
+            "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
+            "- preflight status: $($preflightReport.status)",
+            "- certified: $($certification.certified)"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          if (-not [bool]$certification.certified) {
+            throw "Machine certification failed. Inspect certification artifact bundle."
+          }
+
+          "summary_path=$summaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload certification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-hosted-machine-certification-${{ matrix.setup_name }}-${{ github.run_id }}
+          path: |
+            ${{ steps.runner-metadata.outputs.metadata_path }}
+            ${{ steps.machine-preflight.outputs.report_path }}
+            ${{ steps.port-matrix.outputs.matrix_summary_path }}
+            ${{ steps.certification-summary.outputs.summary_path }}
+            ${{ steps.port-matrix.outputs.matrix_root }}
+          if-no-files-found: error
