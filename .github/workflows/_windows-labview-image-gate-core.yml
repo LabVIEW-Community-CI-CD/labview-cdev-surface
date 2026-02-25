@@ -264,7 +264,8 @@ jobs:
           $manifestPath = Join-Path $artifactRoot 'payload\workspace-governance\workspace-governance.json'
           $sourceManifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
           $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
-          foreach ($requiredScriptPath in @($prepareRepoScript)) {
+          $ensureGitSafeDirectoriesScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-GitSafeDirectories.ps1'
+          foreach ($requiredScriptPath in @($prepareRepoScript, $ensureGitSafeDirectoriesScript)) {
             if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
               throw "Required isolation script is missing: $requiredScriptPath"
             }
@@ -312,11 +313,13 @@ jobs:
               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
               Select-Object -Unique)
           )
-          foreach ($safeRepoPath in $safeRepoPaths) {
-            & git config --global --add safe.directory $safeRepoPath 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to configure git safe.directory entry for host release gate path: $safeRepoPath"
-            }
+          $gitSafeReportPath = Join-Path $artifactRoot 'git-safe-directories-report.host-release.json'
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $safeRepoPaths `
+            -IncludeGitWorktrees `
+            -OutputPath $gitSafeReportPath | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to bootstrap git safe.directory entries for host release gate lane.'
           }
           foreach ($repo in @($manifest.managed_repos)) {
             $repoPath = [string]$repo.path
@@ -775,6 +778,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
             throw "Workspace governance manifest is missing for container parity gate: $manifestPath"
           }
+          $ensureGitSafeDirectoriesScript = 'C:\workspace\scripts\Ensure-GitSafeDirectories.ps1'
+          if (-not (Test-Path -LiteralPath $ensureGitSafeDirectoriesScript -PathType Leaf)) {
+            throw "Git safe-directory helper is missing in container parity lane: $ensureGitSafeDirectoriesScript"
+          }
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $safeRepoPaths = @(
             @($manifest.managed_repos |
@@ -782,11 +789,12 @@ jobs:
               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
               Select-Object -Unique)
           )
-          foreach ($safeRepoPath in $safeRepoPaths) {
-            & git config --global --add safe.directory $safeRepoPath 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to configure git safe.directory entry for container parity gate path: $safeRepoPath"
-            }
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $safeRepoPaths `
+            -IncludeGitWorktrees `
+            -OutputPath 'C:\workspace\artifacts\windows-image-gate\parity\git-safe-directories-report.container-parity.json' | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to bootstrap git safe.directory entries for container parity gate lane.'
           }
 
           Write-PhaseCheckpoint -Phase 'installer_start' -Status 'info' -Message "timeout_minutes=$installerTimeoutMinutes"
@@ -969,7 +977,8 @@ jobs:
           $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
           $resolveIsolationScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Resolve-IsolatedBuildWorkspace.ps1'
           $convertManifestScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Convert-ManifestToWorkspace.ps1'
-          foreach ($requiredScriptPath in @($prepareRepoScript, $resolveIsolationScript, $convertManifestScript)) {
+          $ensureGitSafeDirectoriesScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-GitSafeDirectories.ps1'
+          foreach ($requiredScriptPath in @($prepareRepoScript, $resolveIsolationScript, $convertManifestScript, $ensureGitSafeDirectoriesScript)) {
             if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
               throw "Required isolation script is missing: $requiredScriptPath"
             }
@@ -1037,11 +1046,13 @@ jobs:
               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
               Select-Object -Unique)
           )
-          foreach ($safeRepoPath in $safeRepoPaths) {
-            & git config --global --add safe.directory $safeRepoPath 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to configure git safe.directory entry for container parity host preflight path: $safeRepoPath"
-            }
+          $gitSafeReportPath = Join-Path $artifactRoot 'git-safe-directories-report.host-preflight.json'
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $safeRepoPaths `
+            -IncludeGitWorktrees `
+            -OutputPath $gitSafeReportPath | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to bootstrap git safe.directory entries for container parity host preflight lane.'
           }
           foreach ($repo in @($manifest.managed_repos)) {
             $repoPath = [string]$repo.path

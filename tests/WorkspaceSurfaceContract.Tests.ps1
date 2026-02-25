@@ -18,6 +18,7 @@ Describe 'Workspace surface contract' {
         $script:bundleRunnerCliScriptPath = Join-Path $script:repoRoot 'scripts/Build-RunnerCliBundleFromManifest.ps1'
         $script:resolveIsolatedWorkspaceScriptPath = Join-Path $script:repoRoot 'scripts/Resolve-IsolatedBuildWorkspace.ps1'
         $script:prepareIsolatedRepoScriptPath = Join-Path $script:repoRoot 'scripts/Prepare-IsolatedRepoAtPinnedSha.ps1'
+        $script:ensureGitSafeDirectoriesScriptPath = Join-Path $script:repoRoot 'scripts/Ensure-GitSafeDirectories.ps1'
         $script:convertManifestWorkspaceScriptPath = Join-Path $script:repoRoot 'scripts/Convert-ManifestToWorkspace.ps1'
         $script:cleanupIsolatedWorkspaceScriptPath = Join-Path $script:repoRoot 'scripts/Cleanup-IsolatedBuildWorkspace.ps1'
         $script:harnessRunnerBaselineScriptPath = Join-Path $script:repoRoot 'scripts/Assert-InstallerHarnessRunnerBaseline.ps1'
@@ -66,6 +67,7 @@ Describe 'Workspace surface contract' {
             $script:bundleRunnerCliScriptPath,
             $script:resolveIsolatedWorkspaceScriptPath,
             $script:prepareIsolatedRepoScriptPath,
+            $script:ensureGitSafeDirectoriesScriptPath,
             $script:convertManifestWorkspaceScriptPath,
             $script:cleanupIsolatedWorkspaceScriptPath,
             $script:harnessRunnerBaselineScriptPath,
@@ -328,6 +330,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'IsolatedBuildWorkspacePolicyContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'GitSafeDirectoryPolicyContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ENABLE_SELF_HOSTED_CONTRACTS'
     }
 

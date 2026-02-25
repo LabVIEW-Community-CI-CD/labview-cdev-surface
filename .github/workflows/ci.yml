@@ -46,6 +46,7 @@ jobs:
             './tests/Build-RunnerCliBundleFromManifest.Tests.ps1',
             './tests/BuildRunnerCliBundleTempIsolationContract.Tests.ps1',
             './tests/IsolatedBuildWorkspacePolicyContract.Tests.ps1',
+            './tests/GitSafeDirectoryPolicyContract.Tests.ps1',
             './tests/RunnerCliBundleDeterminismContract.Tests.ps1',
             './tests/WorkspaceInstallerDeterminismContract.Tests.ps1',
             './tests/ProvenanceContract.Tests.ps1',

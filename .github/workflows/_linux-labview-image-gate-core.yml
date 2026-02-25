@@ -268,7 +268,8 @@ jobs:
           $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
           $ensureHostPrereqsScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-HostLabVIEWPrerequisites.ps1'
           $ensurePortContractScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-LabVIEWCliPortContractAndIni.ps1'
-          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript, $ensureHostPrereqsScript, $ensurePortContractScript)) {
+          $ensureGitSafeDirectoriesScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-GitSafeDirectories.ps1'
+          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript, $ensureHostPrereqsScript, $ensurePortContractScript, $ensureGitSafeDirectoriesScript)) {
             if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
               throw "Required isolation script is missing: $requiredScriptPath"
             }
@@ -293,6 +294,15 @@ jobs:
 
           $repoPath = Join-Path $isolatedReposRoot 'labview-icon-editor'
           $provisionReportPath = Join-Path $artifactRoot 'repo-provisioning.labview-icon-editor.json'
+          $gitSafePaths = @($sourceRepoPath, $repoPath, $env:GITHUB_WORKSPACE)
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $gitSafePaths `
+            -IncludeGitWorktrees `
+            -OutputPath (Join-Path $artifactRoot 'git-safe-directories-report.pre-provision.json') | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to bootstrap git safe.directory entries for linux gate windows 32-bit prerequisite lane.'
+          }
+
           & $prepareRepoScript `
             -RepoName 'labview-icon-editor' `
             -RepoOriginUrl $repoOriginUrl `
@@ -303,6 +313,15 @@ jobs:
             -OutputPath $provisionReportPath | Out-Null
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to provision isolated icon-editor repo into '$repoPath'."
+          }
+
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $gitSafePaths `
+            -IncludeGitWorktrees `
+            -ValidateGitStatus `
+            -OutputPath (Join-Path $artifactRoot 'git-safe-directories-report.post-provision.json') | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to validate git safe.directory entries for linux gate windows 32-bit prerequisite lane.'
           }
 
           $requiredLabviewYear = [string]$env:REQUIRED_LABVIEW_YEAR
@@ -486,7 +505,8 @@ jobs:
           $prepareRepoScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Prepare-IsolatedRepoAtPinnedSha.ps1'
           $ensureHostPrereqsScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-HostLabVIEWPrerequisites.ps1'
           $ensurePortContractScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-LabVIEWCliPortContractAndIni.ps1'
-          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript, $ensureHostPrereqsScript, $ensurePortContractScript)) {
+          $ensureGitSafeDirectoriesScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-GitSafeDirectories.ps1'
+          foreach ($requiredScriptPath in @($resolveIsolationScript, $prepareRepoScript, $ensureHostPrereqsScript, $ensurePortContractScript, $ensureGitSafeDirectoriesScript)) {
             if (-not (Test-Path -LiteralPath $requiredScriptPath -PathType Leaf)) {
               throw "Required isolation script is missing: $requiredScriptPath"
             }
@@ -511,6 +531,15 @@ jobs:
 
           $repoPath = Join-Path $isolatedReposRoot 'labview-icon-editor'
           $provisionReportPath = Join-Path $artifactRoot 'repo-provisioning.labview-icon-editor.json'
+          $gitSafePaths = @($sourceRepoPath, $repoPath, $env:GITHUB_WORKSPACE)
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $gitSafePaths `
+            -IncludeGitWorktrees `
+            -OutputPath (Join-Path $artifactRoot 'git-safe-directories-report.pre-provision.json') | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to bootstrap git safe.directory entries for linux gate windows 64-bit prerequisite lane.'
+          }
+
           & $prepareRepoScript `
             -RepoName 'labview-icon-editor' `
             -RepoOriginUrl $repoOriginUrl `
@@ -521,6 +550,15 @@ jobs:
             -OutputPath $provisionReportPath | Out-Null
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to provision isolated icon-editor repo into '$repoPath'."
+          }
+
+          & $ensureGitSafeDirectoriesScript `
+            -Paths $gitSafePaths `
+            -IncludeGitWorktrees `
+            -ValidateGitStatus `
+            -OutputPath (Join-Path $artifactRoot 'git-safe-directories-report.post-provision.json') | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to validate git safe.directory entries for linux gate windows 64-bit prerequisite lane.'
           }
 
           $requiredLabviewYear = [string]$env:REQUIRED_LABVIEW_YEAR

@@ -52,6 +52,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - always-isolated
   - `git-worktree` primary, detached-clone fallback
   - deterministic root selection: `D:\dev` preferred, `C:\dev` fallback
+  - run `scripts\Ensure-GitSafeDirectories.ps1` before repo operations (include worktrees; emit JSON report)
   - cleanup after artifact upload must run under `if: always()`
   - release artifact default policy token: `ci-only-selector`
 - Windows gate workflow must target labels: `self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`.

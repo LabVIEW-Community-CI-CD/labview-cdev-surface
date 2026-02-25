@@ -25,6 +25,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$ensureGitSafeDirectoriesScript = Join-Path $PSScriptRoot 'Ensure-GitSafeDirectories.ps1'
+if (-not (Test-Path -LiteralPath $ensureGitSafeDirectoriesScript -PathType Leaf)) {
+    throw "Required script is missing: $ensureGitSafeDirectoriesScript"
+}
+
 function ConvertTo-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -54,7 +59,7 @@ function Remove-Directory {
 function Add-GitSafeDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    & git config --global --add safe.directory $Path 2>$null
+    & $ensureGitSafeDirectoriesScript -Paths @($Path) | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to configure git safe.directory for '$Path'."
     }
