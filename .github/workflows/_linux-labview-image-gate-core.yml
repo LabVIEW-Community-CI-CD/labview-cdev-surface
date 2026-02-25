@@ -931,9 +931,10 @@ jobs:
           name: linux-gate-windows-ppl-64-${{ github.run_id }}
           path: ${{ runner.temp }}/linux-gate/windows-ppl-64
 
-      - name: Run Linux parity VIP build via VIPM API/CLI
+      - name: Run Linux parity VIP build via VIPM CLI (signal-only)
         shell: bash
         env:
+          RELEASE_BUILD_LANE: ${{ needs.resolve-parity-context.outputs.lane_id }}
           ICON_EDITOR_SOURCE_URL: ${{ needs.resolve-parity-context.outputs.icon_editor_source_url }}
           ICON_EDITOR_PINNED_SHA: ${{ needs.resolve-parity-context.outputs.icon_editor_pinned_sha }}
           PARITY_LABVIEW_YEAR: ${{ needs.resolve-parity-context.outputs.lvcontainer_year }}
@@ -1090,7 +1091,7 @@ jobs:
         with:
           name: linux-labview-image-gate-vip-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-vip
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload linux parity VIP artifacts (attempt 2)
         if: always() && steps.upload_linux_parity_vip_artifacts_attempt_1.outcome == 'failure'
@@ -1098,7 +1099,7 @@ jobs:
         with:
           name: linux-labview-image-gate-vip-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-vip
-          if-no-files-found: error
+          if-no-files-found: warn
 
   gate-summary:
     name: Linux Gate Summary
@@ -1121,13 +1122,13 @@ jobs:
           vip_result='${{ needs.linux-parity-vip.result }}'
 
           gate_status='fail'
-          if [[ "$ppl32_result" == 'success' && "$ppl64_result" == 'success' && "$projectspec_result" == 'success' && "$vip_result" == 'success' ]]; then
+          if [[ "$ppl32_result" == 'success' && "$ppl64_result" == 'success' && "$projectspec_result" == 'success' ]]; then
             gate_status='pass'
           fi
 
           echo "gate_status=$gate_status" >> "$GITHUB_OUTPUT"
-          echo "gate_report_artifact_name=linux-labview-image-gate-vip-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "gate_report_path=${GITHUB_WORKSPACE}/artifacts/linux-image-gate/parity/linux-vip/linux-parity-vip-report.json" >> "$GITHUB_OUTPUT"
+          echo "gate_report_artifact_name=linux-labview-image-gate-projectspec-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "gate_report_path=${GITHUB_WORKSPACE}/artifacts/linux-image-gate/parity/linux-projectspec/linux-parity-projectspec-classification.json" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Linux Gate Summary"
@@ -1135,11 +1136,15 @@ jobs:
             echo "- Windows host PPL 32 prerequisite: $ppl32_result"
             echo "- Windows host PPL 64 prerequisite: $ppl64_result"
             echo "- Linux parity project-spec lane: $projectspec_result"
-            echo "- Linux parity VIP lane: $vip_result"
+            echo "- Linux parity VIP lane (signal-only): $vip_result"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          if [[ "$vip_result" != 'success' ]]; then
+            echo "::warning::Linux parity VIP signal lane failed. This is non-blocking until deterministic in-image VIPM CLI packaging is available."
+          fi
+
           if [[ "$gate_status" != 'pass' ]]; then
-            echo "One or more hard Linux gate lanes failed." >&2
+            echo "One or more hard Linux gate lanes failed (windows host prerequisites and/or linux projectspec lane)." >&2
             exit 1
           fi
