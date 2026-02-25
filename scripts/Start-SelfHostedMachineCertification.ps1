@@ -23,6 +23,13 @@ param(
     [int]$DispatchPauseSeconds = 4,
 
     [Parameter()]
+    [string]$ActorMachineName = '',
+
+    [Parameter()]
+    [ValidateSet('machine+setup')]
+    [string]$ActorKeyStrategy = 'machine+setup',
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -84,6 +91,56 @@ function Get-CollisionGuardLabel {
     return (Get-ScalarString -Value $Setup.collision_guard_label)
 }
 
+function Get-ActorMachineName {
+    param([string]$PreferredName)
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredName)) {
+        return [string]$PreferredName
+    }
+    return [System.Environment]::MachineName
+}
+
+function Normalize-ActorLabelToken {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $token = ([string]$Value).Trim().ToLowerInvariant()
+    $token = [Regex]::Replace($token, '[^a-z0-9\-]', '-')
+    $token = [Regex]::Replace($token, '-{2,}', '-')
+    $token = $token.Trim('-')
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return 'unknown'
+    }
+    return $token
+}
+
+function Get-ActorKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string]$SetupName,
+        [Parameter(Mandatory = $true)][string]$Strategy
+    )
+
+    if ($Strategy -eq 'machine+setup') {
+        return ("{0}::{1}" -f [string]$MachineName, [string]$SetupName)
+    }
+    throw "Unsupported actor key strategy '$Strategy'."
+}
+
+function Get-ActorRunnerLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string]$SetupName
+    )
+
+    $machineToken = Normalize-ActorLabelToken -Value $MachineName
+    $setupToken = Normalize-ActorLabelToken -Value $SetupName
+    $label = ("cert-actor-{0}-{1}" -f $machineToken, $setupToken)
+    if ($label.Length -gt 63) {
+        $label = $label.Substring(0, 63).TrimEnd('-')
+    }
+    return $label
+}
+
 function Get-SetupBoolean {
     param(
         [Parameter(Mandatory = $true)][object]$Setup,
@@ -134,7 +191,8 @@ function Resolve-RunnerLabelsCsv {
 function Resolve-UpstreamRunnerLabelsCsv {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
-        [Parameter(Mandatory = $true)][object]$Setup
+        [Parameter(Mandatory = $true)][object]$Setup,
+        [Parameter(Mandatory = $true)][string]$ActorMachine
     )
 
     $baseCsv = Resolve-RunnerLabelsCsv -Setup $Setup
@@ -152,6 +210,12 @@ function Resolve-UpstreamRunnerLabelsCsv {
     if ($labels -notcontains $guardLabel) {
         $labels += $guardLabel
     }
+
+    $actorLabel = Get-ActorRunnerLabel -MachineName $ActorMachine -SetupName ([string]$Setup.name)
+    if ($labels -notcontains $actorLabel) {
+        $labels += $actorLabel
+    }
+
     return (Join-LabelsCsv -Labels $labels)
 }
 
@@ -229,9 +293,12 @@ if (@($selectedSetups).Count -eq 0) {
 
 $dispatchRecords = @()
 $claimedRunIds = @{}
+$resolvedActorMachineName = Get-ActorMachineName -PreferredName $ActorMachineName
 foreach ($setup in $selectedSetups) {
     $setupNameToken = [string]$setup.name
-    $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup
+    $actorKey = Get-ActorKey -MachineName $resolvedActorMachineName -SetupName $setupNameToken -Strategy $ActorKeyStrategy
+    $actorRunnerLabel = Get-ActorRunnerLabel -MachineName $resolvedActorMachineName -SetupName $setupNameToken
+    $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup -ActorMachine $resolvedActorMachineName
     $switchDockerContext = (Get-SetupBoolean -Setup $setup -PropertyName 'switch_docker_context' -Default $true).ToString().ToLowerInvariant()
     $startDockerDesktop = (Get-SetupBoolean -Setup $setup -PropertyName 'start_docker_desktop_if_needed' -Default $true).ToString().ToLowerInvariant()
     Assert-UpstreamRunnerCapacity -Repository $Repository -RunnerLabelsCsv $runnerLabelsCsv -SetupName $setupNameToken
@@ -295,7 +362,10 @@ foreach ($setup in $selectedSetups) {
 
     $record = [ordered]@{
         setup_name = $setupNameToken
-        machine_name = [System.Environment]::MachineName
+        machine_name = $resolvedActorMachineName
+        actor_key = $actorKey
+        actor_runner_label = $actorRunnerLabel
+        actor_key_strategy = $ActorKeyStrategy
         runner_labels_csv = $runnerLabelsCsv
         start_docker_desktop_if_needed = $startDockerDesktop
         switch_docker_context = $switchDockerContext
@@ -317,6 +387,8 @@ $report = [ordered]@{
     repository = $Repository
     workflow = $WorkflowFile
     ref = $Ref
+    actor_machine_name = $resolvedActorMachineName
+    actor_key_strategy = $ActorKeyStrategy
     profiles_path = $resolvedProfilesPath
     dispatched_setups = @($selectedSetups | ForEach-Object { [string]$_.name })
     runs = @($dispatchRecords)

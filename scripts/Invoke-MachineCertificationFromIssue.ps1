@@ -41,6 +41,61 @@ function New-MarkdownTable {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Normalize-ActorToken {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $token = ([string]$Value).Trim().ToLowerInvariant()
+    $token = [Regex]::Replace($token, '[^a-z0-9\-]', '-')
+    $token = [Regex]::Replace($token, '-{2,}', '-')
+    $token = $token.Trim('-')
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return 'unknown'
+    }
+    return $token
+}
+
+function Get-ActorKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string]$SetupName,
+        [Parameter(Mandatory = $true)][string]$ActorKeyStrategy
+    )
+
+    if ($ActorKeyStrategy -eq 'machine+setup') {
+        return ("{0}::{1}" -f [string]$MachineName, [string]$SetupName)
+    }
+    throw "Unsupported actor_key_strategy '$ActorKeyStrategy'."
+}
+
+function Get-ActorKeysForSetups {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string[]]$SetupNames,
+        [Parameter(Mandatory = $true)][string]$ActorKeyStrategy
+    )
+
+    $keys = @()
+    foreach ($setupName in @($SetupNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+        $keys += (Get-ActorKey -MachineName $MachineName -SetupName ([string]$setupName) -ActorKeyStrategy $ActorKeyStrategy)
+    }
+    return @($keys | Select-Object -Unique)
+}
+
+function Get-SessionActorKeysFromBody {
+    param([Parameter(Mandatory = $true)][string]$Body)
+
+    $actorKeys = @()
+    if ($Body -match "(?m)^- actor_keys:\s*(.+?)\s*$") {
+        $raw = [string]$Matches[1]
+        $actorKeys = @(
+            $raw -split ',' |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    }
+    return @($actorKeys | Select-Object -Unique)
+}
+
 function Get-IssueComments {
     param([Parameter(Mandatory = $true)][string]$IssueUrl)
 
@@ -84,10 +139,17 @@ function Get-OpenCertificationSessions {
         }
 
         if ($kind -eq 'START') {
+            $sessionActorKeys = Get-SessionActorKeysFromBody -Body $body
+            $sessionMachine = ''
+            if ($body -match "(?m)^- orchestrator_machine:\s*(.+?)\s*$") {
+                $sessionMachine = [string]$Matches[1].Trim()
+            }
             $starts[$sessionId] = [pscustomobject]@{
                 id = $sessionId
                 created_at = [string]$comment.createdAt
                 url = [string]$comment.url
+                actor_keys = @($sessionActorKeys)
+                orchestrator_machine = $sessionMachine
             }
         } else {
             $ends[$sessionId] = [pscustomobject]@{
@@ -135,6 +197,126 @@ function Get-ActiveWorkflowRuns {
         $rows |
         Where-Object { [string]$_.status -in @('queued', 'in_progress', 'pending', 'requested', 'waiting', 'action_required') }
     )
+}
+
+function Get-ActorLockedSessions {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$OpenSessions,
+        [Parameter(Mandatory = $true)][string[]]$TargetActorKeys
+    )
+
+    $targetSet = @{}
+    foreach ($key in @($TargetActorKeys | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+        $targetSet[[string]$key] = $true
+    }
+
+    $locked = @()
+    foreach ($session in @($OpenSessions)) {
+        $sessionActorKeys = @($session.actor_keys | ForEach-Object { [string]$_ })
+        $matchingActorKeys = @($sessionActorKeys | Where-Object { $targetSet.ContainsKey([string]$_) })
+        if (@($matchingActorKeys).Count -gt 0) {
+            $locked += [pscustomobject]@{
+                id = [string]$session.id
+                created_at = [string]$session.created_at
+                url = [string]$session.url
+                orchestrator_machine = [string]$session.orchestrator_machine
+                matching_actor_keys = @($matchingActorKeys)
+                reason = 'open_session_same_actor'
+            }
+            continue
+        }
+
+        if (@($sessionActorKeys).Count -eq 0) {
+            $locked += [pscustomobject]@{
+                id = [string]$session.id
+                created_at = [string]$session.created_at
+                url = [string]$session.url
+                orchestrator_machine = [string]$session.orchestrator_machine
+                matching_actor_keys = @()
+                reason = 'open_session_missing_actor_keys'
+            }
+        }
+    }
+    return @($locked)
+}
+
+function Get-ActorKeysFromRun {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][string]$ActorKeyStrategy
+    )
+
+    $runViewJson = gh run view $RunId -R $Repository --json jobs,url,status,conclusion
+    if ($LASTEXITCODE -ne 0) {
+        return [pscustomobject]@{
+            actor_keys = @()
+            unresolved_setups = @()
+            job_count = 0
+        }
+    }
+
+    $runView = $runViewJson | ConvertFrom-Json -ErrorAction Stop
+    $jobs = @($runView.jobs)
+    $actorKeys = @()
+    $unresolvedSetups = @()
+
+    foreach ($job in @($jobs)) {
+        $jobName = [string]$job.name
+        if ($jobName -notmatch '^Self-Hosted Machine Certification \((.+)\)$') {
+            continue
+        }
+
+        $setupName = [string]$Matches[1]
+        $runnerName = [string]$job.runnerName
+        if ([string]::IsNullOrWhiteSpace($runnerName)) {
+            $unresolvedSetups += $setupName
+            continue
+        }
+        $actorKeys += (Get-ActorKey -MachineName $runnerName -SetupName $setupName -ActorKeyStrategy $ActorKeyStrategy)
+    }
+
+    return [pscustomobject]@{
+        actor_keys = @($actorKeys | Select-Object -Unique)
+        unresolved_setups = @($unresolvedSetups | Select-Object -Unique)
+        job_count = @($jobs).Count
+    }
+}
+
+function Get-ActorLockedRuns {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][object[]]$ActiveRuns,
+        [Parameter(Mandatory = $true)][string[]]$TargetActorKeys,
+        [Parameter(Mandatory = $true)][string]$ActorKeyStrategy
+    )
+
+    $targetSet = @{}
+    foreach ($key in @($TargetActorKeys | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+        $targetSet[[string]$key] = $true
+    }
+
+    $locked = @()
+    foreach ($run in @($ActiveRuns)) {
+        $runId = [string]$run.databaseId
+        if ([string]::IsNullOrWhiteSpace($runId)) {
+            continue
+        }
+        $runActors = Get-ActorKeysFromRun -Repository $Repository -RunId $runId -ActorKeyStrategy $ActorKeyStrategy
+        $matchingActorKeys = @($runActors.actor_keys | Where-Object { $targetSet.ContainsKey([string]$_) })
+        if (@($matchingActorKeys).Count -gt 0) {
+            $locked += [pscustomobject]@{
+                run_id = $runId
+                status = [string]$run.status
+                conclusion = [string]$run.conclusion
+                url = [string]$run.url
+                matching_actor_keys = @($matchingActorKeys)
+                unresolved_setups = @($runActors.unresolved_setups)
+                reason = 'active_run_same_actor'
+            }
+        }
+    }
+    return @($locked)
 }
 
 function Assert-RequiredScriptPaths {
@@ -269,7 +451,8 @@ function Get-SetupRowsFromRun {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
         [Parameter(Mandatory = $true)][string]$RunId,
-        [Parameter(Mandatory = $true)][string[]]$SetupNames
+        [Parameter(Mandatory = $true)][string[]]$SetupNames,
+        [Parameter(Mandatory = $true)][string]$ActorKeyStrategy
     )
 
     $runViewJson = gh run view $RunId -R $Repository --json status,conclusion,url,jobs
@@ -286,6 +469,7 @@ function Get-SetupRowsFromRun {
             $rows += [pscustomobject]@{
                 setup_name = [string]$setup
                 machine_name = 'unknown'
+                actor_key = ''
                 run_id = [string]$RunId
                 run_url = [string]$runView.url
                 status = [string]$runView.status
@@ -294,9 +478,16 @@ function Get-SetupRowsFromRun {
             continue
         }
 
+        $resolvedMachineName = [string]$match.runnerName
+        $resolvedActorKey = ''
+        if (-not [string]::IsNullOrWhiteSpace($resolvedMachineName)) {
+            $resolvedActorKey = Get-ActorKey -MachineName $resolvedMachineName -SetupName ([string]$setup) -ActorKeyStrategy $ActorKeyStrategy
+        }
+
         $rows += [pscustomobject]@{
             setup_name = [string]$setup
-            machine_name = [string]$match.runnerName
+            machine_name = $resolvedMachineName
+            actor_key = $resolvedActorKey
             run_id = [string]$RunId
             run_url = [string]$match.url
             status = [string]$match.status
@@ -335,6 +526,8 @@ $workflowFile = [string]$config.workflow_file
 $ref = [string]$config.ref
 $setupNames = @($config.setup_names | ForEach-Object { [string]$_ })
 $triggerMode = [string]$config.trigger_mode
+$actorKeyStrategy = [string]$config.actor_key_strategy
+$actorLockMode = [string]$config.actor_lock_mode
 $requiredScriptPaths = @($config.required_script_paths | ForEach-Object { [string]$_ })
 $requireLocalRefSync = if ($null -eq $config.PSObject.Properties['require_local_ref_sync']) {
     $true
@@ -352,6 +545,18 @@ if ([string]::IsNullOrWhiteSpace($triggerMode)) {
 }
 if (@('auto', 'dispatch', 'rerun_latest') -notcontains $triggerMode) {
     throw "Unsupported trigger_mode '$triggerMode'. Supported values: auto, dispatch, rerun_latest."
+}
+if ([string]::IsNullOrWhiteSpace($actorKeyStrategy)) {
+    $actorKeyStrategy = 'machine+setup'
+}
+if (@('machine+setup') -notcontains $actorKeyStrategy) {
+    throw "Unsupported actor_key_strategy '$actorKeyStrategy'. Supported values: machine+setup."
+}
+if ([string]::IsNullOrWhiteSpace($actorLockMode)) {
+    $actorLockMode = 'fail-closed'
+}
+if (@('fail-closed', 'warn-only') -notcontains $actorLockMode) {
+    throw "Unsupported actor_lock_mode '$actorLockMode'. Supported values: fail-closed, warn-only."
 }
 if (@($setupNames).Count -eq 0) {
     throw "Issue config must include non-empty setup_names."
@@ -395,6 +600,9 @@ $sessionStartCommentPosted = $false
 $sessionRunIds = @()
 $staleOpenSessions = @()
 $staleActiveRuns = @()
+$actorKeys = Get-ActorKeysForSetups -MachineName $orchestratorMachineName -SetupNames $setupNames -ActorKeyStrategy $actorKeyStrategy
+$staleActorSessions = @()
+$staleActorRuns = @()
 
 $issueComments = Get-IssueComments -IssueUrl $IssueUrl
 $staleOpenSessions = Get-OpenCertificationSessions `
@@ -403,6 +611,8 @@ $staleOpenSessions = Get-OpenCertificationSessions `
     -Workflow $workflowFile `
     -Ref $ref
 $staleActiveRuns = Get-ActiveWorkflowRuns -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref
+$staleActorSessions = Get-ActorLockedSessions -OpenSessions $staleOpenSessions -TargetActorKeys $actorKeys
+$staleActorRuns = Get-ActorLockedRuns -Repository $repositorySlug -ActiveRuns $staleActiveRuns -TargetActorKeys $actorKeys -ActorKeyStrategy $actorKeyStrategy
 
 $startCommentLines = @(
     "[$effectiveRecorderName] CERT_SESSION_START id=$sessionId",
@@ -411,10 +621,15 @@ $startCommentLines = @(
     "- workflow: $workflowFile",
     "- ref: $ref",
     "- orchestrator_machine: $orchestratorMachineName",
+    "- actor_key_strategy: $actorKeyStrategy",
+    "- actor_lock_mode: $actorLockMode",
+    "- actor_keys: $($actorKeys -join ', ')",
     "- started_utc: $($sessionStartedUtc.ToString('o'))",
     "- trigger_mode: $triggerMode",
     "- stale_open_session_count: $(@($staleOpenSessions).Count)",
-    "- stale_active_run_count: $(@($staleActiveRuns).Count)"
+    "- stale_active_run_count: $(@($staleActiveRuns).Count)",
+    "- stale_actor_session_count: $(@($staleActorSessions).Count)",
+    "- stale_actor_run_count: $(@($staleActorRuns).Count)"
 )
 if (@($staleOpenSessions).Count -gt 0) {
     $startCommentLines += '- stale_open_sessions:'
@@ -428,12 +643,37 @@ if (@($staleActiveRuns).Count -gt 0) {
         $startCommentLines += ("  - run_id={0} status={1} url={2}" -f [string]$r.databaseId, [string]$r.status, [string]$r.url)
     }
 }
+if (@($staleActorSessions).Count -gt 0) {
+    $startCommentLines += '- stale_actor_sessions:'
+    foreach ($session in @($staleActorSessions)) {
+        $startCommentLines += ("  - id={0} reason={1} matching_actor_keys={2} url={3}" -f [string]$session.id, [string]$session.reason, [string](@($session.matching_actor_keys) -join ';'), [string]$session.url)
+    }
+}
+if (@($staleActorRuns).Count -gt 0) {
+    $startCommentLines += '- stale_actor_runs:'
+    foreach ($run in @($staleActorRuns)) {
+        $startCommentLines += ("  - run_id={0} reason={1} matching_actor_keys={2} url={3}" -f [string]$run.run_id, [string]$run.reason, [string](@($run.matching_actor_keys) -join ';'), [string]$run.url)
+    }
+}
 
 gh issue comment $IssueUrl --body ($startCommentLines -join [Environment]::NewLine) | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to post CERT_SESSION_START comment to issue."
 }
 $sessionStartCommentPosted = $true
+
+if ($actorLockMode -eq 'fail-closed' -and (@($staleActorSessions).Count -gt 0 -or @($staleActorRuns).Count -gt 0)) {
+    $closureHint = @(
+        "actor_lock_violation: one or more actor keys are already active for this workflow/ref.",
+        "Required reconciliation: post an explicit session-closure comment before rerun.",
+        "Suggested comment:",
+        "[{0}] CERT_SESSION_END id=<stale-session-id>" -f $effectiveRecorderName,
+        "- status: reconciled",
+        "- reason: <operator-provided-reason>",
+        "actor_keys={0}" -f [string]($actorKeys -join ', ')
+    ) -join [Environment]::NewLine
+    throw $closureHint
+}
 
 $dispatchObj = $null
 $dispatchErrorText = ''
@@ -443,7 +683,14 @@ try {
 
 if ($triggerMode -ne 'rerun_latest') {
     try {
-        $dispatchJson = & $startScript -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref -SetupName $setupNames -OutputPath $runReportPath
+        $dispatchJson = & $startScript `
+            -Repository $repositorySlug `
+            -WorkflowFile $workflowFile `
+            -Ref $ref `
+            -SetupName $setupNames `
+            -ActorMachineName $orchestratorMachineName `
+            -ActorKeyStrategy $actorKeyStrategy `
+            -OutputPath $runReportPath
         if ($LASTEXITCODE -ne 0) {
             throw "Start-SelfHostedMachineCertification.ps1 failed."
         }
@@ -480,7 +727,7 @@ if ($fallbackToRerunLatest) {
     }
     Start-Sleep -Seconds 3
 
-    $attemptRows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId ([string]$latestRun.databaseId) -SetupNames $setupNames
+    $attemptRows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId ([string]$latestRun.databaseId) -SetupNames $setupNames -ActorKeyStrategy $actorKeyStrategy
     $dispatchObj = [pscustomobject]@{
         runs = @($attemptRows)
     }
@@ -538,7 +785,7 @@ if (-not $SkipWatch) {
             } else {
                 @($setupNames)
             }
-            $rows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId $runId -SetupNames $expectedSetupsForRun
+            $rows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId $runId -SetupNames $expectedSetupsForRun -ActorKeyStrategy $actorKeyStrategy
             $finalRows += @($rows)
         } catch {
             $expectedSetupsForRun = if ($runSetupMap.ContainsKey($runId) -and @($runSetupMap[$runId]).Count -gt 0) {
@@ -550,6 +797,7 @@ if (-not $SkipWatch) {
                 $finalRows += [pscustomobject]@{
                     setup_name = [string]$setupName
                     machine_name = 'unknown'
+                    actor_key = ''
                     run_id = [string]$runId
                     run_url = ''
                     status = 'unknown'
@@ -564,6 +812,7 @@ if (-not $SkipWatch) {
             $finalRows += [pscustomobject]@{
                 setup_name = [string]$setupName
                 machine_name = 'unknown'
+                actor_key = ''
                 run_id = ''
                 run_url = ''
                 status = 'unknown'
@@ -611,6 +860,9 @@ $report = [ordered]@{
     repository = $repositorySlug
     recorder_name = $effectiveRecorderName
     orchestrator_machine = $orchestratorMachineName
+    actor_key_strategy = $actorKeyStrategy
+    actor_lock_mode = $actorLockMode
+    actor_keys = @($actorKeys)
     workflow = $workflowFile
     ref = $ref
     trigger_mode = $triggerMode
@@ -620,6 +872,8 @@ $report = [ordered]@{
     session_status = $sessionStatus
     stale_open_sessions_detected = @($staleOpenSessions)
     stale_active_runs_detected = @($staleActiveRuns)
+    stale_actor_sessions = @($staleActorSessions)
+    stale_actor_runs = @($staleActorRuns)
     setups = $setupNames
     attempts = @($dispatchObj.runs)
     results = @($finalRows)
@@ -656,6 +910,9 @@ $report | ConvertTo-Json -Depth 8 | Write-Output
                 "- workflow: $workflowFile",
                 "- ref: $ref",
                 "- orchestrator_machine: $orchestratorMachineName",
+                "- actor_key_strategy: $actorKeyStrategy",
+                "- actor_lock_mode: $actorLockMode",
+                "- actor_keys: $($actorKeys -join ', ')",
                 "- started_utc: $($sessionStartedUtc.ToString('o'))",
                 "- ended_utc: $($sessionEndedUtc.ToString('o'))",
                 "- duration_seconds: $durationSeconds",
