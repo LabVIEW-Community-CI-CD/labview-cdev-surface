@@ -277,6 +277,7 @@ try {
     $report.auto_install_bitnesses = @($autoInstallBitnesses)
 
     $viAnalyzerPackages = @()
+    $viAnalyzerMissingPackages = @()
     if ($RequireViAnalyzer) {
         $report.vi_analyzer.status = 'pending'
         $viAnalyzerPackages = @('ni-labview-vi-analyzer-toolkit-lic')
@@ -291,12 +292,27 @@ try {
         $report.vi_analyzer.required_packages = @($viAnalyzerPackages)
 
         # VI Analyzer remediation is install-capable only on elevated runners.
-        # Fail deterministically before any NIPM transaction on non-admin lanes.
+        # On non-admin lanes, pass only if all required packages are already present.
         if (-not $isAdministrator) {
-            $report.error_code = 'requires_admin_for_vi_analyzer_install'
-            $report.vi_analyzer.error_code = 'requires_admin_for_vi_analyzer_install'
-            $report.vi_analyzer.status = 'requires_admin'
-            throw ("requires_admin_for_vi_analyzer_install: Administrative privileges are required to remediate VI Analyzer packages ({0}) for LabVIEW {1}." -f [string]::Join(', ', @($viAnalyzerPackages)), $RequiredLabviewYear)
+            $installedBefore = [ordered]@{}
+            foreach ($packageName in $viAnalyzerPackages) {
+                $isInstalled = [bool](Test-NipkgPackageInstalled -NipkgPath $nipkgPath -PackageName $packageName)
+                $installedBefore[$packageName] = $isInstalled
+                if (-not $isInstalled) {
+                    $viAnalyzerMissingPackages += $packageName
+                }
+            }
+            $report.vi_analyzer.installed_before = $installedBefore
+
+            if (@($viAnalyzerMissingPackages).Count -gt 0) {
+                $report.error_code = 'requires_admin_for_vi_analyzer_install'
+                $report.vi_analyzer.error_code = 'requires_admin_for_vi_analyzer_install'
+                $report.vi_analyzer.status = 'requires_admin'
+                throw ("requires_admin_for_vi_analyzer_install: Administrative privileges are required to remediate VI Analyzer packages ({0}) for LabVIEW {1}. Missing packages: {2}" -f [string]::Join(', ', @($viAnalyzerPackages)), $RequiredLabviewYear, [string]::Join(', ', @($viAnalyzerMissingPackages)))
+            }
+
+            $report.vi_analyzer.installed_after = $installedBefore
+            $report.vi_analyzer.status = 'pass'
         }
     }
 
@@ -392,7 +408,7 @@ try {
             -Actions $actions)
     }
 
-    if ($RequireViAnalyzer) {
+    if ($RequireViAnalyzer -and $report.vi_analyzer.status -ne 'pass') {
         $installedBefore = [ordered]@{}
         foreach ($packageName in $viAnalyzerPackages) {
             $installedBefore[$packageName] = [bool](Test-NipkgPackageInstalled -NipkgPath $nipkgPath -PackageName $packageName)
