@@ -168,6 +168,7 @@
         "vip_package_build_check"
       ]
     },
+    "release_build_default_lane": "multiarch-2025q3",
     "release_build_contracts": {
       "legacy-2020": {
         "labview_version_source": ".lvversion",

@@ -64,6 +64,9 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'allowed_linux_tags'
         $script:coreWorkflowContent | Should -Match 'linux_image_locks'
         $script:coreWorkflowContent | Should -Match 'release_lane_linux_override'
+        $script:coreWorkflowContent | Should -Match 'release_build_default_lane'
+        $script:coreWorkflowContent | Should -Match "lane_id='multiarch-2025q3'"
+        $script:coreWorkflowContent | Should -Match 'Unknown release lane'
         $script:coreWorkflowContent | Should -Match "lock_policy must be 'derive-tag-then-pin-digest'"
         $script:coreWorkflowContent | Should -Match 'LVIE_RELEASE_BUILD_LANE'
         $script:coreWorkflowContent | Should -Match 'nationalinstruments/labview:'

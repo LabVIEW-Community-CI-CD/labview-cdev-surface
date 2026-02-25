@@ -166,6 +166,7 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'vipm-api'
         ((@($script:manifest.installer_contract.container_parity_contract.linux_vip_build.required_ppl_bitness) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.artifact_role | Should -Be 'signal-only'
+        $script:manifest.installer_contract.release_build_default_lane | Should -Be 'multiarch-2025q3'
         $script:manifest.installer_contract.release_build_contracts.'legacy-2020'.required_year | Should -Be '2020'
         ((@($script:manifest.installer_contract.release_build_contracts.'legacy-2020'.required_ppl_bitnesses) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
         $script:manifest.installer_contract.release_build_contracts.'legacy-2020'.required_execution_profile | Should -Be 'host-release'

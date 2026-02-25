@@ -65,7 +65,14 @@ jobs:
 
           lane_id='${{ vars.LVIE_RELEASE_BUILD_LANE }}'
           if [[ -z "$lane_id" ]]; then
-            lane_id='legacy-2020'
+            lane_id="$(jq -r '.installer_contract.release_build_default_lane // empty' "$manifest_path")"
+          fi
+          if [[ -z "$lane_id" ]]; then
+            lane_id='multiarch-2025q3'
+          fi
+          if ! jq -e --arg lane "$lane_id" '.installer_contract.release_build_contracts[$lane]' "$manifest_path" >/dev/null; then
+            echo "Unknown release lane '$lane_id'. Define installer_contract.release_build_contracts[$lane_id]." >&2
+            exit 1
           fi
 
           release_required_year="$(jq -r --arg lane "$lane_id" '.installer_contract.release_build_contracts[$lane].required_year // .installer_contract.release_build_contract.required_year // .installer_contract.labview_gate.required_year // "2020"' "$manifest_path")"
