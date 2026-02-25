@@ -229,7 +229,7 @@ jobs:
   windows-host-ppl-32:
     name: Windows Host PPL Prerequisite (32-bit)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless, linux-gate-windows-ready]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -247,6 +247,31 @@ jobs:
             Remove-Item -LiteralPath $artifactRoot -Recurse -Force
           }
           New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          $runnerSessionName = [string]$env:SESSIONNAME
+          if ([string]::IsNullOrWhiteSpace($runnerSessionName)) {
+            $runnerSessionName = 'unknown'
+          }
+          $runnerIsInteractive = [System.Environment]::UserInteractive
+          $runnerSessionId = -1
+          try {
+            $runnerSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          } catch {
+            $runnerSessionId = -1
+          }
+          $sessionSignalsHeadless = ($runnerSessionId -eq 0) -or ($runnerSessionName -match '^(Services|Service)$')
+          [ordered]@{
+            status = if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) { 'fail' } else { 'pass' }
+            reason = if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) { 'runner_not_headless' } else { '' }
+            interactive = $runnerIsInteractive
+            session_name = $runnerSessionName
+            session_id = $runnerSessionId
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactRoot 'runner-headless-check.json') -Encoding utf8
+          if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) {
+            throw ("runner_not_headless: windows-host-ppl-32 requires service/headless runner. session='{0}' session_id={1} interactive={2}" -f $runnerSessionName, $runnerSessionId, $runnerIsInteractive)
+          }
+
           $runnerCliRoot = Join-Path $artifactRoot 'tools\runner-cli\win-x64'
           New-Item -Path $runnerCliRoot -ItemType Directory -Force | Out-Null
 
@@ -524,7 +549,7 @@ jobs:
   windows-host-ppl-64:
     name: Windows Host PPL Prerequisite (64-bit)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless, linux-gate-windows-ready]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -542,6 +567,31 @@ jobs:
             Remove-Item -LiteralPath $artifactRoot -Recurse -Force
           }
           New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          $runnerSessionName = [string]$env:SESSIONNAME
+          if ([string]::IsNullOrWhiteSpace($runnerSessionName)) {
+            $runnerSessionName = 'unknown'
+          }
+          $runnerIsInteractive = [System.Environment]::UserInteractive
+          $runnerSessionId = -1
+          try {
+            $runnerSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          } catch {
+            $runnerSessionId = -1
+          }
+          $sessionSignalsHeadless = ($runnerSessionId -eq 0) -or ($runnerSessionName -match '^(Services|Service)$')
+          [ordered]@{
+            status = if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) { 'fail' } else { 'pass' }
+            reason = if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) { 'runner_not_headless' } else { '' }
+            interactive = $runnerIsInteractive
+            session_name = $runnerSessionName
+            session_id = $runnerSessionId
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactRoot 'runner-headless-check.json') -Encoding utf8
+          if ($runnerIsInteractive -or (-not $sessionSignalsHeadless)) {
+            throw ("runner_not_headless: windows-host-ppl-64 requires service/headless runner. session='{0}' session_id={1} interactive={2}" -f $runnerSessionName, $runnerSessionId, $runnerIsInteractive)
+          }
+
           $runnerCliRoot = Join-Path $artifactRoot 'tools\runner-cli\win-x64'
           New-Item -Path $runnerCliRoot -ItemType Directory -Force | Out-Null
 
@@ -1033,7 +1083,7 @@ jobs:
   windows-host-vip-build:
     name: Windows Host VIP Build
     needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64, linux-hosted-ppl-64]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless, linux-gate-windows-ready]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
