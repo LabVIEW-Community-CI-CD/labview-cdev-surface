@@ -78,6 +78,8 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'lv_icon_x64\.lvlibp'
         $script:coreWorkflowContent | Should -Match 'EnableCICDFeaturesForLabVIEW=TRUE'
         $script:coreWorkflowContent | Should -Match 'LabVIEWCLI -OperationName'
+        $script:coreWorkflowContent | Should -Match 'labviewCliContainerCommand = @\('
+        $script:coreWorkflowContent | Should -Match '\) -join "`n"'
         $script:coreWorkflowContent | Should -Match "driver = 'labviewcli-smoke'"
         $script:coreWorkflowContent | Should -Not -Match 'command -v vipm'
         $script:coreWorkflowContent | Should -Match 'windows_prereq_artifacts'

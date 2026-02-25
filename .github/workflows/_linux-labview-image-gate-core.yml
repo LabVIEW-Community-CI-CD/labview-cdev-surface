@@ -523,21 +523,21 @@ jobs:
             }
 
             $labviewCliSmokeLogPath = Join-Path $logRoot 'labviewcli-smoke.log'
-            $labviewCliContainerCommand = @'
-            set -euo pipefail
-            if [ "${LINUX_ENABLE_CICD_FEATURES}" = "true" ]; then
-              export EnableCICDFeaturesForLabVIEW=TRUE
-            fi
-            if [ ! -x "${LINUX_LABVIEW_PATH}" ]; then
-              echo "Missing LabVIEW executable path: ${LINUX_LABVIEW_PATH}" >&2
-              exit 1
-            fi
-            LABVIEWCLI_ARGS=()
-            if [ "${LINUX_HEADLESS_REQUIRED}" = "true" ]; then
-              LABVIEWCLI_ARGS+=("-Headless")
-            fi
-            LabVIEWCLI -OperationName "${LINUX_CLI_OPERATION}" -LabVIEWPath "${LINUX_LABVIEW_PATH}" "${LABVIEWCLI_ARGS[@]}" -Help
-            '@
+            $labviewCliContainerCommand = @(
+              'set -euo pipefail'
+              'if [ "${LINUX_ENABLE_CICD_FEATURES}" = "true" ]; then'
+              '  export EnableCICDFeaturesForLabVIEW=TRUE'
+              'fi'
+              'if [ ! -x "${LINUX_LABVIEW_PATH}" ]; then'
+              '  echo "Missing LabVIEW executable path: ${LINUX_LABVIEW_PATH}" >&2'
+              '  exit 1'
+              'fi'
+              'LABVIEWCLI_ARGS=()'
+              'if [ "${LINUX_HEADLESS_REQUIRED}" = "true" ]; then'
+              '  LABVIEWCLI_ARGS+=("-Headless")'
+              'fi'
+              'LabVIEWCLI -OperationName "${LINUX_CLI_OPERATION}" -LabVIEWPath "${LINUX_LABVIEW_PATH}" "${LABVIEWCLI_ARGS[@]}" -Help'
+            ) -join "`n"
             $labviewCliOutput = (& docker run --rm `
               -e "LINUX_ENABLE_CICD_FEATURES=$([string]$env:LINUX_ENABLE_CICD_FEATURES)" `
               -e "LINUX_HEADLESS_REQUIRED=$([string]$env:LINUX_HEADLESS_REQUIRED)" `
