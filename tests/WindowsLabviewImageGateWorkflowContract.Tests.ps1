@@ -48,12 +48,12 @@ Describe 'Windows LabVIEW image gate workflow contract' {
     }
 
     It 'uses expected runner labels for host release and container parity lanes' {
-        $script:coreWorkflowContent | Should -Match '(?s)windows-host-release-gate:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-release-gate:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-host-native\]'
         $script:coreWorkflowContent | Should -Not -Match '(?s)windows-host-release-gate:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
         $script:coreWorkflowContent | Should -Match 'Windows Host Linux Prereq \(native 2025q3 x86\)'
         $script:coreWorkflowContent | Should -Match 'Windows Host Linux Prereq \(native 2025q3 x64\)'
-        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x86:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
-        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x64:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x86:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-host-native\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x64:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-host-native\]'
         $script:coreWorkflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*windows-containers,\s*user-session,\s*cdev-surface-windows-gate\]'
     }
 

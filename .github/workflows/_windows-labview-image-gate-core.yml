@@ -166,7 +166,7 @@ jobs:
     name: Windows Host Release Gate (LabVIEW ${{ needs.resolve-parity-context.outputs.release_required_year }})
     needs: [resolve-parity-context]
     if: ${{ !inputs.linux_prereq_only }}
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-host-native]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -421,7 +421,7 @@ jobs:
   windows-host-linux-prereq-x86:
     name: Windows Host Linux Prereq (native 2025q3 x86)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-host-native]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -515,7 +515,7 @@ jobs:
   windows-host-linux-prereq-x64:
     name: Windows Host Linux Prereq (native 2025q3 x64)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-host-native]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
