@@ -447,13 +447,35 @@ jobs:
               [Parameter()][switch]$AppendLog
             )
 
+            $output = @()
+            $exitCode = 1
+            $invocationError = $null
             $previousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
               $output = @(& $CommandPath @Arguments 2>&1)
-              $exitCode = [int]$LASTEXITCODE
+              if ($null -ne $LASTEXITCODE) {
+                $exitCode = [int]$LASTEXITCODE
+              } else {
+                $exitCode = 0
+              }
+            } catch {
+              $invocationError = $_
+              if ($null -ne $LASTEXITCODE -and [int]$LASTEXITCODE -ne 0) {
+                $exitCode = [int]$LASTEXITCODE
+              } else {
+                $exitCode = 1
+              }
+              $output = @(
+                [string]$invocationError.Exception.Message,
+                [string]$invocationError
+              )
             } finally {
               $ErrorActionPreference = $previousErrorActionPreference
+            }
+
+            if ($null -ne $invocationError) {
+              $output += "runner_cli_invocation_exception=$($invocationError.FullyQualifiedErrorId)"
             }
 
             if ($AppendLog) {
@@ -767,13 +789,35 @@ jobs:
               [Parameter()][switch]$AppendLog
             )
 
+            $output = @()
+            $exitCode = 1
+            $invocationError = $null
             $previousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
               $output = @(& $CommandPath @Arguments 2>&1)
-              $exitCode = [int]$LASTEXITCODE
+              if ($null -ne $LASTEXITCODE) {
+                $exitCode = [int]$LASTEXITCODE
+              } else {
+                $exitCode = 0
+              }
+            } catch {
+              $invocationError = $_
+              if ($null -ne $LASTEXITCODE -and [int]$LASTEXITCODE -ne 0) {
+                $exitCode = [int]$LASTEXITCODE
+              } else {
+                $exitCode = 1
+              }
+              $output = @(
+                [string]$invocationError.Exception.Message,
+                [string]$invocationError
+              )
             } finally {
               $ErrorActionPreference = $previousErrorActionPreference
+            }
+
+            if ($null -ne $invocationError) {
+              $output += "runner_cli_invocation_exception=$($invocationError.FullyQualifiedErrorId)"
             }
 
             if ($AppendLog) {
