@@ -399,21 +399,45 @@ jobs:
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           }
 
-          try {
-            & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath
-            $runnerCliExit = [int]$LASTEXITCODE
-          } catch {
-            $runnerCliErrorText = [string]$_.Exception.Message
-            if ($runnerCliErrorText -match 'Application Control policy has blocked this file') {
-              $runnerCliInvocation.mode = 'dotnet-dll-fallback'
-              $runnerCliInvocation.fallback_triggered = $true
-              $runnerCliInvocation.block_reason = 'application_control_policy'
-              $runnerCliInvocation.block_message = $runnerCliErrorText
-              & dotnet $runnerCliDllPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath -Append
-              $runnerCliExit = [int]$LASTEXITCODE
-            } else {
-              throw
+          function Invoke-RunnerCliCommand {
+            param(
+              [Parameter(Mandatory = $true)][string]$CommandPath,
+              [Parameter(Mandatory = $true)][string[]]$Arguments,
+              [Parameter(Mandatory = $true)][string]$LogPath,
+              [Parameter()][switch]$AppendLog
+            )
+
+            $previousErrorActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+              $output = @(& $CommandPath @Arguments 2>&1)
+              $exitCode = [int]$LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $previousErrorActionPreference
             }
+
+            if ($AppendLog) {
+              $output | Tee-Object -FilePath $LogPath -Append | Out-Null
+            } else {
+              $output | Tee-Object -FilePath $LogPath | Out-Null
+            }
+
+            return [pscustomobject]@{
+              exit_code = $exitCode
+              output = @($output | ForEach-Object { [string]$_ })
+            }
+          }
+
+          $primaryResult = Invoke-RunnerCliCommand -CommandPath $runnerCliPath -Arguments $commandArgs -LogPath $runnerCliLogPath
+          $runnerCliExit = [int]$primaryResult.exit_code
+          $primaryOutputText = [string]::Join("`n", @($primaryResult.output))
+          if ($primaryOutputText -match 'Application Control policy has blocked this file') {
+            $runnerCliInvocation.mode = 'dotnet-dll-fallback'
+            $runnerCliInvocation.fallback_triggered = $true
+            $runnerCliInvocation.block_reason = 'application_control_policy'
+            $runnerCliInvocation.block_message = $primaryOutputText
+            $fallbackResult = Invoke-RunnerCliCommand -CommandPath 'dotnet' -Arguments @($runnerCliDllPath) + $commandArgs -LogPath $runnerCliLogPath -AppendLog
+            $runnerCliExit = [int]$fallbackResult.exit_code
           }
 
           $runnerCliInvocation.exit_code = $runnerCliExit
@@ -670,21 +694,45 @@ jobs:
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           }
 
-          try {
-            & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath
-            $runnerCliExit = [int]$LASTEXITCODE
-          } catch {
-            $runnerCliErrorText = [string]$_.Exception.Message
-            if ($runnerCliErrorText -match 'Application Control policy has blocked this file') {
-              $runnerCliInvocation.mode = 'dotnet-dll-fallback'
-              $runnerCliInvocation.fallback_triggered = $true
-              $runnerCliInvocation.block_reason = 'application_control_policy'
-              $runnerCliInvocation.block_message = $runnerCliErrorText
-              & dotnet $runnerCliDllPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath -Append
-              $runnerCliExit = [int]$LASTEXITCODE
-            } else {
-              throw
+          function Invoke-RunnerCliCommand {
+            param(
+              [Parameter(Mandatory = $true)][string]$CommandPath,
+              [Parameter(Mandatory = $true)][string[]]$Arguments,
+              [Parameter(Mandatory = $true)][string]$LogPath,
+              [Parameter()][switch]$AppendLog
+            )
+
+            $previousErrorActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+              $output = @(& $CommandPath @Arguments 2>&1)
+              $exitCode = [int]$LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $previousErrorActionPreference
             }
+
+            if ($AppendLog) {
+              $output | Tee-Object -FilePath $LogPath -Append | Out-Null
+            } else {
+              $output | Tee-Object -FilePath $LogPath | Out-Null
+            }
+
+            return [pscustomobject]@{
+              exit_code = $exitCode
+              output = @($output | ForEach-Object { [string]$_ })
+            }
+          }
+
+          $primaryResult = Invoke-RunnerCliCommand -CommandPath $runnerCliPath -Arguments $commandArgs -LogPath $runnerCliLogPath
+          $runnerCliExit = [int]$primaryResult.exit_code
+          $primaryOutputText = [string]::Join("`n", @($primaryResult.output))
+          if ($primaryOutputText -match 'Application Control policy has blocked this file') {
+            $runnerCliInvocation.mode = 'dotnet-dll-fallback'
+            $runnerCliInvocation.fallback_triggered = $true
+            $runnerCliInvocation.block_reason = 'application_control_policy'
+            $runnerCliInvocation.block_message = $primaryOutputText
+            $fallbackResult = Invoke-RunnerCliCommand -CommandPath 'dotnet' -Arguments @($runnerCliDllPath) + $commandArgs -LogPath $runnerCliLogPath -AppendLog
+            $runnerCliExit = [int]$fallbackResult.exit_code
           }
 
           $runnerCliInvocation.exit_code = $runnerCliExit
