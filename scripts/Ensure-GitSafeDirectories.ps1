@@ -100,20 +100,6 @@ foreach ($path in @($inputSet)) {
     [void]$targetSet.Add($path)
 }
 
-if ($IncludeGitWorktrees) {
-    foreach ($path in @($inputSet)) {
-        if (-not (Test-GitRepoPath -Path $path)) {
-            continue
-        }
-        foreach ($worktreePath in @(Get-GitWorktreePaths -RepoPath $path)) {
-            if ([string]::IsNullOrWhiteSpace($worktreePath)) {
-                continue
-            }
-            [void]$targetSet.Add((ConvertTo-NormalizedPath -Path $worktreePath))
-        }
-    }
-}
-
 $existingRaw = @(& git config --global --get-all safe.directory 2>$null)
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
     throw 'Failed to query existing git safe.directory entries.'
@@ -130,9 +116,36 @@ foreach ($line in @($existingRaw)) {
 
 $added = New-Object 'System.Collections.Generic.List[string]'
 $alreadyPresent = New-Object 'System.Collections.Generic.List[string]'
+
+if ($IncludeGitWorktrees) {
+    foreach ($path in @($inputSet)) {
+        if (-not (Test-GitRepoPath -Path $path)) {
+            continue
+        }
+
+        # Ensure the repo root itself is safe before probing worktrees.
+        if (-not $existingSet.Contains($path)) {
+            & git config --global --add safe.directory $path 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to configure git safe.directory entry for '$path'."
+            }
+            [void]$existingSet.Add($path)
+            [void]$added.Add($path)
+        }
+
+        foreach ($worktreePath in @(Get-GitWorktreePaths -RepoPath $path)) {
+            if ([string]::IsNullOrWhiteSpace($worktreePath)) {
+                continue
+            }
+            [void]$targetSet.Add((ConvertTo-NormalizedPath -Path $worktreePath))
+        }
+    }
+}
 foreach ($path in @($targetSet)) {
     if ($existingSet.Contains($path)) {
-        [void]$alreadyPresent.Add($path)
+        if (-not $added.Contains($path)) {
+            [void]$alreadyPresent.Add($path)
+        }
         continue
     }
 

@@ -28,6 +28,18 @@ Describe 'Git safe-directory policy contract' {
         $script:scriptContent | Should -Match 'detected_dubious_ownership'
     }
 
+    It 'bootstraps repo root as safe before worktree probing' {
+        $bootstrapToken = "if (-not `$existingSet.Contains(`$path)) {"
+        $worktreeToken = 'Get-GitWorktreePaths -RepoPath $path'
+
+        $bootstrapIndex = $script:scriptContent.IndexOf($bootstrapToken, [System.StringComparison]::Ordinal)
+        $worktreeIndex = $script:scriptContent.IndexOf($worktreeToken, [System.StringComparison]::Ordinal)
+
+        $bootstrapIndex | Should -BeGreaterThan -1
+        $worktreeIndex | Should -BeGreaterThan -1
+        $bootstrapIndex | Should -BeLessThan $worktreeIndex
+    }
+
     It 'produces deterministic JSON evidence fields' {
         $script:scriptContent | Should -Match 'added_count'
         $script:scriptContent | Should -Match 'target_path_count'
