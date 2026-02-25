@@ -45,4 +45,12 @@ Describe 'Host LabVIEW prerequisite remediation contract' {
         $script:content | Should -Match '\$report\.vi_analyzer\.status\s*=\s*''pass'''
         $script:content | Should -Match 'if \(\@\(\$viAnalyzerMissingPackages\)\.Count -gt 0\)'
     }
+
+    It 'probes NIPM package install state with non-terminating stderr handling' {
+        $script:content | Should -Match 'function Test-NipkgPackageInstalled'
+        $script:content | Should -Match '\$previousErrorActionPreference\s*=\s*\$ErrorActionPreference'
+        $script:content | Should -Match '\$ErrorActionPreference\s*=\s*''Continue'''
+        $script:content | Should -Match '\$output\s*=\s*&\s*\$NipkgPath\s+list-installed\s+\$PackageName\s+2>&1'
+        $script:content | Should -Match '\$ErrorActionPreference\s*=\s*\$previousErrorActionPreference'
+    }
 }

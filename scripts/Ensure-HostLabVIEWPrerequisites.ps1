@@ -122,8 +122,14 @@ function Test-NipkgPackageInstalled {
         [string]$PackageName
     )
 
-    $output = & $NipkgPath list-installed $PackageName 2>&1
-    $exitCode = [int]$LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $NipkgPath list-installed $PackageName 2>&1
+        $exitCode = [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($exitCode -ne 0) {
         throw "nipkg list-installed '$PackageName' failed with exit code $exitCode."
     }
