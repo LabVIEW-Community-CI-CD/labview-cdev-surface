@@ -76,6 +76,9 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'LVIE_WORKTREE_ROOT = ''C:\\dev'''
         $script:coreWorkflowContent | Should -Match 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = \[string\]\$env:RELEASE_REQUIRED_YEAR'
         $script:coreWorkflowContent | Should -Match 'RELEASE_REQUIRED_YEAR:\s*\$\{\{\s*needs\.resolve-parity-context\.outputs\.release_required_year\s*\}\}'
+        $script:coreWorkflowContent | Should -Not -Match 'Host release contract requires LabVIEW 2020 only'
+        $script:coreWorkflowContent | Should -Match '\$requiredYearLabview32Root = "C:\\Program Files \(x86\)\\National Instruments\\LabVIEW \$requiredLabviewYear"'
+        $script:coreWorkflowContent | Should -Match '\$requiredYearLabview64Root = "C:\\Program Files\\National Instruments\\LabVIEW \$requiredLabviewYear"'
     }
 
     It 'enforces release-vs-parity post-action roles and vi analyzer parity execution' {

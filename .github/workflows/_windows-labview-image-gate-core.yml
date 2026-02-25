@@ -237,8 +237,8 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($requiredLabviewYear)) {
             throw 'Resolved release required year is empty.'
           }
-          if ($requiredLabviewYear -ne '2020') {
-            throw "Host release contract requires LabVIEW 2020 only. resolved_year=$requiredLabviewYear"
+          if ($requiredLabviewYear -notmatch '^\d{4}$') {
+            throw "Resolved release required year is invalid: $requiredLabviewYear"
           }
 
           & $convertManifestScript -ManifestPath $payloadManifestPath -WorkspaceRoot $isolatedWorkspaceRoot -OutputPath $payloadManifestPath | Out-Null
@@ -285,9 +285,19 @@ jobs:
             }
           }
 
+          $requiredLabviewYear = [string]$env:RELEASE_REQUIRED_YEAR
+          if ([string]::IsNullOrWhiteSpace($requiredLabviewYear)) {
+            throw 'RELEASE_REQUIRED_YEAR is empty for host release gate.'
+          }
+          if ($requiredLabviewYear -notmatch '^\d{4}$') {
+            throw "RELEASE_REQUIRED_YEAR '$requiredLabviewYear' is invalid. Expected a 4-digit year."
+          }
+
+          $requiredYearLabview64Root = "C:\Program Files\National Instruments\LabVIEW $requiredLabviewYear"
+          $requiredYearLabview32Root = "C:\Program Files (x86)\National Instruments\LabVIEW $requiredLabviewYear"
+
           foreach ($requiredRoot in @(
-            'C:\Program Files\National Instruments\LabVIEW 2020',
-            'C:\Program Files (x86)\National Instruments\LabVIEW 2020',
+            $requiredYearLabview32Root,
             'C:\Program Files\Git',
             'C:\Program Files\GitHub CLI',
             'C:\Program Files\G-CLI'
@@ -295,6 +305,9 @@ jobs:
             if (-not (Test-Path -LiteralPath $requiredRoot -PathType Container)) {
               throw "Host release gate requires root path: $requiredRoot"
             }
+          }
+          if (-not (Test-Path -LiteralPath $requiredYearLabview64Root -PathType Container)) {
+            Write-Warning "LabVIEW $requiredLabviewYear x64 root is not present pre-install ($requiredYearLabview64Root). Continuing; installer/runtime remediation may provision it."
           }
           if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
             throw "Workspace governance manifest is missing for host release gate: $manifestPath"
