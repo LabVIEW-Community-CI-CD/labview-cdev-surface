@@ -295,6 +295,80 @@ function Get-DockerDesktopContextHost {
     }
 }
 
+function Invoke-DockerBackendRecovery {
+    param(
+        [Parameter(Mandatory = $true)][string]$DockerExecutable,
+        [Parameter(Mandatory = $true)][string]$DockerContext,
+        [Parameter(Mandatory = $true)][bool]$DockerContextExists,
+        [Parameter(Mandatory = $true)][int]$StartupTimeoutSeconds,
+        [Parameter(Mandatory = $true)][int]$PollSeconds
+    )
+
+    $steps = @()
+
+    $dockerService = Get-Service -Name 'com.docker.service' -ErrorAction SilentlyContinue
+    if ($null -ne $dockerService) {
+        try {
+            if ([string]$dockerService.Status -eq 'Running') {
+                Restart-Service -Name 'com.docker.service' -Force -ErrorAction Stop
+                $steps += 'restarted com.docker.service'
+            } else {
+                Start-Service -Name 'com.docker.service' -ErrorAction Stop
+                $steps += 'started com.docker.service'
+            }
+        } catch {
+            $steps += ("service action failed: {0}" -f [string]$_.Exception.Message)
+        }
+    } else {
+        $steps += 'com.docker.service not found'
+    }
+
+    foreach ($procName in @('Docker Desktop', 'com.docker.backend', 'com.docker.build')) {
+        $procs = @(Get-Process -Name $procName -ErrorAction SilentlyContinue)
+        if (@($procs).Count -gt 0) {
+            foreach ($proc in $procs) {
+                try {
+                    Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                } catch {
+                    # best effort
+                }
+            }
+            $steps += ("stopped process: {0} count={1}" -f $procName, @($procs).Count)
+        }
+    }
+
+    $dockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+    if (Test-Path -LiteralPath $dockerDesktopExe -PathType Leaf) {
+        try {
+            Start-Process -FilePath $dockerDesktopExe | Out-Null
+            $steps += 'started Docker Desktop.exe'
+        } catch {
+            $steps += ("start Docker Desktop.exe failed: {0}" -f [string]$_.Exception.Message)
+        }
+    } else {
+        $steps += ("Docker Desktop executable missing: {0}" -f $dockerDesktopExe)
+    }
+
+    $reachability = if ($DockerContextExists) {
+        Wait-DockerContextReachable `
+            -DockerExecutable $DockerExecutable `
+            -Context $DockerContext `
+            -TimeoutSeconds $StartupTimeoutSeconds `
+            -PollSeconds $PollSeconds
+    } else {
+        Wait-DockerDaemonReachable `
+            -DockerExecutable $DockerExecutable `
+            -TimeoutSeconds $StartupTimeoutSeconds `
+            -PollSeconds $PollSeconds
+    }
+
+    return [pscustomobject]@{
+        recovered = [bool]$reachability.reachable
+        detail = [string]$reachability.detail
+        steps = [string]($steps -join ' | ')
+    }
+}
+
 foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli', 'vipm', 'docker')) {
     $resolved = Resolve-Tool -Name $commandName -FallbackPaths @($toolFallbackMap[$commandName])
     $resolvedTools[$commandName] = $resolved
@@ -523,6 +597,35 @@ if ($SwitchDockerContext) {
             -Name 'docker:context_switch' `
             -Passed $switchPassed `
             -Detail $switchDetail `
+            -Severity $DockerCheckSeverity
+    }
+}
+
+$dockerRecoveryResult = $null
+if ($StartDockerDesktopIfNeeded -and $null -ne $dockerTool -and [bool]$dockerTool.found) {
+    $preRecoveryReachability = if ($dockerContextExists) {
+        Test-DockerContextReachable -DockerExecutable $dockerTool.path -Context $DockerContext
+    } else {
+        Test-DockerDaemonReachable -DockerExecutable $dockerTool.path
+    }
+
+    if (-not [bool]$preRecoveryReachability.reachable) {
+        $dockerRecoveryResult = Invoke-DockerBackendRecovery `
+            -DockerExecutable $dockerTool.path `
+            -DockerContext $DockerContext `
+            -DockerContextExists $dockerContextExists `
+            -StartupTimeoutSeconds $DockerStartupTimeoutSeconds `
+            -PollSeconds $DockerSwitchPollSeconds
+        Add-Check `
+            -Name 'docker:backend_recovery' `
+            -Passed ([bool]$dockerRecoveryResult.recovered) `
+            -Detail ("context={0}; detail={1}; steps={2}" -f $DockerContext, [string]$dockerRecoveryResult.detail, [string]$dockerRecoveryResult.steps) `
+            -Severity $DockerCheckSeverity
+    } else {
+        Add-Check `
+            -Name 'docker:backend_recovery' `
+            -Passed $true `
+            -Detail 'not needed; docker context already reachable after startup/switch phases.' `
             -Severity $DockerCheckSeverity
     }
 }
