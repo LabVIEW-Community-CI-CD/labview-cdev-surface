@@ -52,6 +52,8 @@ jobs:
             './tests/WorkspaceInstallerDeterminismContract.Tests.ps1',
             './tests/ProvenanceContract.Tests.ps1',
             './tests/IntegrationGateWorkflowContract.Tests.ps1',
+            './tests/SelfHostedMachineCertificationWorkflowContract.Tests.ps1',
+            './tests/MachineCertificationProfilesContract.Tests.ps1',
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
             './tests/NightlySupplyChainCanaryWorkflowContract.Tests.ps1',
             './tests/WindowsLabviewImageGateWorkflowContract.Tests.ps1',
