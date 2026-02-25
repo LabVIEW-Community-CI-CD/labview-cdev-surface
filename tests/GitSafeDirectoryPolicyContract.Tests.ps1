@@ -16,6 +16,8 @@ Describe 'Git safe-directory policy contract' {
     It 'uses global safe.directory bootstrap and supports idempotent discovery' {
         $script:scriptContent | Should -Match 'git config --global --get-all safe\.directory'
         $script:scriptContent | Should -Match 'git config --global --add safe\.directory'
+        $script:scriptContent | Should -Match 'ConvertTo-NormalizedPathOrRaw'
+        $script:scriptContent | Should -Match "Preserve non-path safe\.directory values"
         $script:scriptContent | Should -Match 'include_git_worktrees'
         $script:scriptContent | Should -Match 'validate_git_status'
     }

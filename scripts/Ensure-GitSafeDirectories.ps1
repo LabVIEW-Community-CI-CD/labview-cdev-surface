@@ -26,6 +26,22 @@ function ConvertTo-NormalizedPath {
     return $resolved
 }
 
+function ConvertTo-NormalizedPathOrRaw {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $trimmed = ([string]$Path).Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return ''
+    }
+
+    try {
+        return ConvertTo-NormalizedPath -Path $trimmed
+    } catch {
+        # Preserve non-path safe.directory values (for example '*') instead of failing normalization.
+        return $trimmed
+    }
+}
+
 function New-CaseInsensitiveSet {
     return New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 }
@@ -109,7 +125,7 @@ foreach ($line in @($existingRaw)) {
     if ([string]::IsNullOrWhiteSpace($value)) {
         continue
     }
-    [void]$existingSet.Add((ConvertTo-NormalizedPath -Path $value))
+    [void]$existingSet.Add((ConvertTo-NormalizedPathOrRaw -Path $value))
 }
 
 $added = New-Object 'System.Collections.Generic.List[string]'
