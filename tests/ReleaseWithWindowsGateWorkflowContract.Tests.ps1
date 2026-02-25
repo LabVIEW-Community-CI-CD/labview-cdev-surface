@@ -31,6 +31,7 @@ Describe 'Release with Windows gate workflow contract' {
         $script:workflowContent | Should -Match 'windows_gate:'
         $script:workflowContent | Should -Match 'needs:\s*\[repo_guard\]'
         $script:workflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
+        $script:workflowContent | Should -Match 'container_parity_required:\s*\$\{\{\s*github\.ref_name == ''main''\s*\}\}'
         $script:workflowContent | Should -Match 'linux_parity_gate:'
         $script:workflowContent | Should -Match 'needs:\s*\[repo_guard,\s*windows_gate\]'
         $script:workflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'

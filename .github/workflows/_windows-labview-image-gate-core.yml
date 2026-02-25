@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      container_parity_required:
+        description: Require Windows container parity lane. Disable for host-native-only validation.
+        required: false
+        type: boolean
+        default: true
     outputs:
       gate_status:
         description: Pass/fail status for the Windows image gate.
@@ -609,7 +614,7 @@ jobs:
   windows-container-parity-gate:
     name: Windows Container Parity (${{ needs.resolve-parity-context.outputs.lvcontainer_raw }} | b${{ needs.resolve-parity-context.outputs.selected_ppl_bitness }} | ${{ needs.resolve-parity-context.outputs.build_spec_marker }})
     needs: [resolve-parity-context]
-    if: ${{ !inputs.linux_prereq_only }}
+    if: ${{ !inputs.linux_prereq_only && inputs.container_parity_required }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
@@ -1238,14 +1243,15 @@ jobs:
           set -euo pipefail
 
           prereq_only='${{ inputs.linux_prereq_only }}'
+          container_parity_required='${{ inputs.container_parity_required }}'
           host_result='${{ needs.windows-host-release-gate.result }}'
           prereq_x86_result='${{ needs.windows-host-linux-prereq-x86.result }}'
           prereq_x64_result='${{ needs.windows-host-linux-prereq-x64.result }}'
           parity_result='${{ needs.windows-container-parity-gate.result }}'
 
           gate_status='fail'
-          gate_report_artifact_name="windows-labview-image-gate-parity-${GITHUB_RUN_ID}"
-          gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/parity/windows-container-parity-gate-report.json"
+          gate_report_artifact_name="windows-labview-image-gate-release-${GITHUB_RUN_ID}"
+          gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/release/windows-host-release-gate-report.json"
           if [[ "$prereq_only" == 'true' ]]; then
             gate_report_artifact_name="windows-host-linux-prereq-x64-${GITHUB_RUN_ID}"
             gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/linux-prereq/x64/windows-host-linux-prereq-x64-report.json"
@@ -1253,8 +1259,16 @@ jobs:
               gate_status='pass'
             fi
           else
-            if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' && "$parity_result" == 'success' ]]; then
-              gate_status='pass'
+            if [[ "$container_parity_required" == 'true' ]]; then
+              gate_report_artifact_name="windows-labview-image-gate-parity-${GITHUB_RUN_ID}"
+              gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/parity/windows-container-parity-gate-report.json"
+              if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' && "$parity_result" == 'success' ]]; then
+                gate_status='pass'
+              fi
+            else
+              if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' ]]; then
+                gate_status='pass'
+              fi
             fi
           fi
 
@@ -1272,6 +1286,7 @@ jobs:
             echo "- Linux prereq x86 gate: $prereq_x86_result"
             echo "- Linux prereq x64 gate: $prereq_x64_result"
             echo "- Container parity gate: $parity_result"
+            echo "- Container parity required: $container_parity_required"
             echo "- Linux prereq only mode: $prereq_only"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"

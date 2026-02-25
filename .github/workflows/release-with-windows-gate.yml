@@ -59,6 +59,8 @@ jobs:
     name: Windows Gate
     needs: [repo_guard]
     uses: ./.github/workflows/_windows-labview-image-gate-core.yml
+    with:
+      container_parity_required: ${{ github.ref_name == 'main' }}
     secrets: inherit
 
   linux_parity_gate:
