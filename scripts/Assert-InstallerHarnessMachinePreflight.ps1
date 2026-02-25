@@ -33,7 +33,10 @@ param(
     [switch]$StartDockerDesktopIfNeeded,
 
     [Parameter()]
-    [int]$DockerStartupTimeoutSeconds = 20
+    [int]$DockerStartupTimeoutSeconds = 20,
+
+    [Parameter()]
+    [int]$NativeCommandTimeoutSeconds = 15
 )
 
 Set-StrictMode -Version Latest
@@ -127,8 +130,14 @@ function Invoke-NativeCapture {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter()][string[]]$Arguments = @(),
-        [Parameter()][int]$TimeoutSeconds = 5
+        [Parameter()][int]$TimeoutSeconds = 0
     )
+
+    $effectiveTimeoutSeconds = if ($TimeoutSeconds -gt 0) {
+        [Math]::Max(1, [int]$TimeoutSeconds)
+    } else {
+        [Math]::Max(1, [int]$script:NativeCommandTimeoutSeconds)
+    }
 
     $stdOutPath = [System.IO.Path]::GetTempFileName()
     $stdErrPath = [System.IO.Path]::GetTempFileName()
@@ -144,7 +153,7 @@ function Invoke-NativeCapture {
             -RedirectStandardOutput $stdOutPath `
             -RedirectStandardError $stdErrPath
 
-        $waitMilliseconds = [Math]::Max(1, $TimeoutSeconds) * 1000
+        $waitMilliseconds = $effectiveTimeoutSeconds * 1000
         $exited = $process.WaitForExit($waitMilliseconds)
         if (-not $exited) {
             $timedOut = $true
@@ -161,7 +170,7 @@ function Invoke-NativeCapture {
         $stdout = if (Test-Path -LiteralPath $stdOutPath -PathType Leaf) { Get-Content -LiteralPath $stdOutPath -Raw } else { '' }
         $stderr = if (Test-Path -LiteralPath $stdErrPath -PathType Leaf) { Get-Content -LiteralPath $stdErrPath -Raw } else { '' }
         if ($timedOut) {
-            $output = ("command_timeout_after_{0}s`n{1}`n{2}" -f [Math]::Max(1, $TimeoutSeconds), [string]$stdout, [string]$stderr).Trim()
+            $output = ("command_timeout_after_{0}s`n{1}`n{2}" -f $effectiveTimeoutSeconds, [string]$stdout, [string]$stderr).Trim()
         } else {
             $output = ("{0}`n{1}" -f [string]$stdout, [string]$stderr).Trim()
         }
@@ -547,6 +556,7 @@ $report = [ordered]@{
     docker_context_switch_requested = [bool]$SwitchDockerContext
     docker_context_switch_timeout_seconds = $DockerSwitchTimeoutSeconds
     docker_context_switch_poll_seconds = $DockerSwitchPollSeconds
+    native_command_timeout_seconds = $NativeCommandTimeoutSeconds
     nsis_path = $nsisResolved
     status = $status
     summary = [ordered]@{
