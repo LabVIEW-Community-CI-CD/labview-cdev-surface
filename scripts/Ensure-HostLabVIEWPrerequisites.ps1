@@ -231,6 +231,7 @@ function Ensure-LabVIEWInstall {
 
 $report = [ordered]@{
     status = 'pending'
+    error_code = ''
     required_labview_year = $RequiredLabviewYear
     mandatory_bitnesses = @()
     auto_install_bitnesses = @()
@@ -242,6 +243,7 @@ $report = [ordered]@{
     actions = @()
     vi_analyzer = [ordered]@{
         status = 'not_requested'
+        error_code = ''
         required_packages = @()
         installed_before = @{}
         installed_after = @{}
@@ -273,6 +275,30 @@ try {
     $autoInstallBitnesses = Normalize-Bitnesses -Bitnesses $AutoInstallBitnesses
     $report.mandatory_bitnesses = @($mandatoryBitnesses)
     $report.auto_install_bitnesses = @($autoInstallBitnesses)
+
+    $viAnalyzerPackages = @()
+    if ($RequireViAnalyzer) {
+        $report.vi_analyzer.status = 'pending'
+        $viAnalyzerPackages = @('ni-labview-vi-analyzer-toolkit-lic')
+        if ($RequiredLabviewYear -eq '2020') {
+            $viAnalyzerPackages += @(
+                'ni-labview-2020-vi-analyzer-toolkit',
+                'ni-labview-2020-vi-analyzer-toolkit-x86'
+            )
+        } else {
+            $viAnalyzerPackages += 'ni-viawin-labview-support'
+        }
+        $report.vi_analyzer.required_packages = @($viAnalyzerPackages)
+
+        # VI Analyzer remediation is install-capable only on elevated runners.
+        # Fail deterministically before any NIPM transaction on non-admin lanes.
+        if (-not $isAdministrator) {
+            $report.error_code = 'requires_admin_for_vi_analyzer_install'
+            $report.vi_analyzer.error_code = 'requires_admin_for_vi_analyzer_install'
+            $report.vi_analyzer.status = 'requires_admin'
+            throw ("requires_admin_for_vi_analyzer_install: Administrative privileges are required to remediate VI Analyzer packages ({0}) for LabVIEW {1}." -f [string]::Join(', ', @($viAnalyzerPackages)), $RequiredLabviewYear)
+        }
+    }
 
     $feedListCache = Get-NipkgFeedList -NipkgPath $nipkgPath
 
@@ -367,18 +393,6 @@ try {
     }
 
     if ($RequireViAnalyzer) {
-        $report.vi_analyzer.status = 'pending'
-        $viAnalyzerPackages = @('ni-labview-vi-analyzer-toolkit-lic')
-        if ($RequiredLabviewYear -eq '2020') {
-            $viAnalyzerPackages += @(
-                'ni-labview-2020-vi-analyzer-toolkit',
-                'ni-labview-2020-vi-analyzer-toolkit-x86'
-            )
-        } else {
-            $viAnalyzerPackages += 'ni-viawin-labview-support'
-        }
-        $report.vi_analyzer.required_packages = @($viAnalyzerPackages)
-
         $installedBefore = [ordered]@{}
         foreach ($packageName in $viAnalyzerPackages) {
             $installedBefore[$packageName] = [bool](Test-NipkgPackageInstalled -NipkgPath $nipkgPath -PackageName $packageName)
@@ -388,7 +402,10 @@ try {
         foreach ($packageName in $viAnalyzerPackages) {
             if (-not [bool]$installedBefore[$packageName]) {
                 if (-not $isAdministrator) {
-                    throw ("Administrative privileges are required to install VI Analyzer package '{0}'. Relaunch an elevated shell and rerun remediation." -f $packageName)
+                    $report.error_code = 'requires_admin_for_vi_analyzer_install'
+                    $report.vi_analyzer.error_code = 'requires_admin_for_vi_analyzer_install'
+                    $report.vi_analyzer.status = 'requires_admin'
+                    throw ("requires_admin_for_vi_analyzer_install: Administrative privileges are required to install VI Analyzer package '{0}'. Relaunch an elevated shell and rerun remediation." -f $packageName)
                 }
                 $installExitCode = Invoke-NipkgCommand -NipkgPath $nipkgPath -Arguments @('install', '--accept-eulas', '--yes', '--include-recommended', $packageName)
                 [void]$actions.Add([ordered]@{
@@ -424,6 +441,9 @@ try {
     $report.feeds_added = @($feedsAdded)
     $report.actions = @($actions)
     $report.status = 'fail'
+    if ([string]::IsNullOrWhiteSpace([string]$report.error_code) -and ([string]$_.Exception.Message).StartsWith('requires_admin_for_vi_analyzer_install')) {
+        $report.error_code = 'requires_admin_for_vi_analyzer_install'
+    }
     $report.error = $_.Exception.Message
     throw
 } finally {
