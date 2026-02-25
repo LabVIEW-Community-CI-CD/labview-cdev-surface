@@ -24,7 +24,7 @@ param(
     [switch]$SwitchDockerContext,
 
     [Parameter()]
-    [int]$DockerSwitchTimeoutSeconds = 30,
+    [int]$DockerSwitchTimeoutSeconds = 20,
 
     [Parameter()]
     [int]$DockerSwitchPollSeconds = 5,
@@ -33,7 +33,7 @@ param(
     [switch]$StartDockerDesktopIfNeeded,
 
     [Parameter()]
-    [int]$DockerStartupTimeoutSeconds = 30
+    [int]$DockerStartupTimeoutSeconds = 20
 )
 
 Set-StrictMode -Version Latest
@@ -127,7 +127,7 @@ function Invoke-NativeCapture {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter()][string[]]$Arguments = @(),
-        [Parameter()][int]$TimeoutSeconds = 15
+        [Parameter()][int]$TimeoutSeconds = 5
     )
 
     $stdOutPath = [System.IO.Path]::GetTempFileName()
