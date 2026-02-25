@@ -35,8 +35,13 @@ Describe 'Build runner-cli bundle from manifest contract' {
     It 'builds and writes runner-cli executable, hash, and metadata' {
         $script:scriptContent | Should -Match 'dotnet publish'
         $script:scriptContent | Should -Match 'runner-cli\.exe'
+        $script:scriptContent | Should -Match 'runner-cli\.dll'
+        $script:scriptContent | Should -Match 'runner-cli\.runtimeconfig\.json'
+        $script:scriptContent | Should -Match 'runner-cli\.deps\.json'
         $script:scriptContent | Should -Match 'runner-cli\.exe\.sha256'
         $script:scriptContent | Should -Match 'runner-cli\.metadata\.json'
+        $script:scriptContent | Should -Match 'launcher_fallback_command'
+        $script:scriptContent | Should -Match 'dotnet runner-cli\.dll'
         $script:scriptContent | Should -Match 'source_commit'
         $script:scriptContent | Should -Match 'build_epoch_utc'
         $script:scriptContent | Should -Match 'Deterministic=true'

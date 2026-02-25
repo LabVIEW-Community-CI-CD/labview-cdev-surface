@@ -248,11 +248,13 @@ $tempRoot = Join-Path $tempBasePath (
 )
 $cloneRoot = Join-Path $tempRoot 'src'
 $publishRoot = Join-Path $tempRoot 'publish'
+$frameworkPublishRoot = Join-Path $tempRoot 'publish-framework'
 if (Test-Path -LiteralPath $tempRoot -PathType Container) {
     Remove-Directory -Path $tempRoot
 }
 Ensure-Directory -Path $cloneRoot
 Ensure-Directory -Path $publishRoot
+Ensure-Directory -Path $frameworkPublishRoot
 
 try {
     & git clone --no-tags $sourceUrl $cloneRoot
@@ -306,18 +308,60 @@ try {
         throw "dotnet publish failed for runner-cli ($Runtime)."
     }
 
+    $frameworkPublishArgs = @(
+        'publish', $csproj,
+        '--configuration', 'Release',
+        '--runtime', $Runtime,
+        '--self-contained', 'false',
+        '-p:PublishSingleFile=false',
+        '-p:PublishTrimmed=false',
+        '-p:GenerateDocumentationFile=false',
+        '-p:DebugSymbols=false',
+        '--output', $frameworkPublishRoot
+    )
+    if ($Deterministic) {
+        $frameworkPublishArgs += @(
+            '-p:Deterministic=true',
+            '-p:ContinuousIntegrationBuild=true',
+            ("-p:PathMap={0}=/src" -f $cloneRoot),
+            ("-p:RepositoryCommit={0}" -f $pinnedSha),
+            ("-p:RepositoryUrl={0}" -f $sourceUrl),
+            '-p:DebugType=None'
+        )
+    }
+
+    & dotnet @frameworkPublishArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet framework-dependent publish failed for runner-cli ($Runtime)."
+    }
+
     $exeName = if ($Runtime.StartsWith('win-')) { 'runner-cli.exe' } else { 'runner-cli' }
     $publishedExe = Join-Path $publishRoot $exeName
     if (-not (Test-Path -LiteralPath $publishedExe -PathType Leaf)) {
         throw "Published runner-cli binary was not found: $publishedExe"
     }
 
+    $publishedDll = Join-Path $frameworkPublishRoot 'runner-cli.dll'
+    $publishedRuntimeConfig = Join-Path $frameworkPublishRoot 'runner-cli.runtimeconfig.json'
+    $publishedDeps = Join-Path $frameworkPublishRoot 'runner-cli.deps.json'
+    foreach ($requiredPath in @($publishedDll, $publishedRuntimeConfig, $publishedDeps)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Framework-dependent runner-cli artifact was not found: $requiredPath"
+        }
+    }
+
     Ensure-Directory -Path $resolvedOutputRoot
     $bundleExePath = Join-Path $resolvedOutputRoot 'runner-cli.exe'
     $bundleShaPath = Join-Path $resolvedOutputRoot 'runner-cli.exe.sha256'
     $bundleMetadataPath = Join-Path $resolvedOutputRoot 'runner-cli.metadata.json'
+    $bundleDllPath = Join-Path $resolvedOutputRoot 'runner-cli.dll'
+    $bundleRuntimeConfigPath = Join-Path $resolvedOutputRoot 'runner-cli.runtimeconfig.json'
+    $bundleDepsPath = Join-Path $resolvedOutputRoot 'runner-cli.deps.json'
 
     Copy-Item -LiteralPath $publishedExe -Destination $bundleExePath -Force
+    Copy-Item -LiteralPath $publishedDll -Destination $bundleDllPath -Force
+    Copy-Item -LiteralPath $publishedRuntimeConfig -Destination $bundleRuntimeConfigPath -Force
+    Copy-Item -LiteralPath $publishedDeps -Destination $bundleDepsPath -Force
 
     $sha256 = Get-Sha256Hex -Path $bundleExePath
     "{0} *{1}" -f $sha256, (Split-Path -Path $bundleExePath -Leaf) | Set-Content -LiteralPath $bundleShaPath -Encoding ascii
@@ -335,7 +379,12 @@ try {
             installed_dotnet_version = $installedSdkVersion
         }
         publish_command = ("dotnet {0}" -f ($publishArgs -join ' '))
+        framework_publish_command = ("dotnet {0}" -f ($frameworkPublishArgs -join ' '))
         output_file = 'runner-cli.exe'
+        launcher_dll = 'runner-cli.dll'
+        launcher_runtimeconfig = 'runner-cli.runtimeconfig.json'
+        launcher_deps = 'runner-cli.deps.json'
+        launcher_fallback_command = 'dotnet runner-cli.dll'
         output_sha256 = $sha256
     }
     $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $bundleMetadataPath -Encoding UTF8
@@ -351,6 +400,9 @@ try {
         build_epoch_utc = (Convert-ToEpochIso8601 -EpochSeconds $epoch)
         output_root = $resolvedOutputRoot
         executable = $bundleExePath
+        launcher_dll = $bundleDllPath
+        launcher_runtimeconfig = $bundleRuntimeConfigPath
+        launcher_deps = $bundleDepsPath
         sha256_file = $bundleShaPath
         metadata_file = $bundleMetadataPath
         sha256 = $sha256

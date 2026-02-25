@@ -246,8 +246,12 @@ jobs:
           }
 
           $runnerCliPath = Join-Path $runnerCliRoot 'runner-cli.exe'
+          $runnerCliDllPath = Join-Path $runnerCliRoot 'runner-cli.dll'
           if (-not (Test-Path -LiteralPath $runnerCliPath -PathType Leaf)) {
             throw "runner-cli executable not found: $runnerCliPath"
+          }
+          if (-not (Test-Path -LiteralPath $runnerCliDllPath -PathType Leaf)) {
+            throw "runner-cli launcher DLL not found: $runnerCliDllPath"
           }
 
           $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
@@ -382,8 +386,38 @@ jobs:
 
           $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = $requiredLabviewYear
           $env:LVIE_REMEDIATE_LABVIEWCLI_PORT_CONTRACT = '1'
-          & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath (Join-Path $artifactRoot 'runner-cli-ppl-build-32.log')
-          $runnerCliExit = $LASTEXITCODE
+          $runnerCliLogPath = Join-Path $artifactRoot 'runner-cli-ppl-build-32.log'
+          $runnerCliInvocationPath = Join-Path $artifactRoot 'runner-cli-invocation.json'
+          $runnerCliInvocation = [ordered]@{
+            mode = 'exe'
+            executable = $runnerCliPath
+            launcher_dll = $runnerCliDllPath
+            fallback_triggered = $false
+            block_reason = ''
+            block_message = ''
+            exit_code = 1
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          }
+
+          try {
+            & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath
+            $runnerCliExit = [int]$LASTEXITCODE
+          } catch {
+            $runnerCliErrorText = [string]$_.Exception.Message
+            if ($runnerCliErrorText -match 'Application Control policy has blocked this file') {
+              $runnerCliInvocation.mode = 'dotnet-dll-fallback'
+              $runnerCliInvocation.fallback_triggered = $true
+              $runnerCliInvocation.block_reason = 'application_control_policy'
+              $runnerCliInvocation.block_message = $runnerCliErrorText
+              & dotnet $runnerCliDllPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath -Append
+              $runnerCliExit = [int]$LASTEXITCODE
+            } else {
+              throw
+            }
+          }
+
+          $runnerCliInvocation.exit_code = $runnerCliExit
+          $runnerCliInvocation | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $runnerCliInvocationPath -Encoding utf8
           if ($runnerCliExit -ne 0) {
             throw "runner-cli ppl build (32-bit) failed with exit code $runnerCliExit."
           }
@@ -483,8 +517,12 @@ jobs:
           }
 
           $runnerCliPath = Join-Path $runnerCliRoot 'runner-cli.exe'
+          $runnerCliDllPath = Join-Path $runnerCliRoot 'runner-cli.dll'
           if (-not (Test-Path -LiteralPath $runnerCliPath -PathType Leaf)) {
             throw "runner-cli executable not found: $runnerCliPath"
+          }
+          if (-not (Test-Path -LiteralPath $runnerCliDllPath -PathType Leaf)) {
+            throw "runner-cli launcher DLL not found: $runnerCliDllPath"
           }
 
           $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
@@ -619,8 +657,38 @@ jobs:
 
           $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = $requiredLabviewYear
           $env:LVIE_REMEDIATE_LABVIEWCLI_PORT_CONTRACT = '1'
-          & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath (Join-Path $artifactRoot 'runner-cli-ppl-build-64.log')
-          $runnerCliExit = $LASTEXITCODE
+          $runnerCliLogPath = Join-Path $artifactRoot 'runner-cli-ppl-build-64.log'
+          $runnerCliInvocationPath = Join-Path $artifactRoot 'runner-cli-invocation.json'
+          $runnerCliInvocation = [ordered]@{
+            mode = 'exe'
+            executable = $runnerCliPath
+            launcher_dll = $runnerCliDllPath
+            fallback_triggered = $false
+            block_reason = ''
+            block_message = ''
+            exit_code = 1
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          }
+
+          try {
+            & $runnerCliPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath
+            $runnerCliExit = [int]$LASTEXITCODE
+          } catch {
+            $runnerCliErrorText = [string]$_.Exception.Message
+            if ($runnerCliErrorText -match 'Application Control policy has blocked this file') {
+              $runnerCliInvocation.mode = 'dotnet-dll-fallback'
+              $runnerCliInvocation.fallback_triggered = $true
+              $runnerCliInvocation.block_reason = 'application_control_policy'
+              $runnerCliInvocation.block_message = $runnerCliErrorText
+              & dotnet $runnerCliDllPath @commandArgs 2>&1 | Tee-Object -FilePath $runnerCliLogPath -Append
+              $runnerCliExit = [int]$LASTEXITCODE
+            } else {
+              throw
+            }
+          }
+
+          $runnerCliInvocation.exit_code = $runnerCliExit
+          $runnerCliInvocation | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $runnerCliInvocationPath -Encoding utf8
           if ($runnerCliExit -ne 0) {
             throw "runner-cli ppl build (64-bit) failed with exit code $runnerCliExit."
           }

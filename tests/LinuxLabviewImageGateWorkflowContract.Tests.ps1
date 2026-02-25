@@ -55,6 +55,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = \$requiredLabviewYear'
         $script:coreWorkflowContent | Should -Match 'isolated-workspace-resolution\.json'
         $script:coreWorkflowContent | Should -Match 'repo-provisioning\.labview-icon-editor\.json'
+        $script:coreWorkflowContent | Should -Match 'runner-cli-invocation\.json'
         $script:coreWorkflowContent | Should -Match 'if:\s*always\(\)'
     }
 
@@ -78,6 +79,12 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'artifact_role'
         $script:coreWorkflowContent | Should -Match 'signal-only'
         $script:coreWorkflowContent | Should -Not -Match '\bg-cli\b'
+    }
+
+    It 'supports runner-cli application-control fallback via dotnet launcher' {
+        $script:coreWorkflowContent | Should -Match 'Application Control policy has blocked this file'
+        $script:coreWorkflowContent | Should -Match 'dotnet-dll-fallback'
+        $script:coreWorkflowContent | Should -Match 'runner-cli\.dll'
     }
 
     It 'adds anti-stall signatures and parity observability bundles' {
