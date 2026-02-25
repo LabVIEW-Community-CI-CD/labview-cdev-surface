@@ -124,7 +124,8 @@ function Test-RootWritable {
         $probeRoot = Join-Path $RootPath '_lvie-ci-probe'
         New-Item -Path $probeRoot -ItemType Directory -Force | Out-Null
 
-        $probeFile = Join-Path $probeRoot ("{0}.tmp" -f [Guid]::NewGuid().ToString('N'))
+        # SmartApp policies may block .tmp extension writes; use a deterministic non-.tmp probe extension.
+        $probeFile = Join-Path $probeRoot ("{0}.probe" -f [Guid]::NewGuid().ToString('N'))
         'probe' | Set-Content -LiteralPath $probeFile -Encoding ascii
         Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $probeRoot -Force -ErrorAction SilentlyContinue
