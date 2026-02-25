@@ -33,7 +33,8 @@ Execution contract:
 ```json
 {
   "workflow_file": "self-hosted-machine-certification.yml",
-  "ref": "main",
+  "ref": "cert/self-hosted-machine-certification-evidence",
+  "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
   "setup_names": [
     "legacy-2020-desktop-linux",
@@ -44,5 +45,6 @@ Execution contract:
 
 ## Notes
 - Setup names come from `tools/machine-certification/setup-profiles.json`.
+- `trigger_mode=auto` attempts dispatch first and falls back to rerunning the latest run on `ref` when workflow dispatch is unavailable pre-merge.
 - `recorder_name` must be different from repository owner.
 - This prompt is intentionally issue-first: Codex can execute end-to-end from issue URL only.

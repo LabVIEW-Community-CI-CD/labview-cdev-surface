@@ -47,6 +47,42 @@ function Invoke-Gh {
     }
 }
 
+function Get-ScalarString {
+    param([object]$Value)
+    if ($null -eq $Value) {
+        return ''
+    }
+    if ($Value -is [System.Array]) {
+        $first = @($Value | Select-Object -First 1)
+        if (@($first).Count -eq 0) { return '' }
+        return [string]$first[0]
+    }
+    return [string]$Value
+}
+
+function Resolve-RunnerLabelsCsv {
+    param([Parameter(Mandatory = $true)][object]$Setup)
+
+    $csvValue = Get-ScalarString -Value $Setup.runner_labels_csv
+    if (-not [string]::IsNullOrWhiteSpace($csvValue)) {
+        return $csvValue
+    }
+
+    $jsonValue = Get-ScalarString -Value $Setup.runner_labels_json
+    if (-not [string]::IsNullOrWhiteSpace($jsonValue)) {
+        try {
+            $labels = @($jsonValue | ConvertFrom-Json -ErrorAction Stop | ForEach-Object { [string]$_ })
+            if (@($labels).Count -gt 0) {
+                return ($labels -join ',')
+            }
+        } catch {
+            # fall through to explicit error below
+        }
+    }
+
+    throw "Setup '$([string]$Setup.name)' is missing runner labels (runner_labels_csv or valid runner_labels_json)."
+}
+
 $resolvedProfilesPath = Resolve-ProfilesPath -InputPath $ProfilesPath
 if (-not (Test-Path -LiteralPath $resolvedProfilesPath -PathType Leaf)) {
     throw "Setup profiles file not found: $resolvedProfilesPath"
@@ -79,6 +115,7 @@ $dispatchRecords = @()
 $claimedRunIds = @{}
 foreach ($setup in $selectedSetups) {
     $setupNameToken = [string]$setup.name
+    $runnerLabelsCsv = Resolve-RunnerLabelsCsv -Setup $setup
     Write-Host ("Dispatching setup: {0}" -f $setupNameToken)
     $dispatchStartUtc = (Get-Date).ToUniversalTime()
 
@@ -87,7 +124,7 @@ foreach ($setup in $selectedSetups) {
         '-R', $Repository,
         '--ref', $Ref,
         '-f', ("setup_name={0}" -f $setupNameToken),
-        '-f', ("runner_labels_json={0}" -f ([string]$setup.runner_labels_json)),
+        '-f', ("runner_labels_csv={0}" -f $runnerLabelsCsv),
         '-f', ("expected_labview_year={0}" -f ([string]$setup.expected_labview_year)),
         '-f', ("docker_context={0}" -f ([string]$setup.docker_context)),
         '-f', ("skip_host_ini_mutation={0}" -f ([string]$setup.skip_host_ini_mutation).ToLowerInvariant()),
@@ -98,15 +135,27 @@ foreach ($setup in $selectedSetups) {
     Start-Sleep -Seconds $DispatchPauseSeconds
 
     $runJson = gh run list -R $Repository --workflow $WorkflowFile --branch $Ref --event workflow_dispatch --limit 50 --json databaseId,status,conclusion,url,displayTitle,createdAt
-    $runList = @($runJson | ConvertFrom-Json -ErrorAction Stop)
+    $runListRaw = @($runJson | ConvertFrom-Json -ErrorAction Stop)
+    $runList = @(
+        $runListRaw | ForEach-Object {
+            [pscustomobject]@{
+                databaseId = Get-ScalarString -Value $_.databaseId
+                status = Get-ScalarString -Value $_.status
+                conclusion = Get-ScalarString -Value $_.conclusion
+                url = Get-ScalarString -Value $_.url
+                displayTitle = Get-ScalarString -Value $_.displayTitle
+                createdAt = Get-ScalarString -Value $_.createdAt
+            }
+        }
+    )
     $candidateRuns = @(
         $runList |
         Where-Object {
-            $runId = [string]$_.databaseId
+            $runId = Get-ScalarString -Value $_.databaseId
             if ([string]::IsNullOrWhiteSpace($runId)) { return $false }
             if ($claimedRunIds.ContainsKey($runId)) { return $false }
             $createdAt = [DateTimeOffset]::MinValue
-            if (-not [DateTimeOffset]::TryParse([string]$_.createdAt, [ref]$createdAt)) { return $false }
+            if (-not [DateTimeOffset]::TryParse((Get-ScalarString -Value $_.createdAt), [ref]$createdAt)) { return $false }
             return ($createdAt.UtcDateTime -ge $dispatchStartUtc.AddMinutes(-2))
         } |
         Sort-Object -Property createdAt -Descending
@@ -115,21 +164,21 @@ foreach ($setup in $selectedSetups) {
     if ($null -eq $run -and @($runList).Count -gt 0) {
         $run = @(
             $runList |
-            Where-Object { -not $claimedRunIds.ContainsKey([string]$_.databaseId) } |
+            Where-Object { -not $claimedRunIds.ContainsKey((Get-ScalarString -Value $_.databaseId)) } |
             Sort-Object -Property createdAt -Descending
         ) | Select-Object -First 1
     }
-    if ($null -ne $run -and -not [string]::IsNullOrWhiteSpace([string]$run.databaseId)) {
-        $claimedRunIds[[string]$run.databaseId] = $true
+    if ($null -ne $run -and -not [string]::IsNullOrWhiteSpace((Get-ScalarString -Value $run.databaseId))) {
+        $claimedRunIds[(Get-ScalarString -Value $run.databaseId)] = $true
     }
 
     $record = [ordered]@{
         setup_name = $setupNameToken
-        run_id = if ($null -ne $run) { [string]$run.databaseId } else { '' }
-        run_url = if ($null -ne $run) { [string]$run.url } else { '' }
-        run_created_at = if ($null -ne $run) { [string]$run.createdAt } else { '' }
-        status = if ($null -ne $run) { [string]$run.status } else { 'unknown' }
-        conclusion = if ($null -ne $run) { [string]$run.conclusion } else { '' }
+        run_id = if ($null -ne $run) { (Get-ScalarString -Value $run.databaseId) } else { '' }
+        run_url = if ($null -ne $run) { (Get-ScalarString -Value $run.url) } else { '' }
+        run_created_at = if ($null -ne $run) { (Get-ScalarString -Value $run.createdAt) } else { '' }
+        status = if ($null -ne $run) { (Get-ScalarString -Value $run.status) } else { 'unknown' }
+        conclusion = if ($null -ne $run) { (Get-ScalarString -Value $run.conclusion) } else { '' }
     }
     $dispatchRecords += [pscustomobject]$record
 

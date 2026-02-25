@@ -12,7 +12,8 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
 <!-- CERT_CONFIG_START -->
 {
   "workflow_file": "self-hosted-machine-certification.yml",
-  "ref": "main",
+  "ref": "cert/self-hosted-machine-certification-evidence",
+  "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
   "setup_names": [
     "legacy-2020-desktop-linux",
@@ -20,6 +21,8 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
   ]
 }
 <!-- CERT_CONFIG_END -->
+
+When merged to `main`, change `ref` to `main`.
 
 ## Evidence
 | Setup | Run URL | Conclusion | Artifact URL | Certified |

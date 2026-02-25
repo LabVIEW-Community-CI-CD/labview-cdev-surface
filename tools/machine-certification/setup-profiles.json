@@ -4,6 +4,7 @@
     {
       "name": "legacy-2020-desktop-linux",
       "description": "Windows self-hosted runner with LabVIEW 2020 x86/x64 and Docker desktop-linux context.",
+      "runner_labels_csv": "self-hosted,windows,self-hosted-windows-lv,headless",
       "runner_labels_json": "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
       "expected_labview_year": "2020",
       "docker_context": "desktop-linux",
@@ -14,6 +15,7 @@
     {
       "name": "legacy-2020-desktop-windows",
       "description": "Windows self-hosted runner with LabVIEW 2020 x86/x64 and Docker desktop-windows context visibility.",
+      "runner_labels_csv": "self-hosted,windows,self-hosted-windows-lv,headless",
       "runner_labels_json": "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
       "expected_labview_year": "2020",
       "docker_context": "desktop-windows",

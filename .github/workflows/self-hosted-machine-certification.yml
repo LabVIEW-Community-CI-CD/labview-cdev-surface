@@ -12,10 +12,15 @@ on:
         required: false
         default: manual-dispatch
         type: string
-      runner_labels_json:
-        description: JSON array of runner labels used for certification job routing.
+      runner_labels_csv:
+        description: Comma-separated runner labels used for certification job routing.
         required: true
-        default: '["self-hosted","windows","self-hosted-windows-lv"]'
+        default: 'self-hosted,windows,self-hosted-windows-lv,headless'
+        type: string
+      runner_labels_json:
+        description: Optional JSON array override for runner labels.
+        required: false
+        default: ''
         type: string
       expected_labview_year:
         description: LabVIEW year required by machine preflight checks.
@@ -65,7 +70,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             jq -nc \
               --arg setup_name "${{ github.event.inputs.setup_name }}" \
-              --arg labels "${{ github.event.inputs.runner_labels_json }}" \
+              --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
+              --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
               --arg year "${{ github.event.inputs.expected_labview_year }}" \
               --arg docker_context "${{ github.event.inputs.docker_context }}" \
               --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
@@ -73,7 +79,11 @@ jobs:
               --arg target_ref "${{ github.event.inputs.ref }}" \
               '[{
                 setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
-                runner_labels_json: $labels,
+                runner_labels_json: (
+                  if ($labels_json | length) > 0 then $labels_json
+                  else ($labels_csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | tojson)
+                  end
+                ),
                 expected_labview_year: $year,
                 docker_context: $docker_context,
                 skip_host_ini_mutation: $skip_ini,

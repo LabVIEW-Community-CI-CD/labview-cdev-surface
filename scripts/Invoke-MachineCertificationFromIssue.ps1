@@ -40,10 +40,68 @@ function New-MarkdownTable {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Get-LatestRunForWorkflowRef {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$WorkflowFile,
+        [Parameter(Mandatory = $true)][string]$Ref
+    )
+
+    $runListJson = gh run list -R $Repository --workflow $WorkflowFile --branch $Ref --limit 20 --json databaseId,status,conclusion,url,createdAt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to list runs for workflow '$WorkflowFile' on ref '$Ref'."
+    }
+    $runs = @($runListJson | ConvertFrom-Json -ErrorAction Stop)
+    if (@($runs).Count -eq 0) {
+        throw "No existing runs found for workflow '$WorkflowFile' on ref '$Ref'."
+    }
+    return ($runs | Sort-Object -Property createdAt -Descending | Select-Object -First 1)
+}
+
+function Get-SetupRowsFromRun {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][string[]]$SetupNames
+    )
+
+    $runViewJson = gh run view $RunId -R $Repository --json status,conclusion,url,jobs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to read run details for run id '$RunId'."
+    }
+    $runView = $runViewJson | ConvertFrom-Json -ErrorAction Stop
+    $jobs = @($runView.jobs)
+
+    $rows = @()
+    foreach ($setup in $SetupNames) {
+        $match = @($jobs | Where-Object { [string]$_.name -eq ("Self-Hosted Machine Certification ({0})" -f $setup) }) | Select-Object -First 1
+        if ($null -eq $match) {
+            $rows += [pscustomobject]@{
+                setup_name = [string]$setup
+                run_id = [string]$RunId
+                run_url = [string]$runView.url
+                status = [string]$runView.status
+                conclusion = [string]$runView.conclusion
+            }
+            continue
+        }
+
+        $rows += [pscustomobject]@{
+            setup_name = [string]$setup
+            run_id = [string]$RunId
+            run_url = [string]$match.url
+            status = [string]$match.status
+            conclusion = [string]$match.conclusion
+        }
+    }
+
+    return @($rows)
+}
+
 $repoInfo = Get-IssueRepositorySlug -Url $IssueUrl
 $repositorySlug = [string]$repoInfo.repository
 
-$issue = gh issue view $IssueUrl --json number,title,body,url,repository
+$issue = gh issue view $IssueUrl --json number,title,body,url
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to read issue: $IssueUrl"
 }
@@ -67,11 +125,18 @@ $config = $configText | ConvertFrom-Json -ErrorAction Stop
 $workflowFile = [string]$config.workflow_file
 $ref = [string]$config.ref
 $setupNames = @($config.setup_names | ForEach-Object { [string]$_ })
+$triggerMode = [string]$config.trigger_mode
 if ([string]::IsNullOrWhiteSpace($workflowFile)) {
     $workflowFile = 'self-hosted-machine-certification.yml'
 }
 if ([string]::IsNullOrWhiteSpace($ref)) {
     $ref = 'main'
+}
+if ([string]::IsNullOrWhiteSpace($triggerMode)) {
+    $triggerMode = 'auto'
+}
+if (@('auto', 'dispatch', 'rerun_latest') -notcontains $triggerMode) {
+    throw "Unsupported trigger_mode '$triggerMode'. Supported values: auto, dispatch, rerun_latest."
 }
 if (@($setupNames).Count -eq 0) {
     throw "Issue config must include non-empty setup_names."
@@ -101,11 +166,53 @@ $runReportPath = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     [System.IO.Path]::GetFullPath($OutputPath)
 }
 
-$dispatchJson = & $startScript -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref -SetupName $setupNames -OutputPath $runReportPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Start-SelfHostedMachineCertification.ps1 failed."
+$dispatchObj = $null
+$dispatchErrorText = ''
+
+if ($triggerMode -ne 'rerun_latest') {
+    try {
+        $dispatchJson = & $startScript -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref -SetupName $setupNames -OutputPath $runReportPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Start-SelfHostedMachineCertification.ps1 failed."
+        }
+        $dispatchObj = if ($dispatchJson) { $dispatchJson | ConvertFrom-Json -ErrorAction Stop } else { Get-Content -LiteralPath $runReportPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+    } catch {
+        $dispatchErrorText = $_ | Out-String
+        if ($triggerMode -eq 'dispatch') {
+            throw
+        }
+    }
 }
-$dispatchObj = if ($dispatchJson) { $dispatchJson | ConvertFrom-Json -ErrorAction Stop } else { Get-Content -LiteralPath $runReportPath -Raw | ConvertFrom-Json -ErrorAction Stop }
+
+$fallbackToRerunLatest = $false
+if ($triggerMode -eq 'rerun_latest') {
+    $fallbackToRerunLatest = $true
+} elseif ($triggerMode -eq 'auto' -and $null -eq $dispatchObj) {
+    $normalizedDispatchError = [string]$dispatchErrorText
+    if (
+        $normalizedDispatchError -match 'workflow .* not found on the default branch' -or
+        $normalizedDispatchError -match 'HTTP 404' -or
+        $normalizedDispatchError -match 'Not Found'
+    ) {
+        $fallbackToRerunLatest = $true
+    } else {
+        throw "Dispatch failed and trigger_mode=auto did not match fallback criteria. Error: $normalizedDispatchError"
+    }
+}
+
+if ($fallbackToRerunLatest) {
+    $latestRun = Get-LatestRunForWorkflowRef -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref
+    gh run rerun ([string]$latestRun.databaseId) -R $repositorySlug | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to rerun latest run id '$([string]$latestRun.databaseId)'."
+    }
+    Start-Sleep -Seconds 3
+
+    $attemptRows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId ([string]$latestRun.databaseId) -SetupNames $setupNames
+    $dispatchObj = [pscustomobject]@{
+        runs = @($attemptRows)
+    }
+}
 
 $attemptTable = New-MarkdownTable -Rows @($dispatchObj.runs)
 $attemptBody = @(
@@ -114,6 +221,7 @@ $attemptBody = @(
     "- issue: $IssueUrl",
     "- workflow: $workflowFile",
     "- ref: $ref",
+    "- trigger_mode: $triggerMode",
     "- setups: $($setupNames -join ', ')",
     '',
     $attemptTable
@@ -126,39 +234,78 @@ if ($LASTEXITCODE -ne 0) {
 
 $finalRows = @()
 if (-not $SkipWatch) {
-    foreach ($row in @($dispatchObj.runs)) {
-        $runId = [string]$row.run_id
-        if ([string]::IsNullOrWhiteSpace($runId)) {
-            $finalRows += [pscustomobject]@{
-                setup_name = [string]$row.setup_name
-                run_url = [string]$row.run_url
-                status = 'unknown'
-                conclusion = 'unknown'
-            }
+    $runSetupMap = @{}
+    foreach ($attempt in @($dispatchObj.runs)) {
+        $attemptRunId = [string]$attempt.run_id
+        $attemptSetup = [string]$attempt.setup_name
+        if ([string]::IsNullOrWhiteSpace($attemptRunId) -or [string]::IsNullOrWhiteSpace($attemptSetup)) {
             continue
         }
-
-        gh run watch $runId -R $repositorySlug | Out-Null
-
-        $runViewJson = gh run view $runId -R $repositorySlug --json status,conclusion,url
-        if ($LASTEXITCODE -ne 0) {
-            $finalRows += [pscustomobject]@{
-                setup_name = [string]$row.setup_name
-                run_url = [string]$row.run_url
-                status = 'unknown'
-                conclusion = 'unknown'
-            }
-            continue
+        if (-not $runSetupMap.ContainsKey($attemptRunId)) {
+            $runSetupMap[$attemptRunId] = New-Object System.Collections.Generic.List[string]
         }
-
-        $runView = $runViewJson | ConvertFrom-Json -ErrorAction Stop
-        $finalRows += [pscustomobject]@{
-            setup_name = [string]$row.setup_name
-            run_url = [string]$runView.url
-            status = [string]$runView.status
-            conclusion = [string]$runView.conclusion
+        if (-not $runSetupMap[$attemptRunId].Contains($attemptSetup)) {
+            [void]$runSetupMap[$attemptRunId].Add($attemptSetup)
         }
     }
+
+    $uniqueRunIds = @(
+        @($dispatchObj.runs | ForEach-Object { [string]$_.run_id }) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+    )
+
+    foreach ($runId in $uniqueRunIds) {
+        gh run watch $runId -R $repositorySlug | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning ("Failed to watch run id '{0}', continuing to collect available results." -f $runId)
+        }
+
+        try {
+            $expectedSetupsForRun = if ($runSetupMap.ContainsKey($runId) -and @($runSetupMap[$runId]).Count -gt 0) {
+                @($runSetupMap[$runId])
+            } else {
+                @($setupNames)
+            }
+            $rows = Get-SetupRowsFromRun -Repository $repositorySlug -RunId $runId -SetupNames $expectedSetupsForRun
+            $finalRows += @($rows)
+        } catch {
+            $expectedSetupsForRun = if ($runSetupMap.ContainsKey($runId) -and @($runSetupMap[$runId]).Count -gt 0) {
+                @($runSetupMap[$runId])
+            } else {
+                @($setupNames)
+            }
+            foreach ($setupName in $expectedSetupsForRun) {
+                $finalRows += [pscustomobject]@{
+                    setup_name = [string]$setupName
+                    run_id = [string]$runId
+                    run_url = ''
+                    status = 'unknown'
+                    conclusion = 'unknown'
+                }
+            }
+        }
+    }
+
+    if (@($uniqueRunIds).Count -eq 0) {
+        foreach ($setupName in $setupNames) {
+            $finalRows += [pscustomobject]@{
+                setup_name = [string]$setupName
+                run_id = ''
+                run_url = ''
+                status = 'unknown'
+                conclusion = 'unknown'
+            }
+        }
+    }
+
+    $finalRows = @(
+        $finalRows |
+        Group-Object -Property setup_name |
+        ForEach-Object {
+            @($_.Group | Select-Object -Last 1)
+        }
+    )
 
     $resultTable = New-MarkdownTable -Rows $finalRows
     $resultBody = @(
@@ -184,6 +331,7 @@ $report = [ordered]@{
     recorder_name = $effectiveRecorderName
     workflow = $workflowFile
     ref = $ref
+    trigger_mode = $triggerMode
     setups = $setupNames
     attempts = @($dispatchObj.runs)
     results = @($finalRows)
