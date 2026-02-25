@@ -911,9 +911,120 @@ jobs:
           path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-projectspec
           if-no-files-found: error
 
+  linux-hosted-ppl-64:
+    name: Linux Hosted PPL Prerequisite (64-bit, signal-only)
+    needs: [resolve-parity-context]
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build linux x64 PPL prerequisite via NI container on hosted runner
+        shell: bash
+        env:
+          ICON_EDITOR_SOURCE_URL: ${{ needs.resolve-parity-context.outputs.icon_editor_source_url }}
+          ICON_EDITOR_PINNED_SHA: ${{ needs.resolve-parity-context.outputs.icon_editor_pinned_sha }}
+          LINUX_PARITY_IMAGE: ${{ needs.resolve-parity-context.outputs.lvcontainer_linux_image }}
+          PARITY_LABVIEW_YEAR: ${{ needs.resolve-parity-context.outputs.lvcontainer_year }}
+        run: |
+          set -euo pipefail
+
+          artifact_root="$GITHUB_WORKSPACE/artifacts/linux-image-gate/linux-ppl-64"
+          mkdir -p "$artifact_root"
+          log_path="$artifact_root/linux-hosted-ppl-64.log"
+          report_path="$artifact_root/linux-hosted-ppl-64-report.json"
+
+          write_report() {
+            local status="$1"
+            local reason="$2"
+            local output_path="${3:-}"
+            local sha256="${4:-}"
+            cat > "$report_path" <<JSON
+          {
+            "status": "$status",
+            "reason": "$reason",
+            "linux_image": "${LINUX_PARITY_IMAGE}",
+            "icon_editor_source_url": "${ICON_EDITOR_SOURCE_URL}",
+            "icon_editor_pinned_sha": "${ICON_EDITOR_PINNED_SHA}",
+            "output_ppl_path": "$output_path",
+            "output_ppl_sha256": "$sha256"
+          }
+          JSON
+          }
+
+          fail_with_reason() {
+            local reason="$1"
+            echo "linux-hosted-ppl-64 failure: $reason" | tee -a "$log_path"
+            write_report "fail" "$reason"
+            exit 1
+          }
+
+          [[ -n "${ICON_EDITOR_SOURCE_URL}" ]] || fail_with_reason "missing_icon_editor_source_url"
+          [[ -n "${ICON_EDITOR_PINNED_SHA}" ]] || fail_with_reason "missing_icon_editor_pinned_sha"
+          [[ -n "${LINUX_PARITY_IMAGE}" ]] || fail_with_reason "missing_linux_parity_image"
+
+          clone_root="$RUNNER_TEMP/linux-gate/icon-editor-linux-ppl"
+          rm -rf "$clone_root"
+          git clone --quiet --no-tags "$ICON_EDITOR_SOURCE_URL" "$clone_root" >>"$log_path" 2>&1 || fail_with_reason "clone_failed"
+          git -C "$clone_root" checkout --quiet --detach "$ICON_EDITOR_PINNED_SHA" >>"$log_path" 2>&1 || fail_with_reason "checkout_failed"
+
+          runner_script="$clone_root/Tooling/container-parity/runlabview-linux.sh"
+          [[ -f "$runner_script" ]] || fail_with_reason "missing_runlabview_linux_script"
+
+          docker pull "$LINUX_PARITY_IMAGE" >>"$log_path" 2>&1 || fail_with_reason "docker_pull_failed"
+
+          container_name="lvie-linux-ppl-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container_name="${container_name,,}"
+
+          set +e
+          timeout --preserve-status 45m docker run --name "$container_name" --rm \
+            -v "$clone_root:/workspace" \
+            -w /workspace \
+            -e "CONTAINER_PARITY_LABVIEW_VERSION=${PARITY_LABVIEW_YEAR}" \
+            "$LINUX_PARITY_IMAGE" \
+            /bin/bash -lc 'set -euo pipefail; Tooling/container-parity/runlabview-linux.sh' >>"$log_path" 2>&1
+          docker_exit=$?
+          set -e
+
+          docker rm -f "$container_name" >/dev/null 2>&1 || true
+
+          if [[ "$docker_exit" -ne 0 ]]; then
+            if [[ "$docker_exit" -eq 124 ]]; then
+              fail_with_reason "linux_ppl_container_timeout"
+            fi
+            fail_with_reason "linux_ppl_container_failed"
+          fi
+
+          built_ppl="$clone_root/resource/plugins/lv_icon.lvlibp"
+          [[ -f "$built_ppl" ]] || fail_with_reason "linux_ppl_output_missing"
+
+          output_ppl="$artifact_root/lv_icon_linux_x64.lvlibp"
+          cp "$built_ppl" "$output_ppl"
+          output_sha="$(sha256sum "$output_ppl" | awk '{print $1}')"
+          write_report "pass" "none" "$output_ppl" "$output_sha"
+
+      - name: Upload linux x64 PPL prerequisite artifacts (attempt 1)
+        if: always()
+        id: upload_linux_hosted_ppl_64_artifacts_attempt_1
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gate-linux-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/linux-image-gate/linux-ppl-64
+          if-no-files-found: warn
+
+      - name: Upload linux x64 PPL prerequisite artifacts (attempt 2)
+        if: always() && steps.upload_linux_hosted_ppl_64_artifacts_attempt_1.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gate-linux-ppl-64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/linux-image-gate/linux-ppl-64
+          if-no-files-found: warn
+
   windows-host-vip-build:
     name: Windows Host VIP Build (signal-only)
-    needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64]
+    needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64, linux-hosted-ppl-64]
     continue-on-error: true
     runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
     steps:
@@ -1196,7 +1307,7 @@ jobs:
   gate-summary:
     name: Linux Gate Summary
     if: always()
-    needs: [windows-host-ppl-32, windows-host-ppl-64, linux-parity-projectspec-via-container, windows-host-vip-build]
+    needs: [windows-host-ppl-32, windows-host-ppl-64, linux-parity-projectspec-via-container, linux-hosted-ppl-64, windows-host-vip-build]
     runs-on: ubuntu-latest
     outputs:
       gate_status: ${{ steps.evaluate.outputs.gate_status }}
@@ -1211,6 +1322,7 @@ jobs:
           ppl32_result='${{ needs.windows-host-ppl-32.result }}'
           ppl64_result='${{ needs.windows-host-ppl-64.result }}'
           projectspec_result='${{ needs.linux-parity-projectspec-via-container.result }}'
+          linux_hosted_ppl_result='${{ needs.linux-hosted-ppl-64.result }}'
           vip_result='${{ needs.windows-host-vip-build.result }}'
 
           gate_status='fail'
@@ -1228,9 +1340,14 @@ jobs:
             echo "- Windows host PPL 32 prerequisite: $ppl32_result"
             echo "- Windows host PPL 64 prerequisite: $ppl64_result"
             echo "- Linux parity project-spec lane: $projectspec_result"
+            echo "- Linux hosted PPL x64 lane (signal-only): $linux_hosted_ppl_result"
             echo "- Windows host VIP lane (signal-only): $vip_result"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$linux_hosted_ppl_result" != 'success' ]]; then
+            echo "::warning::Linux hosted PPL x64 signal lane failed. Windows VIP signal lane may not receive lv_icon_linux_x64.lvlibp."
+          fi
 
           if [[ "$vip_result" != 'success' ]]; then
             echo "::warning::Windows host VIP signal lane failed. This is non-blocking while Linux parity remains projectspec-only."
