@@ -10,6 +10,8 @@ jobs:
   windows-labview-image-gate-prereq:
     name: Windows LabVIEW Gate Prereq
     uses: ./.github/workflows/_windows-labview-image-gate-core.yml
+    with:
+      linux_prereq_only: true
     secrets: inherit
 
   linux-labview-image-gate:

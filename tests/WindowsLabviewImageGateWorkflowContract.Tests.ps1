@@ -27,6 +27,7 @@ Describe 'Windows LabVIEW image gate workflow contract' {
 
     It 'defines split hard-gate topology with resolve, host, parity, and summary lanes' {
         $script:coreWorkflowContent | Should -Match 'workflow_call:'
+        $script:coreWorkflowContent | Should -Match 'linux_prereq_only:'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*resolve-parity-context:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-release-gate:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-linux-prereq-x86:\s*$'
@@ -34,6 +35,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-container-parity-gate:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*gate-summary:\s*$'
         $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-release-gate:\s*.*?if:\s*\$\{\{\s*!inputs\.linux_prereq_only\s*\}\}'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-container-parity-gate:\s*.*?if:\s*\$\{\{\s*!inputs\.linux_prereq_only\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x86'
         $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x64'
         $script:coreWorkflowContent | Should -Match 'gate_status'
@@ -84,6 +87,9 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'vip_package_build_check\.status'
         $script:coreWorkflowContent | Should -Match 'Host release VIP gate did not pass'
         $script:coreWorkflowContent | Should -Match 'must skip VIP build'
+        $script:coreWorkflowContent | Should -Match 'git -C \$repoPath reset --hard HEAD'
+        $script:coreWorkflowContent | Should -Match 'git -C \$repoPath clean -ffdx'
+        $script:coreWorkflowContent | Should -Match 'before pinned checkout'
         $script:coreWorkflowContent | Should -Match 'LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD'
         $script:coreWorkflowContent | Should -Match 'ni-labview-vi-analyzer-toolkit-lic'
         $script:coreWorkflowContent | Should -Match 'call \$viAnalyzerInstallCommand'

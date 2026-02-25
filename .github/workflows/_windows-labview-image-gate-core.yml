@@ -2,6 +2,12 @@ name: _windows-labview-image-gate-core
 
 on:
   workflow_call:
+    inputs:
+      linux_prereq_only:
+        description: Run only Windows-host native Linux prerequisite lanes (skip host-release and Windows-container parity hard gates).
+        required: false
+        type: boolean
+        default: false
     outputs:
       gate_status:
         description: Pass/fail status for the Windows image gate.
@@ -159,6 +165,7 @@ jobs:
   windows-host-release-gate:
     name: Windows Host Release Gate (LabVIEW ${{ needs.resolve-parity-context.outputs.release_required_year }})
     needs: [resolve-parity-context]
+    if: ${{ !inputs.linux_prereq_only }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
@@ -310,6 +317,15 @@ jobs:
             & git -C $repoPath fetch --no-tags --quiet origin $repoPinnedSha
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to fetch pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
+            }
+
+            & git -C $repoPath reset --hard HEAD
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to reset managed repository '$repoName' before pinned checkout."
+            }
+            & git -C $repoPath clean -ffdx
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to clean managed repository '$repoName' before pinned checkout."
             }
 
             & git -C $repoPath checkout --quiet --detach $repoPinnedSha
@@ -593,6 +609,7 @@ jobs:
   windows-container-parity-gate:
     name: Windows Container Parity (${{ needs.resolve-parity-context.outputs.lvcontainer_raw }} | b${{ needs.resolve-parity-context.outputs.selected_ppl_bitness }} | ${{ needs.resolve-parity-context.outputs.build_spec_marker }})
     needs: [resolve-parity-context]
+    if: ${{ !inputs.linux_prereq_only }}
     runs-on: [self-hosted, windows, self-hosted-windows-lv, windows-containers, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
@@ -1029,6 +1046,15 @@ jobs:
               throw "Failed to fetch pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
             }
 
+            & git -C $repoPath reset --hard HEAD
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to reset managed repository '$repoName' before pinned checkout."
+            }
+            & git -C $repoPath clean -ffdx
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to clean managed repository '$repoName' before pinned checkout."
+            }
+
             & git -C $repoPath checkout --quiet --detach $repoPinnedSha
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to checkout pinned SHA '$repoPinnedSha' for managed repository '$repoName'."
@@ -1211,19 +1237,30 @@ jobs:
         run: |
           set -euo pipefail
 
+          prereq_only='${{ inputs.linux_prereq_only }}'
           host_result='${{ needs.windows-host-release-gate.result }}'
           prereq_x86_result='${{ needs.windows-host-linux-prereq-x86.result }}'
           prereq_x64_result='${{ needs.windows-host-linux-prereq-x64.result }}'
           parity_result='${{ needs.windows-container-parity-gate.result }}'
 
           gate_status='fail'
-          if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' && "$parity_result" == 'success' ]]; then
-            gate_status='pass'
+          gate_report_artifact_name="windows-labview-image-gate-parity-${GITHUB_RUN_ID}"
+          gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/parity/windows-container-parity-gate-report.json"
+          if [[ "$prereq_only" == 'true' ]]; then
+            gate_report_artifact_name="windows-host-linux-prereq-x64-${GITHUB_RUN_ID}"
+            gate_report_path="${GITHUB_WORKSPACE}/artifacts/windows-image-gate/linux-prereq/x64/windows-host-linux-prereq-x64-report.json"
+            if [[ "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' ]]; then
+              gate_status='pass'
+            fi
+          else
+            if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' && "$parity_result" == 'success' ]]; then
+              gate_status='pass'
+            fi
           fi
 
           echo "gate_status=$gate_status" >> "$GITHUB_OUTPUT"
-          echo "gate_report_artifact_name=windows-labview-image-gate-parity-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "gate_report_path=${GITHUB_WORKSPACE}/artifacts/windows-image-gate/parity/windows-container-parity-gate-report.json" >> "$GITHUB_OUTPUT"
+          echo "gate_report_artifact_name=${gate_report_artifact_name}" >> "$GITHUB_OUTPUT"
+          echo "gate_report_path=${gate_report_path}" >> "$GITHUB_OUTPUT"
           echo "linux_prereq_x86_artifact_name=windows-host-linux-prereq-x86-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "linux_prereq_x64_artifact_name=windows-host-linux-prereq-x64-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "linux_prereq_native_labview_version=2025q3" >> "$GITHUB_OUTPUT"
@@ -1235,6 +1272,7 @@ jobs:
             echo "- Linux prereq x86 gate: $prereq_x86_result"
             echo "- Linux prereq x64 gate: $prereq_x64_result"
             echo "- Container parity gate: $parity_result"
+            echo "- Linux prereq only mode: $prereq_only"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -24,6 +24,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:wrapperWorkflowContent | Should -Not -Match '(?m)^\s*pull_request:'
         $script:wrapperWorkflowContent | Should -Match 'windows-labview-image-gate-prereq:'
         $script:wrapperWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
+        $script:wrapperWorkflowContent | Should -Match 'linux_prereq_only:\s*true'
         $script:wrapperWorkflowContent | Should -Match 'needs:\s*\[windows-labview-image-gate-prereq\]'
         $script:wrapperWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'
         $script:wrapperWorkflowContent | Should -Match 'windows_prereq_x86_artifact_name:'
