@@ -25,7 +25,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:wrapperWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'
     }
 
-    It 'defines resolve, windows prerequisites, hosted linux ppl signal lane, linux parity, windows vip signal lane, and summary lanes' {
+    It 'defines resolve, windows prerequisites, hosted linux ppl signal lane, linux parity, windows vip blocking lane, and summary lanes' {
         $script:coreWorkflowContent | Should -Match '(?m)^\s*resolve-parity-context:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-ppl-32:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-ppl-64:\s*$'
@@ -75,7 +75,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '@sha256:'
     }
 
-    It 'enforces Windows host VIP signal contract and prerequisite guards' {
+    It 'enforces Windows host VIP blocking contract and prerequisite guards' {
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.driver'
         $script:coreWorkflowContent | Should -Match "linux_vip_build\.driver must be 'vipm-cli'"
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.required_ppl_bitness'
@@ -83,8 +83,10 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Tooling/container-parity/runlabview-linux\.sh'
         $script:coreWorkflowContent | Should -Match 'linux-hosted-ppl-64-report\.json'
         $script:coreWorkflowContent | Should -Match 'linux-gate-linux-ppl-64-\$\{\{\s*github\.run_id\s*\}\}'
-        $script:coreWorkflowContent | Should -Match 'Run Windows host VIP build via VIPM CLI \(signal-only\)'
-        $script:coreWorkflowContent | Should -Match 'Download linux x64 PPL prerequisite artifact \(optional\)'
+        $script:coreWorkflowContent | Should -Match 'name:\s*Windows Host VIP Build'
+        $script:coreWorkflowContent | Should -Match 'Run Windows host VIP build via VIPM CLI'
+        $script:coreWorkflowContent | Should -Match 'Download linux x64 PPL prerequisite artifact'
+        $script:coreWorkflowContent | Should -Not -Match '(?ms)^\s*windows-host-vip-build:\s*\r?\n\s*name:\s*[^\r\n]+\r?\n\s*needs:\s*\[[^\r\n]+\]\r?\n\s*continue-on-error:\s*true'
         $script:coreWorkflowContent | Should -Match 'vipm_cli_unavailable'
         $script:coreWorkflowContent | Should -Match 'missing_required_ppl_prerequisite'
         $script:coreWorkflowContent | Should -Match 'missing_linux_ppl_prerequisite'
@@ -114,6 +116,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'linux-parity-projectspec-classification\.json'
         $script:coreWorkflowContent | Should -Match 'windows-host-vip-report\.json'
         $script:coreWorkflowContent | Should -Match 'Linux hosted PPL x64 signal lane failed'
+        $script:coreWorkflowContent | Should -Match 'Windows host VIP lane failed\. This is blocking for Linux gate'
         $script:coreWorkflowContent | Should -Match 'Linux Gate Summary'
     }
 }

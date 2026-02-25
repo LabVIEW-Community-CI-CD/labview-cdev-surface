@@ -1023,9 +1023,8 @@ jobs:
           if-no-files-found: warn
 
   windows-host-vip-build:
-    name: Windows Host VIP Build (signal-only)
+    name: Windows Host VIP Build
     needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64, linux-hosted-ppl-64]
-    continue-on-error: true
     runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
@@ -1043,14 +1042,13 @@ jobs:
           name: linux-gate-windows-ppl-64-${{ github.run_id }}
           path: ${{ runner.temp }}/linux-gate/windows-ppl-64
 
-      - name: Download linux x64 PPL prerequisite artifact (optional)
-        continue-on-error: true
+      - name: Download linux x64 PPL prerequisite artifact
         uses: actions/download-artifact@v4
         with:
           name: linux-gate-linux-ppl-64-${{ github.run_id }}
           path: ${{ runner.temp }}/linux-gate/linux-ppl-64
 
-      - name: Run Windows host VIP build via VIPM CLI (signal-only)
+      - name: Run Windows host VIP build via VIPM CLI
         shell: powershell
         env:
           RELEASE_BUILD_LANE: ${{ needs.resolve-parity-context.outputs.lane_id }}
@@ -1326,7 +1324,7 @@ jobs:
           vip_result='${{ needs.windows-host-vip-build.result }}'
 
           gate_status='fail'
-          if [[ "$ppl32_result" == 'success' && "$ppl64_result" == 'success' && "$projectspec_result" == 'success' ]]; then
+          if [[ "$ppl32_result" == 'success' && "$ppl64_result" == 'success' && "$projectspec_result" == 'success' && "$vip_result" == 'success' ]]; then
             gate_status='pass'
           fi
 
@@ -1341,7 +1339,7 @@ jobs:
             echo "- Windows host PPL 64 prerequisite: $ppl64_result"
             echo "- Linux parity project-spec lane: $projectspec_result"
             echo "- Linux hosted PPL x64 lane (signal-only): $linux_hosted_ppl_result"
-            echo "- Windows host VIP lane (signal-only): $vip_result"
+            echo "- Windows host VIP lane (blocking): $vip_result"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1350,10 +1348,10 @@ jobs:
           fi
 
           if [[ "$vip_result" != 'success' ]]; then
-            echo "::warning::Windows host VIP signal lane failed. This is non-blocking while Linux parity remains projectspec-only."
+            echo "::error::Windows host VIP lane failed. This is blocking for Linux gate."
           fi
 
           if [[ "$gate_status" != 'pass' ]]; then
-            echo "One or more hard Linux gate lanes failed (windows host prerequisites and/or linux projectspec lane)." >&2
+            echo "One or more hard Linux gate lanes failed (windows host prerequisites, linux projectspec lane, and/or windows host VIP lane)." >&2
             exit 1
           fi
