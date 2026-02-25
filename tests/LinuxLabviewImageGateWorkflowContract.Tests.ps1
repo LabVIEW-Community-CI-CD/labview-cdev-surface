@@ -50,6 +50,8 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'linux_enable_cicd_features'
         $script:coreWorkflowContent | Should -Match 'sibling-windows-to-linux'
         $script:coreWorkflowContent | Should -Match '\.lvcontainer'
+        $script:coreWorkflowContent | Should -Match 'nationalinstruments/labview:'
+        $script:coreWorkflowContent | Should -Match 'elseif \(\$lvcontainerRaw -match ''\^\[A-Za-z0-9\._-\]\+\$'''
         $script:coreWorkflowContent | Should -Match '2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c'
         $script:coreWorkflowContent | Should -Match '2025q3'
         $script:coreWorkflowContent | Should -Match 'resolved_linux_tag'

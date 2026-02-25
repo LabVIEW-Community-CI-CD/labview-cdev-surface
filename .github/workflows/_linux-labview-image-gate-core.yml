@@ -153,13 +153,16 @@ jobs:
             throw "No .lvcontainer file found in pinned icon-editor commit '$pinnedSha'."
           }
 
-          $lvcontainerRaw = Get-Content -LiteralPath $lvcontainerPath -Raw
+          $lvcontainerRaw = (Get-Content -LiteralPath $lvcontainerPath -Raw).Trim()
           $imageMatch = [regex]::Match($lvcontainerRaw, 'nationalinstruments/labview:([A-Za-z0-9._-]+)')
-          if (-not $imageMatch.Success) {
+          $rawTag = ''
+          if ($imageMatch.Success) {
+            $rawTag = [string]$imageMatch.Groups[1].Value
+          } elseif ($lvcontainerRaw -match '^[A-Za-z0-9._-]+$') {
+            $rawTag = [string]$lvcontainerRaw
+          } else {
             throw "Unable to parse NI image tag from .lvcontainer at '$lvcontainerPath'."
           }
-
-          $rawTag = [string]$imageMatch.Groups[1].Value
           $derivedLinuxTag = $rawTag
           switch ($linuxTagStrategy.ToLowerInvariant()) {
             'sibling-windows-to-linux' {
