@@ -983,7 +983,7 @@ jobs:
             -w /workspace \
             -e "CONTAINER_PARITY_LABVIEW_VERSION=${PARITY_LABVIEW_YEAR}" \
             "$LINUX_PARITY_IMAGE" \
-            /bin/bash -lc 'set -euo pipefail; Tooling/container-parity/runlabview-linux.sh' >>"$log_path" 2>&1
+            /bin/bash -lc 'set -euo pipefail; bash Tooling/container-parity/runlabview-linux.sh' >>"$log_path" 2>&1
           docker_exit=$?
           set -e
 
