@@ -229,7 +229,7 @@ jobs:
   windows-host-ppl-32:
     name: Windows Host PPL Prerequisite (32-bit)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -524,7 +524,7 @@ jobs:
   windows-host-ppl-64:
     name: Windows Host PPL Prerequisite (64-bit)
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1033,7 +1033,7 @@ jobs:
   windows-host-vip-build:
     name: Windows Host VIP Build
     needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64, linux-hosted-ppl-64]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, cdev-surface-windows-gate, headless]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
