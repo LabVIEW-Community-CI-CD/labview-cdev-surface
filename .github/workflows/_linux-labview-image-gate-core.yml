@@ -1282,7 +1282,12 @@ jobs:
             $requiredLabviewYear = '2025'
           }
 
-          $vipCmd = @('--labview-version', $requiredLabviewYear, '--labview-bitness', '64', 'build', $vipbPath, '--output', $outputRoot)
+          $preBuildVipFiles = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -Filter '*.vip' -File -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty FullName
+          )
+
+          $vipCmd = @('--labview-version', $requiredLabviewYear, '--labview-bitness', '64', 'build', $vipbPath)
           Write-PreflightLog ("Executing Windows host VIP build command: {0} {1}" -f $vipmExe, ($vipCmd -join ' '))
           & $vipmExe @vipCmd | Tee-Object -FilePath $vipLogPath -Append | Out-Null
           $vipExit = [int]$LASTEXITCODE
@@ -1291,14 +1296,30 @@ jobs:
             throw "vipm build failed with exit code $vipExit."
           }
 
-          $builtVip = @(
-            Get-ChildItem -Path $outputRoot -Recurse -Filter '*.vip' -File -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullName
+          $postBuildVipFiles = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -Filter '*.vip' -File -ErrorAction SilentlyContinue
+          )
+          $newVipFiles = @(
+            $postBuildVipFiles |
+              Where-Object { $_.FullName -notin $preBuildVipFiles } |
+              Sort-Object LastWriteTimeUtc -Descending
+          )
+
+          $builtVipSource = @(
+            $newVipFiles | Select-Object -First 1 -ExpandProperty FullName
           ) | Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($builtVip)) {
+          if ([string]::IsNullOrWhiteSpace($builtVipSource)) {
+            $builtVipSource = @(
+              $postBuildVipFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1 -ExpandProperty FullName
+            ) | Select-Object -First 1
+          }
+          if ([string]::IsNullOrWhiteSpace($builtVipSource)) {
             Write-VipReport -Status 'fail' -Reason 'vip_output_missing' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipmExitCode $vipExit
             throw 'vip_output_missing'
           }
+
+          $builtVip = Join-Path $outputRoot ([System.IO.Path]::GetFileName($builtVipSource))
+          Copy-Item -LiteralPath $builtVipSource -Destination $builtVip -Force
 
           Write-VipReport -Status 'pass' -Reason 'none' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipOutput $builtVip -VipmExitCode $vipExit
 
