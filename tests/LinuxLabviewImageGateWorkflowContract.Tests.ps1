@@ -92,6 +92,8 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'LVIE_REQUIRE_HEADLESS:\s*\$\{\{\s*needs\.resolve-parity-context\.outputs\.windows_vip_headless_required\s*\}\}'
         $script:coreWorkflowContent | Should -Not -Match 'vars\.LVIE_REQUIRE_HEADLESS'
         $script:coreWorkflowContent | Should -Match 'Headless runner check'
+        $script:coreWorkflowContent | Should -Match 'GetCurrentProcess\(\)\.SessionId'
+        $script:coreWorkflowContent | Should -Match 'sessionSignalsHeadless'
         $script:coreWorkflowContent | Should -Match 'runner_not_headless'
         $script:coreWorkflowContent | Should -Not -Match '(?ms)^\s*windows-host-vip-build:\s*\r?\n\s*name:\s*[^\r\n]+\r?\n\s*needs:\s*\[[^\r\n]+\]\r?\n\s*continue-on-error:\s*true'
         $script:coreWorkflowContent | Should -Match 'vipm_cli_unavailable'

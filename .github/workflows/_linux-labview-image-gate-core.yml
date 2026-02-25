@@ -1129,10 +1129,17 @@ jobs:
             $runnerSessionName = 'unknown'
           }
           $runnerIsInteractive = [System.Environment]::UserInteractive
-          Write-PreflightLog ("Headless runner check: require={0} interactive={1} session={2}" -f $requireHeadless, $runnerIsInteractive, $runnerSessionName)
-          if ($requireHeadless -and ($runnerIsInteractive -or ($runnerSessionName -notmatch '^(Services|Service)$'))) {
+          $runnerSessionId = -1
+          try {
+            $runnerSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          } catch {
+            $runnerSessionId = -1
+          }
+          $sessionSignalsHeadless = ($runnerSessionId -eq 0) -or ($runnerSessionName -match '^(Services|Service)$')
+          Write-PreflightLog ("Headless runner check: require={0} interactive={1} session={2} session_id={3}" -f $requireHeadless, $runnerIsInteractive, $runnerSessionName, $runnerSessionId)
+          if ($requireHeadless -and ($runnerIsInteractive -or (-not $sessionSignalsHeadless))) {
             Write-VipReport -Status 'fail' -Reason 'runner_not_headless' -X86Ppl '' -X64Ppl '' -LinuxX64Ppl '' -VipmExitCode -1
-            throw ("runner_not_headless: runner session '{0}' (interactive={1}) does not satisfy headless contract." -f $runnerSessionName, $runnerIsInteractive)
+            throw ("runner_not_headless: runner session '{0}' session_id={1} (interactive={2}) does not satisfy headless contract." -f $runnerSessionName, $runnerSessionId, $runnerIsInteractive)
           }
 
           function Get-Sha256Hex {
