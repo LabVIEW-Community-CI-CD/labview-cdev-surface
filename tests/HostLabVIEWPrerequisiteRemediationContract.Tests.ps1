@@ -53,4 +53,10 @@ Describe 'Host LabVIEW prerequisite remediation contract' {
         $script:content | Should -Match '\$output\s*=\s*&\s*\$NipkgPath\s+list-installed\s+\$PackageName\s+2>&1'
         $script:content | Should -Match '\$ErrorActionPreference\s*=\s*\$previousErrorActionPreference'
     }
+
+    It 'maps non-admin package probe failures into deterministic admin-required classification' {
+        $script:content | Should -Match 'action\s*=\s*''vi-analyzer-check'''
+        $script:content | Should -Match 'status\s*=\s*''check_failed'''
+        $script:content | Should -Match '\$viAnalyzerMissingPackages \+= \$packageName'
+    }
 }

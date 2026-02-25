@@ -302,7 +302,18 @@ try {
         if (-not $isAdministrator) {
             $installedBefore = [ordered]@{}
             foreach ($packageName in $viAnalyzerPackages) {
-                $isInstalled = [bool](Test-NipkgPackageInstalled -NipkgPath $nipkgPath -PackageName $packageName)
+                $isInstalled = $false
+                try {
+                    $isInstalled = [bool](Test-NipkgPackageInstalled -NipkgPath $nipkgPath -PackageName $packageName)
+                } catch {
+                    [void]$actions.Add([ordered]@{
+                        action = 'vi-analyzer-check'
+                        package = $packageName
+                        status = 'check_failed'
+                        error = $_.Exception.Message
+                    })
+                    $isInstalled = $false
+                }
                 $installedBefore[$packageName] = $isInstalled
                 if (-not $isInstalled) {
                     $viAnalyzerMissingPackages += $packageName
