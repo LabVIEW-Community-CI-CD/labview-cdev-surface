@@ -5,6 +5,8 @@ Use this template to drive Codex orchestration from an issue URL.
 ## Setup Catalog
 - legacy-2020-desktop-linux
 - legacy-2020-desktop-windows
+- host-2026-desktop-linux
+- host-2026-desktop-windows
 
 ## Desired Outcome
 All listed setups complete `self-hosted-machine-certification.yml` with `certified=true`.
@@ -24,7 +26,9 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
   ],
   "setup_names": [
     "legacy-2020-desktop-linux",
-    "legacy-2020-desktop-windows"
+    "legacy-2020-desktop-windows",
+    "host-2026-desktop-linux",
+    "host-2026-desktop-windows"
   ]
 }
 <!-- CERT_CONFIG_END -->
@@ -47,6 +51,8 @@ When merged to `main`, change `ref` to `main`.
 |---|---|---|---|---|---|
 | legacy-2020-desktop-linux | pending | pending | pending | pending | pending |
 | legacy-2020-desktop-windows | pending | pending | pending | pending | pending |
+| host-2026-desktop-linux | pending | pending | pending | pending | pending |
+| host-2026-desktop-windows | pending | pending | pending | pending | pending |
 
 ## Failure Classification
 - runner_label_mismatch

@@ -55,13 +55,16 @@ Execution contract:
   ],
   "setup_names": [
     "legacy-2020-desktop-linux",
-    "legacy-2020-desktop-windows"
+    "legacy-2020-desktop-windows",
+    "host-2026-desktop-linux",
+    "host-2026-desktop-windows"
   ]
 }
 ```
 
 ## Notes
 - Setup names come from `tools/machine-certification/setup-profiles.json`.
+- The setup catalog now covers host LabVIEW 2020 and host LabVIEW 2026 paths for both Docker desktop contexts.
 - `trigger_mode=auto` attempts dispatch first and falls back to rerunning the latest run on `ref` when workflow dispatch is unavailable pre-merge.
 - `require_local_ref_sync=true` fails closed if local checkout is stale versus issue `ref`.
 - Certification automation switches Docker Desktop context per setup before preflight when `switch_docker_context=true`.
