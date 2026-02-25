@@ -276,6 +276,16 @@ function Wait-DockerDaemonReachable {
     return $latest
 }
 
+function Get-DockerDesktopContextHost {
+    param([Parameter(Mandatory = $true)][string]$Context)
+
+    switch ($Context.ToLowerInvariant()) {
+        'desktop-linux' { return 'npipe:////./pipe/dockerDesktopLinuxEngine' }
+        'desktop-windows' { return 'npipe:////./pipe/dockerDesktopWindowsEngine' }
+        default { return '' }
+    }
+}
+
 foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli', 'vipm', 'docker')) {
     $resolved = Resolve-Tool -Name $commandName -FallbackPaths @($toolFallbackMap[$commandName])
     $resolvedTools[$commandName] = $resolved
@@ -320,6 +330,36 @@ Add-Check `
     -Passed $dockerContextExists `
     -Detail ("context={0}" -f $DockerContext) `
     -Severity $DockerCheckSeverity
+
+if (-not $dockerContextExists -and ($StartDockerDesktopIfNeeded -or $SwitchDockerContext)) {
+    if ($null -eq $dockerTool -or -not [bool]$dockerTool.found) {
+        Add-Check `
+            -Name 'docker:context_ensure' `
+            -Passed $false `
+            -Detail 'docker command unavailable; cannot create missing context.' `
+            -Severity $DockerCheckSeverity
+    } else {
+        $dockerHost = Get-DockerDesktopContextHost -Context $DockerContext
+        if ([string]::IsNullOrWhiteSpace($dockerHost)) {
+            Add-Check `
+                -Name 'docker:context_ensure' `
+                -Passed $false `
+                -Detail ("Unsupported Docker Desktop context for auto-create: {0}" -f $DockerContext) `
+                -Severity $DockerCheckSeverity
+        } else {
+            $createResult = Invoke-NativeCapture -Executable $dockerTool.path -Arguments @('context', 'create', $DockerContext, '--docker', ("host={0}" -f $dockerHost))
+            $refreshInspect = Invoke-NativeCapture -Executable $dockerTool.path -Arguments @('context', 'inspect', $DockerContext)
+            $dockerContextInspectOutput = [string]$refreshInspect.output
+            $dockerContextExists = ([int]$refreshInspect.exit_code -eq 0)
+            $detail = ("context={0}; host={1}; create_exit={2}; create_output={3}" -f $DockerContext, $dockerHost, [int]$createResult.exit_code, [string]$createResult.output)
+            Add-Check `
+                -Name 'docker:context_ensure' `
+                -Passed $dockerContextExists `
+                -Detail $detail `
+                -Severity $DockerCheckSeverity
+        }
+    }
+}
 
 if ($StartDockerDesktopIfNeeded) {
     if ($null -eq $dockerTool -or -not [bool]$dockerTool.found) {
