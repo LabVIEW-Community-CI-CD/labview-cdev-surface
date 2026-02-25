@@ -1058,6 +1058,7 @@ jobs:
           LINUX_VIP_DRIVER: ${{ needs.resolve-parity-context.outputs.linux_vip_driver }}
           LINUX_VIP_ARTIFACT_ROLE: ${{ needs.resolve-parity-context.outputs.linux_vip_artifact_role }}
           LINUX_VIP_REQUIRED_BITNESSES: ${{ needs.resolve-parity-context.outputs.linux_vip_required_ppl_bitnesses }}
+          LVIE_REQUIRE_HEADLESS: ${{ vars.LVIE_REQUIRE_HEADLESS }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -1108,6 +1109,22 @@ jobs:
               release_build_lane = [string]$env:RELEASE_BUILD_LANE
             }
             $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
+          }
+
+          $requireHeadlessRaw = [string]$env:LVIE_REQUIRE_HEADLESS
+          if ([string]::IsNullOrWhiteSpace($requireHeadlessRaw)) {
+            $requireHeadlessRaw = 'false'
+          }
+          $requireHeadless = @('1', 'true', 'yes', 'on') -contains $requireHeadlessRaw.Trim().ToLowerInvariant()
+          $runnerSessionName = [string]$env:SESSIONNAME
+          if ([string]::IsNullOrWhiteSpace($runnerSessionName)) {
+            $runnerSessionName = 'unknown'
+          }
+          $runnerIsInteractive = [System.Environment]::UserInteractive
+          Write-PreflightLog ("Headless runner check: require={0} interactive={1} session={2}" -f $requireHeadless, $runnerIsInteractive, $runnerSessionName)
+          if ($requireHeadless -and ($runnerIsInteractive -or ($runnerSessionName -notmatch '^(Services|Service)$'))) {
+            Write-VipReport -Status 'fail' -Reason 'runner_not_headless' -X86Ppl '' -X64Ppl '' -LinuxX64Ppl '' -VipmExitCode -1
+            throw ("runner_not_headless: runner session '{0}' (interactive={1}) does not satisfy headless contract." -f $runnerSessionName, $runnerIsInteractive)
           }
 
           function Get-Sha256Hex {
@@ -1273,7 +1290,9 @@ jobs:
 
           $vipmExe = [string]$vipm.Source
           $env:VIPM_COMMUNITY_EDITION = 'true'
-          Write-PreflightLog 'Using native VIPM Community mode (VIPM_COMMUNITY_EDITION=true); vipm activate is skipped by contract.'
+          $env:CI = 'true'
+          $env:GIT_TERMINAL_PROMPT = '0'
+          Write-PreflightLog 'Using native VIPM Community mode in headless contract mode (no vipm activate, no interactive prompts).'
 
           $outputRoot = Join-Path $artifactRoot 'vip'
           New-Item -Path $outputRoot -ItemType Directory -Force | Out-Null
@@ -1287,7 +1306,7 @@ jobs:
               Select-Object -ExpandProperty FullName
           )
 
-          $vipCmd = @('--labview-version', $requiredLabviewYear, '--labview-bitness', '64', 'build', $vipbPath)
+          $vipCmd = @('--color-mode', 'never', '--labview-version', $requiredLabviewYear, '--labview-bitness', '64', 'build', $vipbPath)
           Write-PreflightLog ("Executing Windows host VIP build command: {0} {1}" -f $vipmExe, ($vipCmd -join ' '))
           & $vipmExe @vipCmd | Tee-Object -FilePath $vipLogPath -Append | Out-Null
           $vipExit = [int]$LASTEXITCODE
