@@ -104,6 +104,17 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'git -C \$repoPath fetch --no-tags --quiet origin \$repoPinnedSha'
     }
 
+    It 'uses bounded installer polling and terminal-report fail-fast in host release lane' {
+        $script:coreWorkflowContent | Should -Match 'installerTimeoutSeconds = 1800'
+        $script:coreWorkflowContent | Should -Match 'pollIntervalSeconds = 5'
+        $script:coreWorkflowContent | Should -Match 'Start-Process -FilePath \$installerPath -ArgumentList ''/S'' -PassThru'
+        $script:coreWorkflowContent | Should -Not -Match 'Start-Process -FilePath \$installerPath -ArgumentList ''/S'' -Wait -PassThru'
+        $script:coreWorkflowContent | Should -Match 'installerStoppedAfterTerminalReport'
+        $script:coreWorkflowContent | Should -Match 'Host release installer exceeded timeout'
+        $script:coreWorkflowContent | Should -Match 'installer_exit_code'
+        $script:coreWorkflowContent | Should -Match 'installer_stopped_after_terminal_report'
+    }
+
     It 'keeps valid feed-add command ordering and container fallback diagnostics contract' {
         $script:coreWorkflowContent | Should -Match 'feed-add https://download\.ni\.com/support/nipkg/products/ni-l/ni-labview-2026-x86/26\.1/released --name=ni-labview-2026-core-x86-en-2026-q1-released'
         $script:coreWorkflowContent | Should -Match 'feed-add https://download\.ni\.com/support/nipkg/products/ni-l/ni-labview-2020-x86/20\.0/released --name=ni-labview-2020-core-x86-en-2020-released'

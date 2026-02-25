@@ -352,7 +352,57 @@ jobs:
           $env:LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR = [string]$env:RELEASE_REQUIRED_YEAR
           $env:LVIE_GATE_SINGLE_PPL_BITNESS = [string]$env:SELECTED_PPL_BITNESS
 
-          $installerProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
+          $installerTimeoutSeconds = 1800
+          $pollIntervalSeconds = 5
+          $installerProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -PassThru
+          $installerProcessId = [int]$installerProcess.Id
+          $installerStoppedAfterTerminalReport = $false
+          $deadlineUtc = (Get-Date).ToUniversalTime().AddSeconds($installerTimeoutSeconds)
+
+          while ($true) {
+            $installerProcess.Refresh()
+            $processExited = $installerProcess.HasExited
+            $reportStatus = ''
+            $reportIsTerminal = $false
+            if (Test-Path -LiteralPath $installReportPath -PathType Leaf) {
+              try {
+                $reportProbe = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+                $reportStatus = [string]$reportProbe.status
+                if ($reportStatus -in @('succeeded', 'failed')) {
+                  $reportIsTerminal = $true
+                }
+              } catch {
+                $reportIsTerminal = $false
+              }
+            }
+
+            if ($processExited) {
+              break
+            }
+
+            if ($reportIsTerminal) {
+              Stop-Process -Id $installerProcessId -Force -ErrorAction SilentlyContinue
+              $installerStoppedAfterTerminalReport = $true
+              break
+            }
+
+            if ((Get-Date).ToUniversalTime() -ge $deadlineUtc) {
+              Stop-Process -Id $installerProcessId -Force -ErrorAction SilentlyContinue
+              throw "Host release installer exceeded timeout (${installerTimeoutSeconds}s) without terminal report output."
+            }
+
+            Start-Sleep -Seconds $pollIntervalSeconds
+          }
+
+          $installerExitCode = $null
+          try {
+            $installerProcess.Refresh()
+            if ($installerProcess.HasExited) {
+              $installerExitCode = [int]$installerProcess.ExitCode
+            }
+          } catch {
+            $installerExitCode = $null
+          }
 
           if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
             Copy-Item -LiteralPath $launchLogPath -Destination (Join-Path $artifactRoot 'workspace-installer-launch.log') -Force
@@ -361,17 +411,23 @@ jobs:
             Copy-Item -LiteralPath $installReportPath -Destination (Join-Path $artifactRoot 'workspace-install-latest.json') -Force
           }
 
-          if ([int]$installerProcess.ExitCode -ne 0) {
-            throw "Host release installer failed with exit code $([int]$installerProcess.ExitCode)."
-          }
-
           if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
+            if ($null -ne $installerExitCode) {
+              throw "Host release installer report missing: $installReportPath (installer_exit_code=$installerExitCode)"
+            }
             throw "Host release installer report missing: $installReportPath"
           }
 
           $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
           if ([string]$installReport.status -ne 'succeeded') {
-            throw "Host release installer report status is not succeeded: $([string]$installReport.status)"
+            $statusValue = [string]$installReport.status
+            if ($null -ne $installerExitCode) {
+              throw "Host release installer report status is not succeeded: $statusValue (installer_exit_code=$installerExitCode)"
+            }
+            throw "Host release installer report status is not succeeded: $statusValue"
+          }
+          if (($null -ne $installerExitCode) -and ($installerExitCode -ne 0) -and (-not $installerStoppedAfterTerminalReport)) {
+            throw "Host release installer exited with exit code $installerExitCode despite succeeded install report."
           }
 
           $selectedPplBitness = [string]$env:SELECTED_PPL_BITNESS
@@ -403,6 +459,8 @@ jobs:
             vip_output = $vipPath
             report_path = $installReportPath
             execution_profile = [string]$installReport.execution_profile
+            installer_exit_code = $installerExitCode
+            installer_stopped_after_terminal_report = $installerStoppedAfterTerminalReport
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-release-gate-report.json') -Encoding utf8
 
