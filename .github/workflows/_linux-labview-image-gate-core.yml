@@ -1273,11 +1273,7 @@ jobs:
 
           $vipmExe = [string]$vipm.Source
           $env:VIPM_COMMUNITY_EDITION = 'true'
-          & $vipmExe activate | Tee-Object -FilePath $preflightLogPath -Append | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            Write-VipReport -Status 'fail' -Reason 'vipm_activate_failed' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipmExitCode $LASTEXITCODE
-            throw "vipm activate failed with exit code $LASTEXITCODE."
-          }
+          Write-PreflightLog 'Using native VIPM Community mode (VIPM_COMMUNITY_EDITION=true); vipm activate is skipped by contract.'
 
           $outputRoot = Join-Path $artifactRoot 'vip'
           New-Item -Path $outputRoot -ItemType Directory -Force | Out-Null
