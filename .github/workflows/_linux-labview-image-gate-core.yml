@@ -34,6 +34,7 @@ jobs:
       linux_vip_required_ppl_bitnesses: ${{ steps.resolve.outputs.linux_vip_required_ppl_bitnesses }}
       linux_vip_artifact_role: ${{ steps.resolve.outputs.linux_vip_artifact_role }}
       linux_lock_policy: ${{ steps.resolve.outputs.linux_lock_policy }}
+      windows_vip_headless_required: ${{ steps.resolve.outputs.windows_vip_headless_required }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -166,6 +167,7 @@ jobs:
           linux_vip_driver="$(jq -r '.installer_contract.container_parity_contract.linux_vip_build.driver // empty' "$manifest_path")"
           linux_vip_artifact_role="$(jq -r '.installer_contract.container_parity_contract.linux_vip_build.artifact_role // empty' "$manifest_path")"
           linux_vip_required_ppl_bitnesses="$(jq -r '(.installer_contract.container_parity_contract.linux_vip_build.required_ppl_bitness // []) | sort | join(",")' "$manifest_path")"
+          windows_vip_headless_required="$(jq -r '.installer_contract.container_parity_contract.windows_vip_headless_required // false' "$manifest_path")"
 
           if [[ "$linux_vip_enabled" != 'true' ]]; then
             echo "linux_vip_build.enabled must be true in container parity contract." >&2
@@ -181,6 +183,10 @@ jobs:
           fi
           if [[ "$linux_vip_required_ppl_bitnesses" != '32,64' ]]; then
             echo "linux_vip_build.required_ppl_bitness must equal [32,64]. Found '$linux_vip_required_ppl_bitnesses'." >&2
+            exit 1
+          fi
+          if [[ "$windows_vip_headless_required" != 'true' && "$windows_vip_headless_required" != 'false' ]]; then
+            echo "container_parity_contract.windows_vip_headless_required must be boolean true/false. Found '$windows_vip_headless_required'." >&2
             exit 1
           fi
 
@@ -202,6 +208,7 @@ jobs:
           echo "linux_vip_required_ppl_bitnesses=$linux_vip_required_ppl_bitnesses" >> "$GITHUB_OUTPUT"
           echo "linux_vip_artifact_role=$linux_vip_artifact_role" >> "$GITHUB_OUTPUT"
           echo "linux_lock_policy=$linux_lock_policy" >> "$GITHUB_OUTPUT"
+          echo "windows_vip_headless_required=$windows_vip_headless_required" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Linux Gate Context"
@@ -216,6 +223,7 @@ jobs:
             echo "- linux_vip_required_ppl_bitnesses: \`$linux_vip_required_ppl_bitnesses\`"
             echo "- linux_vip_artifact_role: \`$linux_vip_artifact_role\`"
             echo "- linux_lock_policy: \`$linux_lock_policy\`"
+            echo "- windows_vip_headless_required: \`$windows_vip_headless_required\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   windows-host-ppl-32:
@@ -1058,7 +1066,7 @@ jobs:
           LINUX_VIP_DRIVER: ${{ needs.resolve-parity-context.outputs.linux_vip_driver }}
           LINUX_VIP_ARTIFACT_ROLE: ${{ needs.resolve-parity-context.outputs.linux_vip_artifact_role }}
           LINUX_VIP_REQUIRED_BITNESSES: ${{ needs.resolve-parity-context.outputs.linux_vip_required_ppl_bitnesses }}
-          LVIE_REQUIRE_HEADLESS: ${{ vars.LVIE_REQUIRE_HEADLESS }}
+          LVIE_REQUIRE_HEADLESS: ${{ needs.resolve-parity-context.outputs.windows_vip_headless_required }}
         run: |
           $ErrorActionPreference = 'Stop'
 

@@ -56,6 +56,7 @@
       "artifact_root": "artifacts\\parity",
       "build_spec_kind": "ppl",
       "build_spec_placeholder": "srcdist",
+      "windows_vip_headless_required": false,
       "promote_artifacts": false,
       "linux_vip_build": {
         "enabled": true,

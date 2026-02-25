@@ -66,6 +66,8 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'allowed_linux_tags'
         $script:coreWorkflowContent | Should -Match 'linux_image_locks'
         $script:coreWorkflowContent | Should -Match 'release_lane_linux_override'
+        $script:coreWorkflowContent | Should -Match 'windows_vip_headless_required'
+        $script:coreWorkflowContent | Should -Match 'container_parity_contract\.windows_vip_headless_required'
         $script:coreWorkflowContent | Should -Match 'release_build_default_lane'
         $script:coreWorkflowContent | Should -Match "lane_id='multiarch-2025q3'"
         $script:coreWorkflowContent | Should -Match 'Unknown release lane'
@@ -87,6 +89,8 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Run Windows host VIP build via VIPM CLI'
         $script:coreWorkflowContent | Should -Match 'Download linux x64 PPL prerequisite artifact'
         $script:coreWorkflowContent | Should -Match 'LVIE_REQUIRE_HEADLESS'
+        $script:coreWorkflowContent | Should -Match 'LVIE_REQUIRE_HEADLESS:\s*\$\{\{\s*needs\.resolve-parity-context\.outputs\.windows_vip_headless_required\s*\}\}'
+        $script:coreWorkflowContent | Should -Not -Match 'vars\.LVIE_REQUIRE_HEADLESS'
         $script:coreWorkflowContent | Should -Match 'Headless runner check'
         $script:coreWorkflowContent | Should -Match 'runner_not_headless'
         $script:coreWorkflowContent | Should -Not -Match '(?ms)^\s*windows-host-vip-build:\s*\r?\n\s*name:\s*[^\r\n]+\r?\n\s*needs:\s*\[[^\r\n]+\]\r?\n\s*continue-on-error:\s*true'
