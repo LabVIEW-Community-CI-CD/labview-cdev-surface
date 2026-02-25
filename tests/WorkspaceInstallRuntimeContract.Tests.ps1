@@ -44,6 +44,12 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'cdev-cli-win-x64\.zip'
         $script:scriptContent | Should -Match 'cdev-cli-linux-x64\.tar\.gz'
         $script:scriptContent | Should -Match 'Expand-CdevCliWindowsBundle'
+        $script:scriptContent | Should -Match 'function Get-Sha256Hex'
+        $script:scriptContent | Should -Match "Get-Command 'Get-FileHash'"
+        $script:scriptContent | Should -Match '\[System\.Security\.Cryptography\.SHA256\]::Create\(\)'
+        $script:scriptContent | Should -Match 'Get-Sha256Hex -Path \$runnerCliExePath'
+        $script:scriptContent | Should -Match 'Get-Sha256Hex -Path \$cliBundle\.asset_win_path'
+        $script:scriptContent | Should -Match 'Get-Sha256Hex -Path \$cliBundle\.asset_linux_path'
         $script:scriptContent | Should -Match 'cli-bundle'
         $script:scriptContent | Should -Match 'release_build_contract'
         $script:scriptContent | Should -Match 'container_parity_contract'

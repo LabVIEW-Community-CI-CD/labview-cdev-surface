@@ -395,6 +395,36 @@ function Get-ExpectedShaFromFile {
     return $expected
 }
 
+function Get-Sha256Hex {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File not found for hashing: $Path"
+    }
+
+    $hashCmd = Get-Command 'Get-FileHash' -ErrorAction SilentlyContinue
+    if ($null -ne $hashCmd) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $sha.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant())
+}
+
 function Get-LatestVipPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -1765,7 +1795,7 @@ try {
             throw "Bundled runner-cli executable was not found: $runnerCliExePath"
         }
         $expectedSha = Get-ExpectedShaFromFile -ShaFilePath $runnerCliShaPath
-        $actualSha = (Get-FileHash -LiteralPath $runnerCliExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualSha = Get-Sha256Hex -Path $runnerCliExePath
         $runnerCliBundle.expected_sha256 = $expectedSha
         $runnerCliBundle.actual_sha256 = $actualSha
         if ($expectedSha -ne $actualSha) {
@@ -1816,11 +1846,11 @@ try {
             throw "cdev-cli Linux SHA file does not match installer contract. expected=$($cliBundle.asset_linux_expected_sha256) actual=$linuxExpectedFromFile"
         }
 
-        $cliBundle.asset_win_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_win_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cliBundle.asset_win_actual_sha256 = Get-Sha256Hex -Path $cliBundle.asset_win_path
         if ($cliBundle.asset_win_actual_sha256 -ne [string]$cliBundle.asset_win_expected_sha256) {
             throw "cdev-cli Windows asset hash mismatch. expected=$($cliBundle.asset_win_expected_sha256) actual=$($cliBundle.asset_win_actual_sha256)"
         }
-        $cliBundle.asset_linux_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_linux_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cliBundle.asset_linux_actual_sha256 = Get-Sha256Hex -Path $cliBundle.asset_linux_path
         if ($cliBundle.asset_linux_actual_sha256 -ne [string]$cliBundle.asset_linux_expected_sha256) {
             throw "cdev-cli Linux asset hash mismatch. expected=$($cliBundle.asset_linux_expected_sha256) actual=$($cliBundle.asset_linux_actual_sha256)"
         }

@@ -27,7 +27,7 @@
       "lvcontainer_file": ".lvcontainer",
       "windows_tag_strategy": "derive-from-lvcontainer",
       "allowed_windows_tags": [
-        "2025q4-windows",
+        "2025q3-windows",
         "2026q1-windows"
       ],
       "required_execution_profile": "container-parity",
@@ -38,7 +38,32 @@
       "responsibilities": [
         "project-spec-build",
         "vi-analyzer"
-      ]
+      ],
+      "linux_tag_strategy": "sibling-windows-to-linux",
+      "allowed_linux_tags": [
+        "2025q3-linux"
+      ],
+      "locked_linux_image": "nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c",
+      "windows_host_execution_mode": "native",
+      "windows_host_native_labview_version": "2025q3",
+      "linux_vip_build": {
+        "enabled": true,
+        "driver": "labviewcli-smoke",
+        "required_ppl_bitness": [
+          "32",
+          "64"
+        ],
+        "artifact_role": "signal-only",
+        "labview_cli_operation": "MassCompile",
+        "linux_2025q3": {
+          "labview_path": "/usr/local/natinst/LabVIEW-2025-64/labview",
+          "enable_cicd_features_env": "EnableCICDFeaturesForLabVIEW=TRUE"
+        }
+      },
+      "required_check_rollout": {
+        "linux_parity_required": false,
+        "promotion_condition": "single_green_run"
+      }
     },
     "labview_gate": {
       "required_year": "2020",

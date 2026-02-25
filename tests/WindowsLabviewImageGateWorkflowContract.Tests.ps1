@@ -29,17 +29,28 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'workflow_call:'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*resolve-parity-context:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-release-gate:\s*$'
+        $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-linux-prereq-x86:\s*$'
+        $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-linux-prereq-x64:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-container-parity-gate:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*gate-summary:\s*$'
         $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context\]'
-        $script:coreWorkflowContent | Should -Match "needs:\s*\[windows-host-release-gate,\s*windows-container-parity-gate\]"
+        $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x86'
+        $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x64'
         $script:coreWorkflowContent | Should -Match 'gate_status'
         $script:coreWorkflowContent | Should -Match 'gate_report_artifact_name'
         $script:coreWorkflowContent | Should -Match 'gate_report_path'
+        $script:coreWorkflowContent | Should -Match 'linux_prereq_x86_artifact_name'
+        $script:coreWorkflowContent | Should -Match 'linux_prereq_x64_artifact_name'
+        $script:coreWorkflowContent | Should -Match 'linux_prereq_native_labview_version'
     }
 
     It 'uses expected runner labels for host release and container parity lanes' {
-        $script:coreWorkflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-release-gate:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
+        $script:coreWorkflowContent | Should -Not -Match '(?s)windows-host-release-gate:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv\]'
+        $script:coreWorkflowContent | Should -Match 'Windows Host Linux Prereq \(native 2025q3 x86\)'
+        $script:coreWorkflowContent | Should -Match 'Windows Host Linux Prereq \(native 2025q3 x64\)'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x86:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
+        $script:coreWorkflowContent | Should -Match '(?s)windows-host-linux-prereq-x64:\s*.*?runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
         $script:coreWorkflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*windows-containers,\s*user-session,\s*cdev-surface-windows-gate\]'
     }
 
@@ -73,6 +84,11 @@ Describe 'Windows LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'vip_package_build_check\.status'
         $script:coreWorkflowContent | Should -Match 'Host release VIP gate did not pass'
         $script:coreWorkflowContent | Should -Match 'must skip VIP build'
+        $script:coreWorkflowContent | Should -Match 'LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD'
+        $script:coreWorkflowContent | Should -Match 'ni-labview-vi-analyzer-toolkit-lic'
+        $script:coreWorkflowContent | Should -Match 'call \$viAnalyzerInstallCommand'
+        $script:coreWorkflowContent | Should -Match 'resource\\Framework\\Providers\\VI_Analyzer'
+        $script:coreWorkflowContent | Should -Match 'vi-analyzer-install\.log'
         $script:coreWorkflowContent | Should -Match 'run-vi-analyzer-windows\.ps1'
         $script:coreWorkflowContent | Should -Match 'vi-analyzer-summary\.parity\.windows\.gate\.json'
         $script:coreWorkflowContent | Should -Match 'PARITY_BUILD_SPEC_MARKER'
@@ -112,6 +128,8 @@ Describe 'Windows LabVIEW image gate workflow contract' {
 
     It 'publishes split gate artifacts for troubleshooting' {
         $script:coreWorkflowContent | Should -Match 'windows-labview-image-gate-release-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x86-\$\{\{\s*github\.run_id\s*\}\}'
+        $script:coreWorkflowContent | Should -Match 'windows-host-linux-prereq-x64-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'windows-labview-image-gate-parity-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'upload-artifact'
         $script:coreWorkflowContent | Should -Match 'if-no-files-found:\s*error'

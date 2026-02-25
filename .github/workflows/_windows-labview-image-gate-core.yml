@@ -12,6 +12,15 @@ on:
       gate_report_path:
         description: Full path for the generated windows image gate report JSON.
         value: ${{ jobs.gate-summary.outputs.gate_report_path }}
+      linux_prereq_x86_artifact_name:
+        description: Artifact name for Windows-host native x86 Linux parity prerequisite payload.
+        value: ${{ jobs.gate-summary.outputs.linux_prereq_x86_artifact_name }}
+      linux_prereq_x64_artifact_name:
+        description: Artifact name for Windows-host native x64 Linux parity prerequisite payload.
+        value: ${{ jobs.gate-summary.outputs.linux_prereq_x64_artifact_name }}
+      linux_prereq_native_labview_version:
+        description: Native host LabVIEW version used for Linux parity prerequisite lanes.
+        value: ${{ jobs.gate-summary.outputs.linux_prereq_native_labview_version }}
 
 permissions:
   contents: read
@@ -150,7 +159,7 @@ jobs:
   windows-host-release-gate:
     name: Windows Host Release Gate (LabVIEW ${{ needs.resolve-parity-context.outputs.release_required_year }})
     needs: [resolve-parity-context]
-    runs-on: [self-hosted, windows, self-hosted-windows-lv]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -391,6 +400,194 @@ jobs:
         with:
           name: windows-labview-image-gate-release-${{ github.run_id }}
           path: ${{ github.workspace }}/artifacts/windows-image-gate/release
+          if-no-files-found: error
+
+  windows-host-linux-prereq-x86:
+    name: Windows Host Linux Prereq (native 2025q3 x86)
+    needs: [resolve-parity-context]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Produce native 2025q3 x86 Linux parity prerequisites
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate\linux-prereq\x86'
+          if (Test-Path -LiteralPath $artifactRoot -PathType Container) {
+            Remove-Item -LiteralPath $artifactRoot -Recurse -Force
+          }
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          $nativeLabviewVersion = '2025q3'
+          $labviewRootCandidates = @(
+            'C:\Program Files (x86)\National Instruments\LabVIEW 2025 Q3',
+            'C:\Program Files (x86)\National Instruments\LabVIEW 2025',
+            'C:\Program Files\National Instruments\LabVIEW 2025 Q3',
+            'C:\Program Files\National Instruments\LabVIEW 2025'
+          )
+          $labviewRoot = $labviewRootCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$labviewRoot)) {
+            throw "Native host LabVIEW $nativeLabviewVersion root not found. Checked: $($labviewRootCandidates -join '; ')"
+          }
+
+          $viAnalyzerMarkers = @(
+            (Join-Path $labviewRoot 'vi.lib\addons\analyzer'),
+            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer'),
+            (Join-Path $labviewRoot 'resource\Framework\Providers\VI_Analyzer'),
+            (Join-Path $labviewRoot 'project\_VI Analyzer')
+          )
+          $viAnalyzerInstalled = $false
+          foreach ($markerPath in $viAnalyzerMarkers) {
+            if (Test-Path -LiteralPath $markerPath) {
+              $viAnalyzerInstalled = $true
+              break
+            }
+          }
+
+          $viAnalyzerInstallAttempted = $false
+          $viAnalyzerInstallCommand = ''
+          $viAnalyzerInstallLogPath = ''
+          if (-not $viAnalyzerInstalled) {
+            $viAnalyzerInstallAttempted = $true
+            $viAnalyzerInstallCommand = '${{ vars.LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD }}'
+            if ([string]::IsNullOrWhiteSpace($viAnalyzerInstallCommand)) {
+              $nipkgExe = 'C:\Program Files\National Instruments\NI Package Manager\nipkg.exe'
+              if (-not (Test-Path -LiteralPath $nipkgExe -PathType Leaf)) {
+                throw "VI Analyzer is missing and NI Package Manager is unavailable at '$nipkgExe'."
+              }
+              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-labview-vi-analyzer-toolkit-lic"
+            }
+            $viAnalyzerInstallLogPath = Join-Path $artifactRoot 'vi-analyzer-install.log'
+            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', "call $viAnalyzerInstallCommand > `"$viAnalyzerInstallLogPath`" 2>&1") -NoNewWindow -Wait -PassThru
+            if ([int]$viAnalyzerInstallProcess.ExitCode -ne 0) {
+              $installTail = ''
+              if (Test-Path -LiteralPath $viAnalyzerInstallLogPath -PathType Leaf) {
+                $installTail = (Get-Content -LiteralPath $viAnalyzerInstallLogPath -Tail 40 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+              }
+              if ([string]::IsNullOrWhiteSpace($installTail)) {
+                throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              }
+              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode). log_tail=$installTail"
+            }
+          }
+
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'lv_icon_x86.lvlibp') -Value 'signal-only windows host native 2025q3 x86 prereq' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'IconEditor.vipb') -Value '<vipb signal-only="true" prereq-lane="windows-host-linux-prereq-x86" />' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'release-notes.md') -Value 'Windows host native 2025q3 parity prerequisite lane (x86).' -Encoding utf8
+          [ordered]@{
+            status = 'pass'
+            lane = 'windows-host-linux-prereq-x86'
+            bitness = '32'
+            native_labview_version = $nativeLabviewVersion
+            native_labview_root = $labviewRoot
+            vi_analyzer_install_attempted = $viAnalyzerInstallAttempted
+            vi_analyzer_install_command = $viAnalyzerInstallCommand
+            vi_analyzer_install_log = $viAnalyzerInstallLogPath
+            produced_files = @('lv_icon_x86.lvlibp', 'IconEditor.vipb', 'release-notes.md')
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-linux-prereq-x86-report.json') -Encoding utf8
+
+      - name: Upload native 2025q3 x86 Linux parity prerequisites
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-host-linux-prereq-x86-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate/linux-prereq/x86
+          if-no-files-found: error
+
+  windows-host-linux-prereq-x64:
+    name: Windows Host Linux Prereq (native 2025q3 x64)
+    needs: [resolve-parity-context]
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Produce native 2025q3 x64 Linux parity prerequisites
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-image-gate\linux-prereq\x64'
+          if (Test-Path -LiteralPath $artifactRoot -PathType Container) {
+            Remove-Item -LiteralPath $artifactRoot -Recurse -Force
+          }
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
+
+          $nativeLabviewVersion = '2025q3'
+          $labviewRootCandidates = @(
+            'C:\Program Files\National Instruments\LabVIEW 2025 Q3',
+            'C:\Program Files\National Instruments\LabVIEW 2025',
+            'C:\Program Files (x86)\National Instruments\LabVIEW 2025 Q3',
+            'C:\Program Files (x86)\National Instruments\LabVIEW 2025'
+          )
+          $labviewRoot = $labviewRootCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$labviewRoot)) {
+            throw "Native host LabVIEW $nativeLabviewVersion root not found. Checked: $($labviewRootCandidates -join '; ')"
+          }
+
+          $viAnalyzerMarkers = @(
+            (Join-Path $labviewRoot 'vi.lib\addons\analyzer'),
+            (Join-Path $labviewRoot 'resource\plugins\VIAnalyzer'),
+            (Join-Path $labviewRoot 'resource\Framework\Providers\VI_Analyzer'),
+            (Join-Path $labviewRoot 'project\_VI Analyzer')
+          )
+          $viAnalyzerInstalled = $false
+          foreach ($markerPath in $viAnalyzerMarkers) {
+            if (Test-Path -LiteralPath $markerPath) {
+              $viAnalyzerInstalled = $true
+              break
+            }
+          }
+
+          $viAnalyzerInstallAttempted = $false
+          $viAnalyzerInstallCommand = ''
+          $viAnalyzerInstallLogPath = ''
+          if (-not $viAnalyzerInstalled) {
+            $viAnalyzerInstallAttempted = $true
+            $viAnalyzerInstallCommand = '${{ vars.LABVIEW_2025Q3_VI_ANALYZER_NIPKG_INSTALL_CMD }}'
+            if ([string]::IsNullOrWhiteSpace($viAnalyzerInstallCommand)) {
+              $nipkgExe = 'C:\Program Files\National Instruments\NI Package Manager\nipkg.exe'
+              if (-not (Test-Path -LiteralPath $nipkgExe -PathType Leaf)) {
+                throw "VI Analyzer is missing and NI Package Manager is unavailable at '$nipkgExe'."
+              }
+              $viAnalyzerInstallCommand = "`"$nipkgExe`" install --accept-eulas --yes --include-recommended ni-labview-vi-analyzer-toolkit-lic"
+            }
+            $viAnalyzerInstallLogPath = Join-Path $artifactRoot 'vi-analyzer-install.log'
+            $viAnalyzerInstallProcess = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', "call $viAnalyzerInstallCommand > `"$viAnalyzerInstallLogPath`" 2>&1") -NoNewWindow -Wait -PassThru
+            if ([int]$viAnalyzerInstallProcess.ExitCode -ne 0) {
+              $installTail = ''
+              if (Test-Path -LiteralPath $viAnalyzerInstallLogPath -PathType Leaf) {
+                $installTail = (Get-Content -LiteralPath $viAnalyzerInstallLogPath -Tail 40 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+              }
+              if ([string]::IsNullOrWhiteSpace($installTail)) {
+                throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode)"
+              }
+              throw "Failed to install VI Analyzer for LabVIEW $nativeLabviewVersion prerequisite lane. exit_code=$([int]$viAnalyzerInstallProcess.ExitCode). log_tail=$installTail"
+            }
+          }
+
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'lv_icon_x64.lvlibp') -Value 'signal-only windows host native 2025q3 x64 prereq' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'IconEditor.vipb') -Value '<vipb signal-only="true" prereq-lane="windows-host-linux-prereq-x64" />' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $artifactRoot 'release-notes.md') -Value 'Windows host native 2025q3 parity prerequisite lane (x64).' -Encoding utf8
+          [ordered]@{
+            status = 'pass'
+            lane = 'windows-host-linux-prereq-x64'
+            bitness = '64'
+            native_labview_version = $nativeLabviewVersion
+            native_labview_root = $labviewRoot
+            vi_analyzer_install_attempted = $viAnalyzerInstallAttempted
+            vi_analyzer_install_command = $viAnalyzerInstallCommand
+            vi_analyzer_install_log = $viAnalyzerInstallLogPath
+            produced_files = @('lv_icon_x64.lvlibp', 'IconEditor.vipb', 'release-notes.md')
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactRoot 'windows-host-linux-prereq-x64-report.json') -Encoding utf8
+
+      - name: Upload native 2025q3 x64 Linux parity prerequisites
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-host-linux-prereq-x64-${{ github.run_id }}
+          path: ${{ github.workspace }}/artifacts/windows-image-gate/linux-prereq/x64
           if-no-files-found: error
 
   windows-container-parity-gate:
@@ -995,12 +1192,19 @@ jobs:
   gate-summary:
     name: Windows Gate Summary
     if: always()
-    needs: [windows-host-release-gate, windows-container-parity-gate]
+    needs:
+      - windows-host-release-gate
+      - windows-host-linux-prereq-x86
+      - windows-host-linux-prereq-x64
+      - windows-container-parity-gate
     runs-on: ubuntu-latest
     outputs:
       gate_status: ${{ steps.evaluate.outputs.gate_status }}
       gate_report_artifact_name: ${{ steps.evaluate.outputs.gate_report_artifact_name }}
       gate_report_path: ${{ steps.evaluate.outputs.gate_report_path }}
+      linux_prereq_x86_artifact_name: ${{ steps.evaluate.outputs.linux_prereq_x86_artifact_name }}
+      linux_prereq_x64_artifact_name: ${{ steps.evaluate.outputs.linux_prereq_x64_artifact_name }}
+      linux_prereq_native_labview_version: ${{ steps.evaluate.outputs.linux_prereq_native_labview_version }}
     steps:
       - id: evaluate
         shell: bash
@@ -1008,21 +1212,28 @@ jobs:
           set -euo pipefail
 
           host_result='${{ needs.windows-host-release-gate.result }}'
+          prereq_x86_result='${{ needs.windows-host-linux-prereq-x86.result }}'
+          prereq_x64_result='${{ needs.windows-host-linux-prereq-x64.result }}'
           parity_result='${{ needs.windows-container-parity-gate.result }}'
 
           gate_status='fail'
-          if [[ "$host_result" == 'success' && "$parity_result" == 'success' ]]; then
+          if [[ "$host_result" == 'success' && "$prereq_x86_result" == 'success' && "$prereq_x64_result" == 'success' && "$parity_result" == 'success' ]]; then
             gate_status='pass'
           fi
 
           echo "gate_status=$gate_status" >> "$GITHUB_OUTPUT"
           echo "gate_report_artifact_name=windows-labview-image-gate-parity-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "gate_report_path=${GITHUB_WORKSPACE}/artifacts/windows-image-gate/parity/windows-container-parity-gate-report.json" >> "$GITHUB_OUTPUT"
+          echo "linux_prereq_x86_artifact_name=windows-host-linux-prereq-x86-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "linux_prereq_x64_artifact_name=windows-host-linux-prereq-x64-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "linux_prereq_native_labview_version=2025q3" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Windows Gate Summary"
             echo ""
             echo "- Host release gate: $host_result"
+            echo "- Linux prereq x86 gate: $prereq_x86_result"
+            echo "- Linux prereq x64 gate: $prereq_x64_result"
             echo "- Container parity gate: $parity_result"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"

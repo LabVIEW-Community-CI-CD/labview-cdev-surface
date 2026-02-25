@@ -35,6 +35,8 @@ Describe 'Workspace surface contract' {
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
         $script:windowsImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_windows-labview-image-gate-core.yml'
+        $script:linuxImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/linux-labview-image-gate.yml'
+        $script:linuxImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_linux-labview-image-gate-core.yml'
         $script:globalJsonPath = Join-Path $script:repoRoot 'global.json'
         $script:payloadAgentsPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/AGENTS.md'
         $script:payloadManifestPath = Join-Path $script:repoRoot 'workspace-governance-payload/workspace-governance/workspace-governance.json'
@@ -46,6 +48,7 @@ Describe 'Workspace surface contract' {
         $script:payloadCliLinuxAssetPath = Join-Path $script:payloadCliRoot 'cdev-cli-linux-x64.tar.gz'
         $script:payloadCliLinuxShaPath = Join-Path $script:payloadCliRoot 'cdev-cli-linux-x64.tar.gz.sha256'
         $script:payloadCliContractPath = Join-Path $script:payloadCliRoot 'cli-contract.json'
+        $script:linuxGateWorkflowContractTestPath = Join-Path $script:repoRoot 'tests/LinuxLabviewImageGateWorkflowContract.Tests.ps1'
 
         $requiredPaths = @(
             $script:manifestPath,
@@ -77,6 +80,8 @@ Describe 'Workspace surface contract' {
             $script:canaryWorkflowPath,
             $script:windowsImageGateWorkflowPath,
             $script:windowsImageGateCoreWorkflowPath,
+            $script:linuxImageGateWorkflowPath,
+            $script:linuxImageGateCoreWorkflowPath,
             $script:globalJsonPath,
             $script:payloadAgentsPath,
             $script:payloadManifestPath,
@@ -86,7 +91,8 @@ Describe 'Workspace surface contract' {
             $script:payloadCliWinShaPath,
             $script:payloadCliLinuxAssetPath,
             $script:payloadCliLinuxShaPath,
-            $script:payloadCliContractPath
+            $script:payloadCliContractPath,
+            $script:linuxGateWorkflowContractTestPath
         )
 
         foreach ($path in $requiredPaths) {
@@ -128,7 +134,9 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.container_parity_contract.build_spec_kind | Should -Be 'ppl'
         $script:manifest.installer_contract.container_parity_contract.build_spec_placeholder | Should -Be 'srcdist'
         $script:manifest.installer_contract.container_parity_contract.promote_artifacts | Should -BeFalse
+        (@($script:manifest.installer_contract.container_parity_contract.allowed_windows_tags) -contains '2025q3-windows') | Should -BeTrue
         (@($script:manifest.installer_contract.container_parity_contract.allowed_windows_tags) -contains '2026q1-windows') | Should -BeTrue
+        (@($script:manifest.installer_contract.container_parity_contract.allowed_windows_tags) -contains '2025q4-windows') | Should -BeFalse
         $script:manifest.installer_contract.ppl_capability_proof.command | Should -Be 'runner-cli ppl build'
         ((@($script:manifest.installer_contract.ppl_capability_proof.supported_bitnesses) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
         $script:manifest.installer_contract.vip_capability_proof.command | Should -Be 'runner-cli vip build'
@@ -159,6 +167,20 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'ppl_capability_checks.32') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'ppl_capability_checks.64') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'vip_package_build_check') | Should -BeTrue
+        $script:manifest.installer_contract.container_parity_contract.linux_tag_strategy | Should -Be 'sibling-windows-to-linux'
+        ((@($script:manifest.installer_contract.container_parity_contract.allowed_linux_tags) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '2025q3-linux'
+        $script:manifest.installer_contract.container_parity_contract.locked_linux_image | Should -Be 'nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c'
+        $script:manifest.installer_contract.container_parity_contract.windows_host_execution_mode | Should -Be 'native'
+        $script:manifest.installer_contract.container_parity_contract.windows_host_native_labview_version | Should -Be '2025q3'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.enabled | Should -BeTrue
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'labviewcli-smoke'
+        ((@($script:manifest.installer_contract.container_parity_contract.linux_vip_build.required_ppl_bitness) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.artifact_role | Should -Be 'signal-only'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.labview_cli_operation | Should -Be 'MassCompile'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.linux_2025q3.labview_path | Should -Be '/usr/local/natinst/LabVIEW-2025-64/labview'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.linux_2025q3.enable_cicd_features_env | Should -Be 'EnableCICDFeaturesForLabVIEW=TRUE'
+        $script:manifest.installer_contract.container_parity_contract.required_check_rollout.linux_parity_required | Should -BeFalse
+        $script:manifest.installer_contract.container_parity_contract.required_check_rollout.promotion_condition | Should -Be 'single_green_run'
         foreach ($repo in @($script:manifest.managed_repos)) {
             $repo.PSObject.Properties.Name | Should -Contain 'required_gh_repo'
             $repo.PSObject.Properties.Name | Should -Contain 'default_branch'
@@ -270,6 +292,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'CiWorkflowReliabilityContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceShaRefreshPrContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ENABLE_SELF_HOSTED_CONTRACTS'
     }
 
@@ -284,5 +307,6 @@ Describe 'Workspace surface contract' {
         $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
         $script:releaseWithGateWorkflowContent | Should -Match 'allow_gate_override:'
         $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
+        $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'
     }
 }

@@ -1,0 +1,23 @@
+name: linux-labview-image-gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-labview-image-gate-prereq:
+    name: Windows LabVIEW Gate Prereq
+    uses: ./.github/workflows/_windows-labview-image-gate-core.yml
+    secrets: inherit
+
+  linux-labview-image-gate:
+    name: Linux LabVIEW Image Gate
+    needs: [windows-labview-image-gate-prereq]
+    uses: ./.github/workflows/_linux-labview-image-gate-core.yml
+    with:
+      windows_prereq_x86_artifact_name: ${{ needs.windows-labview-image-gate-prereq.outputs.linux_prereq_x86_artifact_name }}
+      windows_prereq_x64_artifact_name: ${{ needs.windows-labview-image-gate-prereq.outputs.linux_prereq_x64_artifact_name }}
+      windows_prereq_native_labview_version: ${{ needs.windows-labview-image-gate-prereq.outputs.linux_prereq_native_labview_version }}
+    secrets: inherit

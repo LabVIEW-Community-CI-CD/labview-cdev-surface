@@ -52,6 +52,7 @@ jobs:
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
             './tests/NightlySupplyChainCanaryWorkflowContract.Tests.ps1',
             './tests/WindowsLabviewImageGateWorkflowContract.Tests.ps1',
+            './tests/LinuxLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/ReleaseWithWindowsGateWorkflowContract.Tests.ps1',
             './tests/DockerDesktopLinuxIterationContract.Tests.ps1',
             './tests/WorkspaceInstallerExerciseContract.Tests.ps1',
