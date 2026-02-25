@@ -59,7 +59,7 @@
       "promote_artifacts": false,
       "linux_vip_build": {
         "enabled": true,
-        "driver": "vipm-api",
+        "driver": "vipm-cli",
         "required_ppl_bitness": [
           "32",
           "64"

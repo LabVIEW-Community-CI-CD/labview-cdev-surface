@@ -163,7 +163,7 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.container_parity_contract.required_check_rollout.mode | Should -Be 'stage_then_required'
         $script:manifest.installer_contract.container_parity_contract.required_check_rollout.promotion_condition | Should -Be 'single_green_run'
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.enabled | Should -BeTrue
-        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'vipm-api'
+        $script:manifest.installer_contract.container_parity_contract.linux_vip_build.driver | Should -Be 'vipm-cli'
         ((@($script:manifest.installer_contract.container_parity_contract.linux_vip_build.required_ppl_bitness) | ForEach-Object { [string]$_ }) -join ',') | Should -Be '32,64'
         $script:manifest.installer_contract.container_parity_contract.linux_vip_build.artifact_role | Should -Be 'signal-only'
         $script:manifest.installer_contract.release_build_default_lane | Should -Be 'multiarch-2025q3'

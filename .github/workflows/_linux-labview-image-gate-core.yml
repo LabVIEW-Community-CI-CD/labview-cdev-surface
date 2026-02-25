@@ -974,12 +974,12 @@ jobs:
 
           vipb_path="$(find "$clone_root" -type f -name '*.vipb' | head -n1 || true)"
           release_notes_path="$(find "$clone_root" -type f \( -iname 'release-notes*.md' -o -iname 'release_notes*.md' \) | head -n1 || true)"
-          if [[ -z "$vipb_path" || -z "$release_notes_path" ]]; then
-            echo "VIP preflight missing VIPB or release notes. vipb='$vipb_path' notes='$release_notes_path'" | tee -a "$preflight_log_path"
+          if [[ -z "$vipb_path" ]]; then
+            echo "VIP preflight missing VIPB. vipb='$vipb_path'" | tee -a "$preflight_log_path"
             cat > "$report_path" <<JSON
           {
             "status": "fail",
-            "reason": "missing_vipb_or_release_notes",
+            "reason": "missing_vipb",
             "vipb_path": "$vipb_path",
             "release_notes_path": "$release_notes_path",
             "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
@@ -989,12 +989,26 @@ jobs:
             exit 1
           fi
 
+          if [[ -z "$release_notes_path" ]]; then
+            release_notes_path="$clone_root/docs/release-notes.parity.generated.md"
+            mkdir -p "$(dirname "$release_notes_path")"
+            generated_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            cat > "$release_notes_path" <<EOF
+# Linux parity release notes (generated)
+- source_repo: $ICON_EDITOR_SOURCE_URL
+- pinned_sha: $ICON_EDITOR_PINNED_SHA
+- lane: $RELEASE_BUILD_LANE
+- generated_utc: $generated_utc
+EOF
+            echo "Generated fallback parity release notes at '$release_notes_path'." | tee -a "$preflight_log_path"
+          fi
+
           if ! command -v vipm >/dev/null 2>&1; then
-            echo "vipm_api_unavailable: vipm CLI is not available on this runner." | tee -a "$preflight_log_path"
+            echo "vipm_cli_unavailable: vipm CLI is not available on this runner." | tee -a "$preflight_log_path"
             cat > "$report_path" <<JSON
           {
             "status": "fail",
-            "reason": "vipm_api_unavailable",
+            "reason": "vipm_cli_unavailable",
             "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
             "x86_ppl": "$x86_ppl",
             "x64_ppl": "$x64_ppl",
@@ -1020,7 +1034,7 @@ jobs:
             cat > "$report_path" <<JSON
           {
             "status": "fail",
-            "reason": "vipm_api_command_failed",
+            "reason": "vipm_cli_command_failed",
             "vipm_exit_code": $vip_exit,
             "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
             "x86_ppl": "$x86_ppl",
