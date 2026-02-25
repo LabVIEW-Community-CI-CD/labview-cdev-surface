@@ -116,8 +116,17 @@ if ($canUseWorktree) {
         throw "Failed to fetch pinned SHA '$pinned' for source repo '$resolvedSourcePath'."
     }
 
-    $worktreeOutput = & git -C $resolvedSourcePath worktree add --detach $resolvedTargetPath $pinned 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    # git worktree may emit informational stderr output; avoid terminating on stderr noise under $ErrorActionPreference='Stop'.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $worktreeOutput = & git -C $resolvedSourcePath worktree add --detach $resolvedTargetPath $pinned 2>&1
+        $worktreeExitCode = [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($worktreeExitCode -eq 0) {
         $provisionMode = 'worktree'
     } else {
         $worktreeError = [string]::Join("`n", @($worktreeOutput | ForEach-Object { [string]$_ }))

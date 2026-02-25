@@ -34,6 +34,8 @@ Describe 'Isolated build workspace policy contract' {
 
     It 'provisions isolated repos via worktree first with detached-clone fallback' {
         $script:prepareContent | Should -Match 'worktree add --detach'
+        $script:prepareContent | Should -Match "ErrorActionPreference = 'Continue'"
+        $script:prepareContent | Should -Match 'worktreeExitCode'
         $script:prepareContent | Should -Match 'git clone --quiet --no-tags'
         $script:prepareContent | Should -Match "provisionMode = 'detached-clone'"
         $script:prepareContent | Should -Match "provisionMode = 'worktree'"
