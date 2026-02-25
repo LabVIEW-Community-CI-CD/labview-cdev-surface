@@ -171,8 +171,8 @@ jobs:
             echo "linux_vip_build.enabled must be true in container parity contract." >&2
             exit 1
           fi
-          if [[ "$linux_vip_driver" != 'vipm-api' ]]; then
-            echo "linux_vip_build.driver must be 'vipm-api'. Found '$linux_vip_driver'." >&2
+          if [[ "$linux_vip_driver" != 'vipm-cli' ]]; then
+            echo "linux_vip_build.driver must be 'vipm-cli'. Found '$linux_vip_driver'." >&2
             exit 1
           fi
           if [[ "$linux_vip_artifact_role" != 'signal-only' ]]; then

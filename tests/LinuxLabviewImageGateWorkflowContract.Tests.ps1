@@ -75,6 +75,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
 
     It 'enforces Linux VIP parity contract and prerequisite guards' {
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.driver'
+        $script:coreWorkflowContent | Should -Match "linux_vip_build\.driver must be 'vipm-cli'"
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.required_ppl_bitness'
         $script:coreWorkflowContent | Should -Match 'vipm_cli_unavailable'
         $script:coreWorkflowContent | Should -Match 'missing_required_ppl_prerequisite'
