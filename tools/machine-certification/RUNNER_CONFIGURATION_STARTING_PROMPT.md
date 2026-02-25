@@ -9,6 +9,11 @@ Inputs:
 - Issue URL: <paste issue URL>
 
 Execution contract:
+0. Bootstrap:
+   - Checkout repository at issue `ref`.
+   - Validate `required_script_paths` from issue config.
+   - If any are missing, stop with `branch_drift_missing_script`.
+   - Do **not** implement missing scripts in this flow.
 1. Read the issue config block between <!-- CERT_CONFIG_START --> and <!-- CERT_CONFIG_END -->.
 2. Run `scripts/Invoke-MachineCertificationFromIssue.ps1 -IssueUrl <url>`.
 3. Wait for all dispatched runs to complete.
@@ -36,6 +41,12 @@ Execution contract:
   "ref": "cert/self-hosted-machine-certification-evidence",
   "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
+  "required_script_paths": [
+    "scripts/Invoke-MachineCertificationFromIssue.ps1",
+    "scripts/Start-SelfHostedMachineCertification.ps1",
+    "scripts/Assert-InstallerHarnessMachinePreflight.ps1",
+    "scripts/Invoke-EndToEndPortMatrixLocal.ps1"
+  ],
   "setup_names": [
     "legacy-2020-desktop-linux",
     "legacy-2020-desktop-windows"

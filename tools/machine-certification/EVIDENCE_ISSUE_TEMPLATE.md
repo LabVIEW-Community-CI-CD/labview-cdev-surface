@@ -15,6 +15,12 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
   "ref": "cert/self-hosted-machine-certification-evidence",
   "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
+  "required_script_paths": [
+    "scripts/Invoke-MachineCertificationFromIssue.ps1",
+    "scripts/Start-SelfHostedMachineCertification.ps1",
+    "scripts/Assert-InstallerHarnessMachinePreflight.ps1",
+    "scripts/Invoke-EndToEndPortMatrixLocal.ps1"
+  ],
   "setup_names": [
     "legacy-2020-desktop-linux",
     "legacy-2020-desktop-windows"
@@ -23,6 +29,12 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
 <!-- CERT_CONFIG_END -->
 
 When merged to `main`, change `ref` to `main`.
+
+## Bootstrap (Required)
+1. Checkout the repository at `ref` from config before executing any command.
+2. Validate `required_script_paths` exist.
+3. If any required script is missing, stop and classify as `branch_drift_missing_script`.
+4. Do not author replacement scripts from scratch in this flow.
 
 ## Evidence
 | Setup | Run URL | Conclusion | Artifact URL | Certified |

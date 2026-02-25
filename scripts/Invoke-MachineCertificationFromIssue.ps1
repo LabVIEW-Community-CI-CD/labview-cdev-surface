@@ -40,6 +40,21 @@ function New-MarkdownTable {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Assert-RequiredScriptPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter()][string[]]$RequiredPaths = @()
+    )
+
+    foreach ($relativePath in @($RequiredPaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+        $normalized = [string]$relativePath -replace '/', '\'
+        $absolutePath = Join-Path $RepoRoot $normalized
+        if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
+            throw ("branch_drift_missing_script: required script missing '{0}'. Checkout issue ref before execution. Do not implement missing scripts." -f $normalized)
+        }
+    }
+}
+
 function Get-LatestRunForWorkflowRef {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
@@ -126,6 +141,7 @@ $workflowFile = [string]$config.workflow_file
 $ref = [string]$config.ref
 $setupNames = @($config.setup_names | ForEach-Object { [string]$_ })
 $triggerMode = [string]$config.trigger_mode
+$requiredScriptPaths = @($config.required_script_paths | ForEach-Object { [string]$_ })
 if ([string]::IsNullOrWhiteSpace($workflowFile)) {
     $workflowFile = 'self-hosted-machine-certification.yml'
 }
@@ -155,6 +171,7 @@ if ([string]::Equals($effectiveRecorderName, [string]$repoInfo.owner, [System.St
 }
 
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
+Assert-RequiredScriptPaths -RepoRoot $repoRoot -RequiredPaths $requiredScriptPaths
 $startScript = Join-Path $repoRoot 'scripts\Start-SelfHostedMachineCertification.ps1'
 if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
     throw "Missing dispatcher script: $startScript"
