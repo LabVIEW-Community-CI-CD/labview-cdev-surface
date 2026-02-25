@@ -15,6 +15,7 @@ All listed setups complete `self-hosted-machine-certification.yml` with `certifi
   "ref": "cert/self-hosted-machine-certification-evidence",
   "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
+  "require_local_ref_sync": true,
   "required_script_paths": [
     "scripts/Invoke-MachineCertificationFromIssue.ps1",
     "scripts/Start-SelfHostedMachineCertification.ps1",
@@ -32,9 +33,10 @@ When merged to `main`, change `ref` to `main`.
 
 ## Bootstrap (Required)
 1. Checkout the repository at `ref` from config before executing any command.
-2. Validate `required_script_paths` exist.
-3. If any required script is missing, stop and classify as `branch_drift_missing_script`.
-4. Do not author replacement scripts from scratch in this flow.
+2. Verify local `HEAD` equals the remote head SHA of `ref`.
+3. Validate `required_script_paths` exist.
+4. If any required script is missing, stop and classify as `branch_drift_missing_script`.
+5. Do not author replacement scripts from scratch in this flow.
 
 ## Evidence
 | Setup | Run URL | Conclusion | Artifact URL | Certified |
@@ -48,3 +50,4 @@ When merged to `main`, change `ref` to `main`.
 - docker_context_unreachable
 - port_contract_failure
 - workflow_dependency_missing
+- branch_drift_missing_script

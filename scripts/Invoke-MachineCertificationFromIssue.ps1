@@ -55,6 +55,101 @@ function Assert-RequiredScriptPaths {
     }
 }
 
+function Invoke-GitCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $output = (& git -C $RepositoryRoot @Arguments 2>&1 | Out-String)
+    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    return [pscustomobject]@{
+        exit_code = $exitCode
+        output = ([string]$output).Trim()
+    }
+}
+
+function Get-RemoteRefSha {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Ref
+    )
+
+    $sha = (gh api "repos/$Repository/commits/$Ref" --jq '.sha' 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sha)) {
+        throw "Unable to resolve remote ref sha for '$Repository@$Ref'."
+    }
+    return $sha.ToLowerInvariant()
+}
+
+function Resolve-MatchingRemoteName {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$RepositorySlug
+    )
+
+    $remoteLinesResult = Invoke-GitCapture -RepositoryRoot $RepositoryRoot -Arguments @('remote', '-v')
+    if ($remoteLinesResult.exit_code -ne 0) {
+        return ''
+    }
+
+    $candidate = ''
+    foreach ($line in @($remoteLinesResult.output -split "(`r`n|`n|`r)") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) {
+        if ($line -notmatch '\(fetch\)$') {
+            continue
+        }
+
+        $parts = $line -split '\s+'
+        if (@($parts).Count -lt 2) {
+            continue
+        }
+        $remoteName = [string]$parts[0]
+        $remoteUrl = [string]$parts[1]
+        if ($remoteUrl -match [Regex]::Escape($RepositorySlug)) {
+            $candidate = $remoteName
+            break
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        return ''
+    }
+    return $candidate
+}
+
+function Assert-LocalRefSync {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$RepositorySlug,
+        [Parameter(Mandatory = $true)][string]$Ref
+    )
+
+    $isGitRepoResult = Invoke-GitCapture -RepositoryRoot $RepositoryRoot -Arguments @('rev-parse', '--is-inside-work-tree')
+    if ($isGitRepoResult.exit_code -ne 0 -or [string]$isGitRepoResult.output -ne 'true') {
+        throw "local_repo_not_git_checkout: '$RepositoryRoot' is not a git working tree."
+    }
+
+    $localHeadResult = Invoke-GitCapture -RepositoryRoot $RepositoryRoot -Arguments @('rev-parse', 'HEAD')
+    if ($localHeadResult.exit_code -ne 0 -or [string]::IsNullOrWhiteSpace([string]$localHeadResult.output)) {
+        throw "local_repo_head_unresolved: unable to resolve local HEAD in '$RepositoryRoot'."
+    }
+    $localHeadSha = ([string]$localHeadResult.output).ToLowerInvariant()
+
+    $remoteHeadSha = Get-RemoteRefSha -Repository $RepositorySlug -Ref $Ref
+    if ($localHeadSha -eq $remoteHeadSha) {
+        return
+    }
+
+    $remoteName = Resolve-MatchingRemoteName -RepositoryRoot $RepositoryRoot -RepositorySlug $RepositorySlug
+    $syncHint = if (-not [string]::IsNullOrWhiteSpace($remoteName)) {
+        "git fetch --prune $remoteName $Ref`ngit checkout --force FETCH_HEAD"
+    } else {
+        "git fetch --prune <remote-for-$RepositorySlug> $Ref`ngit checkout --force FETCH_HEAD"
+    }
+
+    throw ("branch_not_pulled_or_stale: local HEAD '{0}' does not match issue ref '{1}' head '{2}'.`nRun:`n{3}`nDo not implement missing scripts from this state." -f $localHeadSha, $Ref, $remoteHeadSha, $syncHint)
+}
+
 function Get-LatestRunForWorkflowRef {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
@@ -142,6 +237,11 @@ $ref = [string]$config.ref
 $setupNames = @($config.setup_names | ForEach-Object { [string]$_ })
 $triggerMode = [string]$config.trigger_mode
 $requiredScriptPaths = @($config.required_script_paths | ForEach-Object { [string]$_ })
+$requireLocalRefSync = if ($null -eq $config.PSObject.Properties['require_local_ref_sync']) {
+    $true
+} else {
+    [bool]$config.require_local_ref_sync
+}
 if ([string]::IsNullOrWhiteSpace($workflowFile)) {
     $workflowFile = 'self-hosted-machine-certification.yml'
 }
@@ -171,6 +271,9 @@ if ([string]::Equals($effectiveRecorderName, [string]$repoInfo.owner, [System.St
 }
 
 $repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
+if ($requireLocalRefSync) {
+    Assert-LocalRefSync -RepositoryRoot $repoRoot -RepositorySlug $repositorySlug -Ref $ref
+}
 Assert-RequiredScriptPaths -RepoRoot $repoRoot -RequiredPaths $requiredScriptPaths
 $startScript = Join-Path $repoRoot 'scripts\Start-SelfHostedMachineCertification.ps1'
 if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {

@@ -11,6 +11,7 @@ Inputs:
 Execution contract:
 0. Bootstrap:
    - Checkout repository at issue `ref`.
+   - Verify local `HEAD` equals remote head SHA of `ref`.
    - Validate `required_script_paths` from issue config.
    - If any are missing, stop with `branch_drift_missing_script`.
    - Do **not** implement missing scripts in this flow.
@@ -41,6 +42,7 @@ Execution contract:
   "ref": "cert/self-hosted-machine-certification-evidence",
   "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
+  "require_local_ref_sync": true,
   "required_script_paths": [
     "scripts/Invoke-MachineCertificationFromIssue.ps1",
     "scripts/Start-SelfHostedMachineCertification.ps1",
@@ -57,5 +59,6 @@ Execution contract:
 ## Notes
 - Setup names come from `tools/machine-certification/setup-profiles.json`.
 - `trigger_mode=auto` attempts dispatch first and falls back to rerunning the latest run on `ref` when workflow dispatch is unavailable pre-merge.
+- `require_local_ref_sync=true` fails closed if local checkout is stale versus issue `ref`.
 - `recorder_name` must be different from repository owner.
 - This prompt is intentionally issue-first: Codex can execute end-to-end from issue URL only.
