@@ -649,6 +649,18 @@ Add-Check `
     -Detail ("context={0}; detail={1}" -f $DockerContext, $dockerInfoDetail) `
     -Severity $DockerCheckSeverity
 
+# Reconcile early startup false negatives when later phases prove the target context is reachable.
+if ($StartDockerDesktopIfNeeded -and $dockerContextReachable) {
+    $startupChecks = @($checks | Where-Object { [string]$_.check -eq 'docker:desktop_startup' -and -not [bool]$_.passed })
+    foreach ($startupCheck in $startupChecks) {
+        $startupCheck.passed = $true
+        $startupCheck.detail = ("{0} | reconciled_after_context_reachable=true" -f [string]$startupCheck.detail)
+    }
+    if (@($startupChecks).Count -gt 0) {
+        $errors = @($errors | Where-Object { [string]$_ -notlike 'docker:desktop_startup ::*' })
+    }
+}
+
 $status = if ($errors.Count -gt 0) { 'failed' } else { 'succeeded' }
 $report = [ordered]@{
     timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
