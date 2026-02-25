@@ -181,17 +181,21 @@ function Assert-UpstreamRunnerCapacity {
         if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
         $runners += @(([string]$line | ConvertFrom-Json -ErrorAction Stop))
     }
-    $eligible = @(
+    $eligibleOnline = @(
         $runners | Where-Object {
-            [string]$_.status -eq 'online' -and -not [bool]$_.busy
+            [string]$_.status -eq 'online'
         } | Where-Object {
             $runnerLabels = @($_.labels | ForEach-Object { [string]$_.name })
             @($requiredLabels | Where-Object { $runnerLabels -notcontains $_ }).Count -eq 0
         }
     )
+    $eligibleAvailable = @($eligibleOnline | Where-Object { -not [bool]$_.busy })
 
-    if (@($eligible).Count -eq 0) {
+    if (@($eligibleOnline).Count -eq 0) {
         throw ("runner_label_collision_guard_unconfigured: no online upstream runner matches setup '{0}' labels '{1}'. Configure runner labels to avoid collisions." -f $SetupName, $RunnerLabelsCsv)
+    }
+    if (@($eligibleAvailable).Count -eq 0) {
+        Write-Warning ("runner_label_collision_guard_busy: online runners for setup '{0}' labels '{1}' are currently busy; dispatch will queue." -f $SetupName, $RunnerLabelsCsv)
     }
 }
 
