@@ -60,6 +60,54 @@ function Get-ScalarString {
     return [string]$Value
 }
 
+function Split-LabelCsv {
+    param([Parameter(Mandatory = $true)][string]$Csv)
+    return @(
+        $Csv -split ',' |
+        ForEach-Object { ([string]$_).Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
+
+function Join-LabelsCsv {
+    param([Parameter(Mandatory = $true)][string[]]$Labels)
+    return (@($Labels | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ',')
+}
+
+function Get-RepositoryOwner {
+    param([Parameter(Mandatory = $true)][string]$Repository)
+    return ([string]$Repository -split '/')[0]
+}
+
+function Get-CollisionGuardLabel {
+    param([Parameter(Mandatory = $true)][object]$Setup)
+    return (Get-ScalarString -Value $Setup.collision_guard_label)
+}
+
+function Get-SetupBoolean {
+    param(
+        [Parameter(Mandatory = $true)][object]$Setup,
+        [Parameter(Mandatory = $true)][string]$PropertyName,
+        [Parameter(Mandatory = $true)][bool]$Default
+    )
+
+    $property = $Setup.PSObject.Properties[$PropertyName]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $Default
+    }
+
+    $raw = [string]$property.Value
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return $Default
+    }
+
+    try {
+        return [System.Convert]::ToBoolean($property.Value)
+    } catch {
+        throw ("setup_boolean_invalid: setup '{0}' has invalid boolean value for '{1}': '{2}'." -f [string]$Setup.name, $PropertyName, $raw)
+    }
+}
+
 function Resolve-RunnerLabelsCsv {
     param([Parameter(Mandatory = $true)][object]$Setup)
 
@@ -81,6 +129,70 @@ function Resolve-RunnerLabelsCsv {
     }
 
     throw "Setup '$([string]$Setup.name)' is missing runner labels (runner_labels_csv or valid runner_labels_json)."
+}
+
+function Resolve-UpstreamRunnerLabelsCsv {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][object]$Setup
+    )
+
+    $baseCsv = Resolve-RunnerLabelsCsv -Setup $Setup
+    $owner = Get-RepositoryOwner -Repository $Repository
+    if (-not [string]::Equals($owner, 'LabVIEW-Community-CI-CD', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $baseCsv
+    }
+
+    $guardLabel = Get-CollisionGuardLabel -Setup $Setup
+    if ([string]::IsNullOrWhiteSpace($guardLabel)) {
+        throw "runner_collision_guard_label_missing: setup '$([string]$Setup.name)' must define collision_guard_label for upstream dispatch."
+    }
+
+    $labels = Split-LabelCsv -Csv $baseCsv
+    if ($labels -notcontains $guardLabel) {
+        $labels += $guardLabel
+    }
+    return (Join-LabelsCsv -Labels $labels)
+}
+
+function Assert-UpstreamRunnerCapacity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$RunnerLabelsCsv,
+        [Parameter(Mandatory = $true)][string]$SetupName
+    )
+
+    $owner = Get-RepositoryOwner -Repository $Repository
+    if (-not [string]::Equals($owner, 'LabVIEW-Community-CI-CD', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+
+    $requiredLabels = Split-LabelCsv -Csv $RunnerLabelsCsv
+    if (@($requiredLabels).Count -eq 0) {
+        throw "runner_labels_empty: setup '$SetupName' resolved to no runner labels."
+    }
+
+    $runnerLines = & gh api "repos/$Repository/actions/runners" --paginate --jq '.runners[] | @json'
+    if ($LASTEXITCODE -ne 0) {
+        throw "runner_inventory_query_failed: unable to query upstream runner inventory for '$Repository'."
+    }
+    $runners = @()
+    foreach ($line in @($runnerLines)) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
+        $runners += @(([string]$line | ConvertFrom-Json -ErrorAction Stop))
+    }
+    $eligible = @(
+        $runners | Where-Object {
+            [string]$_.status -eq 'online' -and -not [bool]$_.busy
+        } | Where-Object {
+            $runnerLabels = @($_.labels | ForEach-Object { [string]$_.name })
+            @($requiredLabels | Where-Object { $runnerLabels -notcontains $_ }).Count -eq 0
+        }
+    )
+
+    if (@($eligible).Count -eq 0) {
+        throw ("runner_label_collision_guard_unconfigured: no online upstream runner matches setup '{0}' labels '{1}'. Configure runner labels to avoid collisions." -f $SetupName, $RunnerLabelsCsv)
+    }
 }
 
 $resolvedProfilesPath = Resolve-ProfilesPath -InputPath $ProfilesPath
@@ -115,7 +227,10 @@ $dispatchRecords = @()
 $claimedRunIds = @{}
 foreach ($setup in $selectedSetups) {
     $setupNameToken = [string]$setup.name
-    $runnerLabelsCsv = Resolve-RunnerLabelsCsv -Setup $setup
+    $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup
+    $switchDockerContext = (Get-SetupBoolean -Setup $setup -PropertyName 'switch_docker_context' -Default $true).ToString().ToLowerInvariant()
+    $startDockerDesktop = (Get-SetupBoolean -Setup $setup -PropertyName 'start_docker_desktop_if_needed' -Default $true).ToString().ToLowerInvariant()
+    Assert-UpstreamRunnerCapacity -Repository $Repository -RunnerLabelsCsv $runnerLabelsCsv -SetupName $setupNameToken
     Write-Host ("Dispatching setup: {0}" -f $setupNameToken)
     $dispatchStartUtc = (Get-Date).ToUniversalTime()
 
@@ -127,6 +242,8 @@ foreach ($setup in $selectedSetups) {
         '-f', ("runner_labels_csv={0}" -f $runnerLabelsCsv),
         '-f', ("expected_labview_year={0}" -f ([string]$setup.expected_labview_year)),
         '-f', ("docker_context={0}" -f ([string]$setup.docker_context)),
+        '-f', ("switch_docker_context={0}" -f $switchDockerContext),
+        '-f', ("start_docker_desktop_if_needed={0}" -f $startDockerDesktop),
         '-f', ("skip_host_ini_mutation={0}" -f ([string]$setup.skip_host_ini_mutation).ToLowerInvariant()),
         '-f', ("skip_override_phase={0}" -f ([string]$setup.skip_override_phase).ToLowerInvariant())
     )
@@ -174,6 +291,9 @@ foreach ($setup in $selectedSetups) {
 
     $record = [ordered]@{
         setup_name = $setupNameToken
+        runner_labels_csv = $runnerLabelsCsv
+        start_docker_desktop_if_needed = $startDockerDesktop
+        switch_docker_context = $switchDockerContext
         run_id = if ($null -ne $run) { (Get-ScalarString -Value $run.databaseId) } else { '' }
         run_url = if ($null -ne $run) { (Get-ScalarString -Value $run.url) } else { '' }
         run_created_at = if ($null -ne $run) { (Get-ScalarString -Value $run.createdAt) } else { '' }

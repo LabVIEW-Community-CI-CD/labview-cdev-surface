@@ -35,8 +35,12 @@ When merged to `main`, change `ref` to `main`.
 1. Checkout the repository at `ref` from config before executing any command.
 2. Verify local `HEAD` equals the remote head SHA of `ref`.
 3. Validate `required_script_paths` exist.
-4. If any required script is missing, stop and classify as `branch_drift_missing_script`.
-5. Do not author replacement scripts from scratch in this flow.
+4. Post `CERT_SESSION_START` and detect stale open sessions before dispatch.
+5. If any required script is missing, stop and classify as `branch_drift_missing_script`.
+6. Do not author replacement scripts from scratch in this flow.
+7. Ensure upstream runners include setup-specific collision-guard labels.
+8. Ensure Docker context auto-switch is enabled for each setup (`switch_docker_context=true`).
+9. Ensure Docker Desktop auto-start is enabled for each setup (`start_docker_desktop_if_needed=true`).
 
 ## Evidence
 | Setup | Run URL | Conclusion | Artifact URL | Certified |
@@ -47,7 +51,9 @@ When merged to `main`, change `ref` to `main`.
 ## Failure Classification
 - runner_label_mismatch
 - missing_labview_installation
+- docker_context_switch_failed
 - docker_context_unreachable
 - port_contract_failure
 - workflow_dependency_missing
 - branch_drift_missing_script
+- runner_label_collision_guard_unconfigured

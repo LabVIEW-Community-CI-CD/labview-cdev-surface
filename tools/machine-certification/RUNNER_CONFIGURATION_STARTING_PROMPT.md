@@ -13,6 +13,7 @@ Execution contract:
    - Checkout repository at issue `ref`.
    - Verify local `HEAD` equals remote head SHA of `ref`.
    - Validate `required_script_paths` from issue config.
+   - Emit `CERT_SESSION_START` marker comment and detect stale open sessions.
    - If any are missing, stop with `branch_drift_missing_script`.
    - Do **not** implement missing scripts in this flow.
 1. Read the issue config block between <!-- CERT_CONFIG_START --> and <!-- CERT_CONFIG_END -->.
@@ -26,7 +27,9 @@ Execution contract:
    - recorder identity marker from `recorder_name` in issue config
 5. If any setup fails, classify root cause under one of:
    - runner_label_mismatch
+   - runner_label_collision_guard_unconfigured
    - missing_labview_installation
+   - docker_context_switch_failed
    - docker_context_unreachable
    - port_contract_failure
    - workflow_dependency_missing
@@ -60,5 +63,8 @@ Execution contract:
 - Setup names come from `tools/machine-certification/setup-profiles.json`.
 - `trigger_mode=auto` attempts dispatch first and falls back to rerunning the latest run on `ref` when workflow dispatch is unavailable pre-merge.
 - `require_local_ref_sync=true` fails closed if local checkout is stale versus issue `ref`.
+- Certification automation switches Docker Desktop context per setup before preflight when `switch_docker_context=true`.
+- Certification automation can start Docker Desktop automatically when `start_docker_desktop_if_needed=true`.
+- On upstream repos, setup collision-guard labels are enforced to avoid runner pickup collisions.
 - `recorder_name` must be different from repository owner.
 - This prompt is intentionally issue-first: Codex can execute end-to-end from issue URL only.

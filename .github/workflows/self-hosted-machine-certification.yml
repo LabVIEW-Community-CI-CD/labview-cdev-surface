@@ -32,6 +32,16 @@ on:
         required: true
         default: 'desktop-linux'
         type: string
+      switch_docker_context:
+        description: Switch Docker Desktop context before machine preflight.
+        required: false
+        default: true
+        type: boolean
+      start_docker_desktop_if_needed:
+        description: Start Docker Desktop automatically when engine is not reachable.
+        required: false
+        default: true
+        type: boolean
       skip_host_ini_mutation:
         description: Skip host LabVIEW.ini updates during matrix execution.
         required: false
@@ -74,6 +84,8 @@ jobs:
               --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
               --arg year "${{ github.event.inputs.expected_labview_year }}" \
               --arg docker_context "${{ github.event.inputs.docker_context }}" \
+              --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
+              --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
               --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
               --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
               --arg target_ref "${{ github.event.inputs.ref }}" \
@@ -86,6 +98,8 @@ jobs:
                 ),
                 expected_labview_year: $year,
                 docker_context: $docker_context,
+                switch_docker_context: $switch_context,
+                start_docker_desktop_if_needed: $startup_docker,
                 skip_host_ini_mutation: $skip_ini,
                 skip_override_phase: $skip_override,
                 target_ref: $target_ref
@@ -94,18 +108,22 @@ jobs:
             jq -nc '[
               {
                 setup_name: "legacy-2020-desktop-linux",
-                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"linux-gate-windows-ready\"]",
                 expected_labview_year: "2020",
                 docker_context: "desktop-linux",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
               },
               {
                 setup_name: "legacy-2020-desktop-windows",
-                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cdev-surface-windows-gate\"]",
                 expected_labview_year: "2020",
                 docker_context: "desktop-windows",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
@@ -191,7 +209,9 @@ jobs:
           & "$env:GITHUB_WORKSPACE\scripts\Assert-InstallerHarnessMachinePreflight.ps1" `
             -ExpectedLabviewYear '${{ matrix.expected_labview_year }}' `
             -DockerContext '${{ matrix.docker_context }}' `
-            -DockerCheckSeverity warning `
+            -DockerCheckSeverity error `
+            -StartDockerDesktopIfNeeded:$([System.Convert]::ToBoolean('${{ matrix.start_docker_desktop_if_needed }}')) `
+            -SwitchDockerContext:$([System.Convert]::ToBoolean('${{ matrix.switch_docker_context }}')) `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path -LiteralPath $reportPath -PathType Leaf) {

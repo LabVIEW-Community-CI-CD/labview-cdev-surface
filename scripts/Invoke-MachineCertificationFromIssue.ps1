@@ -40,6 +40,102 @@ function New-MarkdownTable {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Get-IssueComments {
+    param([Parameter(Mandatory = $true)][string]$IssueUrl)
+
+    $json = gh issue view $IssueUrl --json comments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to read issue comments: $IssueUrl"
+    }
+    $payload = $json | ConvertFrom-Json -ErrorAction Stop
+    return @($payload.comments)
+}
+
+function Get-OpenCertificationSessions {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Comments,
+        [Parameter(Mandatory = $true)][string]$RecorderName,
+        [Parameter(Mandatory = $true)][string]$Workflow,
+        [Parameter(Mandatory = $true)][string]$Ref
+    )
+
+    $recorderRegex = [Regex]::Escape($RecorderName)
+    $starts = @{}
+    $ends = @{}
+
+    foreach ($comment in @($Comments)) {
+        $body = [string]$comment.body
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+        if ($body -notmatch "^\[$recorderRegex\]\s+CERT_SESSION_(START|END)\s+id=([A-Za-z0-9\-]+)") {
+            continue
+        }
+
+        $kind = [string]$Matches[1]
+        $sessionId = [string]$Matches[2]
+
+        $wf = ''
+        $rf = ''
+        if ($body -match "(?m)^- workflow:\s*(.+?)\s*$") { $wf = [string]$Matches[1].Trim() }
+        if ($body -match "(?m)^- ref:\s*(.+?)\s*$") { $rf = [string]$Matches[1].Trim() }
+
+        if ($wf -ne $Workflow -or $rf -ne $Ref) {
+            continue
+        }
+
+        if ($kind -eq 'START') {
+            $starts[$sessionId] = [pscustomobject]@{
+                id = $sessionId
+                created_at = [string]$comment.createdAt
+                url = [string]$comment.url
+            }
+        } else {
+            $ends[$sessionId] = [pscustomobject]@{
+                id = $sessionId
+                created_at = [string]$comment.createdAt
+                url = [string]$comment.url
+            }
+        }
+    }
+
+    $open = @()
+    foreach ($key in $starts.Keys) {
+        if (-not $ends.ContainsKey($key)) {
+            $open += @($starts[$key])
+        }
+    }
+    return @($open | Sort-Object -Property created_at)
+}
+
+function Get-ActiveWorkflowRuns {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$WorkflowFile,
+        [Parameter(Mandatory = $true)][string]$Ref
+    )
+
+    $json = gh run list -R $Repository --workflow $WorkflowFile --branch $Ref --limit 30 --json databaseId,status,conclusion,url,createdAt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to list workflow runs for stale detection."
+    }
+    $rowsRaw = @($json | ConvertFrom-Json -ErrorAction Stop)
+    $rows = @(
+        $rowsRaw | ForEach-Object {
+            $statusValue = if ($_.status -is [System.Array]) { [string]$_.status[0] } else { [string]$_.status }
+            [pscustomobject]@{
+                databaseId = if ($_.databaseId -is [System.Array]) { [string]$_.databaseId[0] } else { [string]$_.databaseId }
+                status = $statusValue
+                conclusion = if ($_.conclusion -is [System.Array]) { [string]$_.conclusion[0] } else { [string]$_.conclusion }
+                url = if ($_.url -is [System.Array]) { [string]$_.url[0] } else { [string]$_.url }
+                createdAt = if ($_.createdAt -is [System.Array]) { [string]$_.createdAt[0] } else { [string]$_.createdAt }
+            }
+        }
+    )
+    return @(
+        $rows |
+        Where-Object { [string]$_.status -in @('queued', 'in_progress', 'pending', 'requested', 'waiting', 'action_required') }
+    )
+}
+
 function Assert-RequiredScriptPaths {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -286,8 +382,59 @@ $runReportPath = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     [System.IO.Path]::GetFullPath($OutputPath)
 }
 
+$sessionId = ("{0}-{1}" -f ([DateTime]::UtcNow.ToString('yyyyMMddHHmmss')), [Guid]::NewGuid().ToString('N').Substring(0, 8))
+$sessionStartedUtc = (Get-Date).ToUniversalTime()
+$sessionStatus = 'in_progress'
+$sessionError = ''
+$sessionEndedUtc = $null
+$sessionStartCommentPosted = $false
+$sessionRunIds = @()
+$staleOpenSessions = @()
+$staleActiveRuns = @()
+
+$issueComments = Get-IssueComments -IssueUrl $IssueUrl
+$staleOpenSessions = Get-OpenCertificationSessions `
+    -Comments $issueComments `
+    -RecorderName $effectiveRecorderName `
+    -Workflow $workflowFile `
+    -Ref $ref
+$staleActiveRuns = Get-ActiveWorkflowRuns -Repository $repositorySlug -WorkflowFile $workflowFile -Ref $ref
+
+$startCommentLines = @(
+    "[$effectiveRecorderName] CERT_SESSION_START id=$sessionId",
+    '',
+    "- issue: $IssueUrl",
+    "- workflow: $workflowFile",
+    "- ref: $ref",
+    "- started_utc: $($sessionStartedUtc.ToString('o'))",
+    "- trigger_mode: $triggerMode",
+    "- stale_open_session_count: $(@($staleOpenSessions).Count)",
+    "- stale_active_run_count: $(@($staleActiveRuns).Count)"
+)
+if (@($staleOpenSessions).Count -gt 0) {
+    $startCommentLines += '- stale_open_sessions:'
+    foreach ($s in @($staleOpenSessions)) {
+        $startCommentLines += ("  - id={0} created_at={1} url={2}" -f [string]$s.id, [string]$s.created_at, [string]$s.url)
+    }
+}
+if (@($staleActiveRuns).Count -gt 0) {
+    $startCommentLines += '- stale_active_runs:'
+    foreach ($r in @($staleActiveRuns)) {
+        $startCommentLines += ("  - run_id={0} status={1} url={2}" -f [string]$r.databaseId, [string]$r.status, [string]$r.url)
+    }
+}
+
+gh issue comment $IssueUrl --body ($startCommentLines -join [Environment]::NewLine) | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to post CERT_SESSION_START comment to issue."
+}
+$sessionStartCommentPosted = $true
+
 $dispatchObj = $null
 $dispatchErrorText = ''
+$finalRows = @()
+
+try {
 
 if ($triggerMode -ne 'rerun_latest') {
     try {
@@ -352,7 +499,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to post attempt comment to issue."
 }
 
-$finalRows = @()
 if (-not $SkipWatch) {
     $runSetupMap = @{}
     foreach ($attempt in @($dispatchObj.runs)) {
@@ -444,6 +590,14 @@ if (-not $SkipWatch) {
     }
 }
 
+$sessionRunIds = @(
+    @($dispatchObj.runs | ForEach-Object { [string]$_.run_id }) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    Select-Object -Unique
+)
+$sessionStatus = if (@($finalRows).Count -eq 0) { 'dispatched' } else { 'completed' }
+$sessionEndedUtc = (Get-Date).ToUniversalTime()
+
 $report = [ordered]@{
     timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
     issue_url = $IssueUrl
@@ -452,6 +606,12 @@ $report = [ordered]@{
     workflow = $workflowFile
     ref = $ref
     trigger_mode = $triggerMode
+    session_id = $sessionId
+    session_started_utc = $sessionStartedUtc.ToString('o')
+    session_ended_utc = $sessionEndedUtc.ToString('o')
+    session_status = $sessionStatus
+    stale_open_sessions_detected = @($staleOpenSessions)
+    stale_active_runs_detected = @($staleActiveRuns)
     setups = $setupNames
     attempts = @($dispatchObj.runs)
     results = @($finalRows)
@@ -468,3 +628,38 @@ $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host ("Issue certification orchestration completed: {0}" -f $IssueUrl)
 Write-Host ("Report: {0}" -f $reportPath)
 $report | ConvertTo-Json -Depth 8 | Write-Output
+
+} catch {
+    $sessionStatus = 'failed'
+    $sessionError = ($_ | Out-String).Trim()
+    $sessionEndedUtc = (Get-Date).ToUniversalTime()
+    throw
+} finally {
+    if ($sessionStartCommentPosted) {
+        try {
+            if ($null -eq $sessionEndedUtc) {
+                $sessionEndedUtc = (Get-Date).ToUniversalTime()
+            }
+            $durationSeconds = [Math]::Round(($sessionEndedUtc - $sessionStartedUtc).TotalSeconds, 2)
+            $endLines = @(
+                "[$effectiveRecorderName] CERT_SESSION_END id=$sessionId",
+                '',
+                "- issue: $IssueUrl",
+                "- workflow: $workflowFile",
+                "- ref: $ref",
+                "- started_utc: $($sessionStartedUtc.ToString('o'))",
+                "- ended_utc: $($sessionEndedUtc.ToString('o'))",
+                "- duration_seconds: $durationSeconds",
+                "- status: $sessionStatus",
+                "- run_ids: $(@($sessionRunIds) -join ', ')"
+            )
+            if (-not [string]::IsNullOrWhiteSpace($sessionError)) {
+                $singleLineError = ($sessionError -replace "\r?\n", ' ') -replace '\s+', ' '
+                $endLines += ("- error_summary: {0}" -f $singleLineError.Trim())
+            }
+            gh issue comment $IssueUrl --body ($endLines -join [Environment]::NewLine) | Out-Null
+        } catch {
+            Write-Warning ("Failed to post CERT_SESSION_END comment for session '{0}'." -f $sessionId)
+        }
+    }
+}
