@@ -994,12 +994,12 @@ jobs:
             mkdir -p "$(dirname "$release_notes_path")"
             generated_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             cat > "$release_notes_path" <<EOF
-# Linux parity release notes (generated)
-- source_repo: $ICON_EDITOR_SOURCE_URL
-- pinned_sha: $ICON_EDITOR_PINNED_SHA
-- lane: $RELEASE_BUILD_LANE
-- generated_utc: $generated_utc
-EOF
+            # Linux parity release notes (generated)
+            - source_repo: $ICON_EDITOR_SOURCE_URL
+            - pinned_sha: $ICON_EDITOR_PINNED_SHA
+            - lane: $RELEASE_BUILD_LANE
+            - generated_utc: $generated_utc
+            EOF
             echo "Generated fallback parity release notes at '$release_notes_path'." | tee -a "$preflight_log_path"
           fi
 
