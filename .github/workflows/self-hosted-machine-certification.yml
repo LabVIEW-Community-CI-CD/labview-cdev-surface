@@ -1,0 +1,273 @@
+name: Self-Hosted Machine Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional branch or SHA to evaluate. Defaults to workflow ref.
+        required: false
+        type: string
+      runner_labels_json:
+        description: JSON array of runner labels used for certification job routing.
+        required: true
+        default: '["self-hosted","windows","self-hosted-windows-lv"]'
+        type: string
+      expected_labview_year:
+        description: LabVIEW year required by machine preflight checks.
+        required: true
+        default: '2020'
+        type: string
+      docker_context:
+        description: Docker context expected by machine preflight checks.
+        required: true
+        default: 'desktop-linux'
+        type: string
+      skip_host_ini_mutation:
+        description: Skip host LabVIEW.ini updates during matrix execution.
+        required: false
+        default: false
+        type: boolean
+      skip_override_phase:
+        description: Skip unofficial override verification phase in matrix execution.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: self-hosted-machine-certification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    name: Self-Hosted Machine Certification
+    runs-on: ${{ fromJson(inputs.runner_labels_json) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow_dispatch ref override
+        if: ${{ inputs.ref != '' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & git fetch --prune origin "${{ inputs.ref }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch requested ref '${{ inputs.ref }}'."
+          }
+
+          & git checkout --force FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout requested ref '${{ inputs.ref }}'."
+          }
+
+      - id: runner-metadata
+        name: Capture runner metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadataRoot = Join-Path $env:RUNNER_TEMP 'machine-certification'
+          New-Item -Path $metadataRoot -ItemType Directory -Force | Out-Null
+          $metadataPath = Join-Path $metadataRoot 'runner-metadata.json'
+
+          $runnerWorkspace = [string]$env:RUNNER_WORKSPACE
+          $activeRunnerRoot = ''
+          if (-not [string]::IsNullOrWhiteSpace($runnerWorkspace) -and (Test-Path -LiteralPath $runnerWorkspace -PathType Container)) {
+            $activeRunnerRoot = Split-Path -Path (Split-Path -Path $runnerWorkspace -Parent) -Parent
+          }
+
+          $sessionName = [string]$env:SESSIONNAME
+          if ([string]::IsNullOrWhiteSpace($sessionName)) {
+            $sessionName = 'unknown'
+          }
+
+          [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            repository = [string]$env:GITHUB_REPOSITORY
+            workflow = [string]$env:GITHUB_WORKFLOW
+            run_id = [string]$env:GITHUB_RUN_ID
+            run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            runner_name = [string]$env:RUNNER_NAME
+            runner_os = [string]$env:RUNNER_OS
+            runner_arch = [string]$env:RUNNER_ARCH
+            runner_workspace = $runnerWorkspace
+            runner_root = $activeRunnerRoot
+            runner_labels_json = '${{ inputs.runner_labels_json }}'
+            session_name = $sessionName
+            user_interactive = [System.Environment]::UserInteractive
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding utf8
+
+          "metadata_root=$metadataRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "metadata_path=$metadataPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: machine-preflight
+        name: Assert machine preflight pack
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'machine-preflight-report.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Assert-InstallerHarnessMachinePreflight.ps1" `
+            -ExpectedLabviewYear '${{ inputs.expected_labview_year }}' `
+            -DockerContext '${{ inputs.docker_context }}' `
+            -DockerCheckSeverity warning `
+            -OutputPath $reportPath
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw "Machine preflight checks failed."
+          }
+          "report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: seed-contract
+        name: Resolve pinned icon-editor seed contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "Manifest missing: $manifestPath"
+          }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $iconEditorRepo = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
+          if ($null -eq $iconEditorRepo) {
+            throw "Managed repo 'labview-icon-editor' not found in manifest."
+          }
+
+          $pinnedSha = ([string]$iconEditorRepo.pinned_sha).ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Pinned SHA for icon-editor is invalid: '$pinnedSha'"
+          }
+
+          $upstreamUrl = [string]$iconEditorRepo.required_remotes.upstream
+          $originUrl = [string]$iconEditorRepo.required_remotes.origin
+          $cloneUrl = if (-not [string]::IsNullOrWhiteSpace($upstreamUrl)) { $upstreamUrl } else { $originUrl }
+          if ([string]::IsNullOrWhiteSpace($cloneUrl)) {
+            throw "No upstream/origin URL found for managed repo 'labview-icon-editor'."
+          }
+
+          $cloneRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'icon-editor-seed'
+          if (Test-Path -LiteralPath $cloneRoot -PathType Container) {
+            Remove-Item -LiteralPath $cloneRoot -Recurse -Force
+          }
+          & git clone --no-checkout --filter=blob:none $cloneUrl $cloneRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to clone icon-editor seed repository from '$cloneUrl'."
+          }
+
+          & git -C $cloneRoot fetch --depth=1 origin $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch pinned SHA '$pinnedSha' from '$cloneUrl'."
+          }
+
+          & git -C $cloneRoot checkout --force $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout pinned SHA '$pinnedSha' in '$cloneRoot'."
+          }
+
+          $seedContractPath = Join-Path $cloneRoot 'Tooling\labviewcli-port-contract.json'
+          if (-not (Test-Path -LiteralPath $seedContractPath -PathType Leaf)) {
+            throw "Seed contract missing at pinned SHA '$pinnedSha': $seedContractPath"
+          }
+
+          "clone_root=$cloneRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "seed_contract_path=$seedContractPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "icon_editor_pinned_sha=$pinnedSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: port-matrix
+        name: Run end-to-end port matrix
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'port-matrix'
+          $params = @{
+            SeedContractPath = '${{ steps.seed-contract.outputs.seed_contract_path }}'
+            OutputPath = $outputRoot
+          }
+
+          if ([System.Convert]::ToBoolean('${{ inputs.skip_host_ini_mutation }}')) {
+            $params.SkipHostIniMutation = $true
+          }
+          if ([System.Convert]::ToBoolean('${{ inputs.skip_override_phase }}')) {
+            $params.SkipOverridePhase = $true
+          }
+
+          & "$env:GITHUB_WORKSPACE\scripts\Invoke-EndToEndPortMatrixLocal.ps1" @params
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invoke-EndToEndPortMatrixLocal.ps1 failed with exit code $LASTEXITCODE."
+          }
+
+          $matrixSummaryPath = Join-Path $outputRoot 'artifacts\port-matrix-summary.json'
+          if (-not (Test-Path -LiteralPath $matrixSummaryPath -PathType Leaf)) {
+            throw "Port matrix summary not found: $matrixSummaryPath"
+          }
+
+          "matrix_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "matrix_summary_path=$matrixSummaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: certification-summary
+        name: Write certification summary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $summaryPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'self-hosted-machine-certification-report.json'
+          $matrixSummary = Get-Content -LiteralPath '${{ steps.port-matrix.outputs.matrix_summary_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $preflightReport = Get-Content -LiteralPath '${{ steps.machine-preflight.outputs.report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+
+          $certification = [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            repository = [string]$env:GITHUB_REPOSITORY
+            workflow = [string]$env:GITHUB_WORKFLOW
+            run_id = [string]$env:GITHUB_RUN_ID
+            run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            runner_name = [string]$env:RUNNER_NAME
+            requested_runner_labels_json = '${{ inputs.runner_labels_json }}'
+            icon_editor_pinned_sha = '${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}'
+            expected_labview_year = '${{ inputs.expected_labview_year }}'
+            docker_context = '${{ inputs.docker_context }}'
+            matrix = $matrixSummary.summary
+            machine_preflight_status = [string]$preflightReport.status
+            certified = (
+              [string]$preflightReport.status -eq 'pass' -and
+              [int]$matrixSummary.summary.strict_failures -eq 0 -and
+              [int]$matrixSummary.summary.override_failures -eq 0 -and
+              @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
+            )
+          }
+
+          $certification | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+
+          @(
+            "## Self-Hosted Machine Certification",
+            "",
+            "- runner: `${{ env.RUNNER_NAME }}`",
+            "- labels: `${{ inputs.runner_labels_json }}`",
+            "- icon-editor pinned sha: `${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}`",
+            "- strict failures: $($matrixSummary.summary.strict_failures)",
+            "- override failures: $($matrixSummary.summary.override_failures)",
+            "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
+            "- preflight status: $($preflightReport.status)",
+            "- certified: $($certification.certified)"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          if (-not [bool]$certification.certified) {
+            throw "Machine certification failed. Inspect certification artifact bundle."
+          }
+
+          "summary_path=$summaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload certification artifacts
+        if: always()
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          artifact-name: self-hosted-machine-certification-${{ github.run_id }}
+          artifact-path: |
+            ${{ steps.runner-metadata.outputs.metadata_path }}
+            ${{ steps.machine-preflight.outputs.report_path }}
+            ${{ steps.port-matrix.outputs.matrix_summary_path }}
+            ${{ steps.certification-summary.outputs.summary_path }}
+            ${{ steps.port-matrix.outputs.matrix_root }}
+          if-no-files-found: error
