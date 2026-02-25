@@ -25,16 +25,17 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:wrapperWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'
     }
 
-    It 'defines resolve, windows prerequisites, linux parity, linux vip, and summary lanes' {
+    It 'defines resolve, windows prerequisites, linux parity, windows vip signal lane, and summary lanes' {
         $script:coreWorkflowContent | Should -Match '(?m)^\s*resolve-parity-context:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-ppl-32:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-ppl-64:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*linux-parity-projectspec-via-container:\s*$'
-        $script:coreWorkflowContent | Should -Match '(?m)^\s*linux-parity-vip:\s*$'
+        $script:coreWorkflowContent | Should -Match '(?m)^\s*windows-host-vip-build:\s*$'
         $script:coreWorkflowContent | Should -Match '(?m)^\s*gate-summary:\s*$'
         $script:coreWorkflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*user-session,\s*cdev-surface-windows-gate\]'
         $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context\]'
-        $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context,\s*windows-host-ppl-32,\s*windows-host-ppl-64,\s*linux-parity-projectspec-via-container\]'
+        $script:coreWorkflowContent | Should -Match 'needs:\s*\[resolve-parity-context,\s*windows-host-ppl-32,\s*windows-host-ppl-64\]'
+        $script:coreWorkflowContent | Should -Match 'needs:\s*\[windows-host-ppl-32,\s*windows-host-ppl-64,\s*linux-parity-projectspec-via-container,\s*windows-host-vip-build\]'
     }
 
     It 'enforces isolated windows prerequisite workspaces with deterministic cleanup' {
@@ -73,16 +74,24 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '@sha256:'
     }
 
-    It 'enforces Linux VIP parity contract and prerequisite guards' {
+    It 'enforces Windows host VIP signal contract and prerequisite guards' {
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.driver'
         $script:coreWorkflowContent | Should -Match "linux_vip_build\.driver must be 'vipm-cli'"
         $script:coreWorkflowContent | Should -Match 'linux_vip_build\.required_ppl_bitness'
+        $script:coreWorkflowContent | Should -Match 'Run Windows host VIP build via VIPM CLI \(signal-only\)'
+        $script:coreWorkflowContent | Should -Match 'Download linux x64 PPL prerequisite artifact \(optional\)'
         $script:coreWorkflowContent | Should -Match 'vipm_cli_unavailable'
         $script:coreWorkflowContent | Should -Match 'missing_required_ppl_prerequisite'
+        $script:coreWorkflowContent | Should -Match 'missing_linux_ppl_prerequisite'
         $script:coreWorkflowContent | Should -Match 'missing_vipb'
+        $script:coreWorkflowContent | Should -Match 'unsafe_vipb_mutation_root'
+        $script:coreWorkflowContent | Should -Match 'isolated runner temp workspace'
         $script:coreWorkflowContent | Should -Match 'release-notes\.parity\.generated\.md'
         $script:coreWorkflowContent | Should -Match 'Generated fallback parity release notes'
         $script:coreWorkflowContent | Should -Match 'vipm_cli_command_failed'
+        $script:coreWorkflowContent | Should -Match 'vipb-patch-report\.json'
+        $script:coreWorkflowContent | Should -Match 'resource/plugins/lv_icon_linux_x64\.lvlibp'
+        $script:coreWorkflowContent | Should -Match 'windows-host-vip-report\.json'
         $script:coreWorkflowContent | Should -Match 'artifact_role'
         $script:coreWorkflowContent | Should -Match 'signal-only'
         $script:coreWorkflowContent | Should -Not -Match '\bg-cli\b'
@@ -98,7 +107,7 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match 'container_script_non_exit'
         $script:coreWorkflowContent | Should -Match 'phase-checkpoints\.log'
         $script:coreWorkflowContent | Should -Match 'linux-parity-projectspec-classification\.json'
-        $script:coreWorkflowContent | Should -Match 'linux-parity-vip-report\.json'
+        $script:coreWorkflowContent | Should -Match 'windows-host-vip-report\.json'
         $script:coreWorkflowContent | Should -Match 'Linux Gate Summary'
     }
 }

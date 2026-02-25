@@ -911,10 +911,11 @@ jobs:
           path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-projectspec
           if-no-files-found: error
 
-  linux-parity-vip:
-    name: Linux Parity VIP Build (signal-only)
-    needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64, linux-parity-projectspec-via-container]
-    runs-on: ubuntu-latest
+  windows-host-vip-build:
+    name: Windows Host VIP Build (signal-only)
+    needs: [resolve-parity-context, windows-host-ppl-32, windows-host-ppl-64]
+    continue-on-error: true
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, user-session, cdev-surface-windows-gate]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -931,180 +932,271 @@ jobs:
           name: linux-gate-windows-ppl-64-${{ github.run_id }}
           path: ${{ runner.temp }}/linux-gate/windows-ppl-64
 
-      - name: Run Linux parity VIP build via VIPM CLI (signal-only)
-        shell: bash
+      - name: Download linux x64 PPL prerequisite artifact (optional)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-gate-linux-ppl-64-${{ github.run_id }}
+          path: ${{ runner.temp }}/linux-gate/linux-ppl-64
+
+      - name: Run Windows host VIP build via VIPM CLI (signal-only)
+        shell: powershell
         env:
           RELEASE_BUILD_LANE: ${{ needs.resolve-parity-context.outputs.lane_id }}
           ICON_EDITOR_SOURCE_URL: ${{ needs.resolve-parity-context.outputs.icon_editor_source_url }}
           ICON_EDITOR_PINNED_SHA: ${{ needs.resolve-parity-context.outputs.icon_editor_pinned_sha }}
-          PARITY_LABVIEW_YEAR: ${{ needs.resolve-parity-context.outputs.lvcontainer_year }}
+          REQUIRED_LABVIEW_YEAR: ${{ needs.resolve-parity-context.outputs.release_required_year }}
           LINUX_VIP_DRIVER: ${{ needs.resolve-parity-context.outputs.linux_vip_driver }}
           LINUX_VIP_ARTIFACT_ROLE: ${{ needs.resolve-parity-context.outputs.linux_vip_artifact_role }}
           LINUX_VIP_REQUIRED_BITNESSES: ${{ needs.resolve-parity-context.outputs.linux_vip_required_ppl_bitnesses }}
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = 'Stop'
 
-          artifact_root="$GITHUB_WORKSPACE/artifacts/linux-image-gate/parity/linux-vip"
-          mkdir -p "$artifact_root"
-          report_path="$artifact_root/linux-parity-vip-report.json"
-          vip_log_path="$artifact_root/vip-build.log"
-          preflight_log_path="$artifact_root/vip-preflight.log"
-
-          x86_ppl="$(find "$RUNNER_TEMP/linux-gate/windows-ppl-32" -type f -name 'lv_icon_x86.lvlibp' | head -n1 || true)"
-          x64_ppl="$(find "$RUNNER_TEMP/linux-gate/windows-ppl-64" -type f -name 'lv_icon_x64.lvlibp' | head -n1 || true)"
-          if [[ -z "$x86_ppl" || -z "$x64_ppl" ]]; then
-            echo "Missing required PPL prerequisites. x86='$x86_ppl' x64='$x64_ppl'" | tee -a "$preflight_log_path"
-            cat > "$report_path" <<JSON
-          {
-            "status": "fail",
-            "reason": "missing_required_ppl_prerequisite",
-            "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
-            "x86_ppl": "$x86_ppl",
-            "x64_ppl": "$x64_ppl",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\linux-image-gate\parity\windows-vip'
+          if (Test-Path -LiteralPath $artifactRoot -PathType Container) {
+            Remove-Item -LiteralPath $artifactRoot -Recurse -Force
           }
-          JSON
-            exit 1
-          fi
+          New-Item -Path $artifactRoot -ItemType Directory -Force | Out-Null
 
-          clone_root="$RUNNER_TEMP/linux-gate/icon-editor"
-          rm -rf "$clone_root"
-          git clone --quiet --no-tags "$ICON_EDITOR_SOURCE_URL" "$clone_root"
-          git -C "$clone_root" checkout --quiet --detach "$ICON_EDITOR_PINNED_SHA"
+          $reportPath = Join-Path $artifactRoot 'windows-host-vip-report.json'
+          $vipLogPath = Join-Path $artifactRoot 'vip-build.log'
+          $preflightLogPath = Join-Path $artifactRoot 'vip-preflight.log'
 
-          vipb_path="$(find "$clone_root" -type f -name '*.vipb' | head -n1 || true)"
-          release_notes_path="$(find "$clone_root" -type f \( -iname 'release-notes*.md' -o -iname 'release_notes*.md' \) | head -n1 || true)"
-          if [[ -z "$vipb_path" ]]; then
-            echo "VIP preflight missing VIPB. vipb='$vipb_path'" | tee -a "$preflight_log_path"
-            cat > "$report_path" <<JSON
-          {
-            "status": "fail",
-            "reason": "missing_vipb",
-            "vipb_path": "$vipb_path",
-            "release_notes_path": "$release_notes_path",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+          function Write-PreflightLog {
+            param([string]$Message)
+            $timestamp = (Get-Date).ToUniversalTime().ToString('o')
+            $line = "[{0}] {1}" -f $timestamp, $Message
+            Add-Content -LiteralPath $preflightLogPath -Value $line -Encoding utf8
+            Write-Host $line
           }
-          JSON
-            exit 1
-          fi
 
-          if [[ -z "$release_notes_path" ]]; then
-            release_notes_path="$clone_root/docs/release-notes.parity.generated.md"
-            mkdir -p "$(dirname "$release_notes_path")"
-            generated_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            {
-              echo "# Linux parity release notes (generated)"
-              echo "- source_repo: $ICON_EDITOR_SOURCE_URL"
-              echo "- pinned_sha: $ICON_EDITOR_PINNED_SHA"
-              echo "- lane: $RELEASE_BUILD_LANE"
-              echo "- generated_utc: $generated_utc"
-            } > "$release_notes_path"
-            echo "Generated fallback parity release notes at '$release_notes_path'." | tee -a "$preflight_log_path"
-          fi
+          function Write-VipReport {
+            param(
+              [Parameter(Mandatory = $true)][string]$Status,
+              [Parameter(Mandatory = $true)][string]$Reason,
+              [string]$X86Ppl = '',
+              [string]$X64Ppl = '',
+              [string]$LinuxX64Ppl = '',
+              [string]$VipbPath = '',
+              [string]$ReleaseNotesPath = '',
+              [string]$VipOutput = '',
+              [int]$VipmExitCode = -1
+            )
 
-          if ! command -v vipm >/dev/null 2>&1; then
-            echo "vipm_cli_unavailable: vipm CLI is not available on this runner." | tee -a "$preflight_log_path"
-            cat > "$report_path" <<JSON
-          {
-            "status": "fail",
-            "reason": "vipm_cli_unavailable",
-            "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
-            "x86_ppl": "$x86_ppl",
-            "x64_ppl": "$x64_ppl",
-            "vipb_path": "$vipb_path",
-            "release_notes_path": "$release_notes_path",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+            $payload = [ordered]@{
+              status = $Status
+              reason = $Reason
+              required_ppl_bitness = [string]$env:LINUX_VIP_REQUIRED_BITNESSES
+              x86_ppl = $X86Ppl
+              x64_ppl = $X64Ppl
+              linux_x64_ppl = $LinuxX64Ppl
+              vipb_path = $VipbPath
+              release_notes_path = $ReleaseNotesPath
+              vip_output = $VipOutput
+              vipm_exit_code = $VipmExitCode
+              artifact_role = [string]$env:LINUX_VIP_ARTIFACT_ROLE
+              driver = [string]$env:LINUX_VIP_DRIVER
+              release_build_lane = [string]$env:RELEASE_BUILD_LANE
+            }
+            $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
           }
-          JSON
-            exit 1
-          fi
 
-          parity_vip_root="$artifact_root/vip"
-          mkdir -p "$parity_vip_root"
-          vip_cmd=(vipm --labview-version "$PARITY_LABVIEW_YEAR" --labview-bitness 64 build "$vipb_path" --output "$parity_vip_root")
-          echo "Executing Linux parity VIP build command: ${vip_cmd[*]}" | tee -a "$vip_log_path"
-          set +e
-          "${vip_cmd[@]}" >> "$vip_log_path" 2>&1
-          vip_exit=$?
-          set -e
+          $x86Ppl = @(
+            Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'linux-gate\windows-ppl-32') -Recurse -Filter 'lv_icon_x86.lvlibp' -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          $x64Ppl = @(
+            Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'linux-gate\windows-ppl-64') -Recurse -Filter 'lv_icon_x64.lvlibp' -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
 
-          if [[ "$vip_exit" -ne 0 ]]; then
-            cat > "$report_path" <<JSON
-          {
-            "status": "fail",
-            "reason": "vipm_cli_command_failed",
-            "vipm_exit_code": $vip_exit,
-            "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
-            "x86_ppl": "$x86_ppl",
-            "x64_ppl": "$x64_ppl",
-            "vipb_path": "$vipb_path",
-            "release_notes_path": "$release_notes_path",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+          if ([string]::IsNullOrWhiteSpace($x86Ppl) -or [string]::IsNullOrWhiteSpace($x64Ppl)) {
+            Write-PreflightLog ("Missing required PPL prerequisites. x86='{0}' x64='{1}'" -f $x86Ppl, $x64Ppl)
+            Write-VipReport -Status 'fail' -Reason 'missing_required_ppl_prerequisite' -X86Ppl ([string]$x86Ppl) -X64Ppl ([string]$x64Ppl)
+            throw 'missing_required_ppl_prerequisite'
           }
-          JSON
-            exit 1
-          fi
 
-          built_vip="$(find "$parity_vip_root" -type f -name '*.vip' | head -n1 || true)"
-          if [[ -z "$built_vip" ]]; then
-            cat > "$report_path" <<JSON
-          {
-            "status": "fail",
-            "reason": "vip_output_missing",
-            "vipm_exit_code": $vip_exit,
-            "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
-            "x86_ppl": "$x86_ppl",
-            "x64_ppl": "$x64_ppl",
-            "vipb_path": "$vipb_path",
-            "release_notes_path": "$release_notes_path",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+          $cloneRoot = Join-Path $env:RUNNER_TEMP 'linux-gate\icon-editor'
+          if ($cloneRoot -match '^[A-Za-z]:\\dev(\\|$)') {
+            throw "Unsafe clone root '$cloneRoot'. VIP build must use isolated runner temp workspace, never C:\\dev."
           }
-          JSON
-            exit 1
-          fi
-
-          cat > "$report_path" <<JSON
-          {
-            "status": "pass",
-            "reason": "none",
-            "required_ppl_bitness": "$LINUX_VIP_REQUIRED_BITNESSES",
-            "x86_ppl": "$x86_ppl",
-            "x64_ppl": "$x64_ppl",
-            "vipb_path": "$vipb_path",
-            "release_notes_path": "$release_notes_path",
-            "vip_output": "$built_vip",
-            "artifact_role": "$LINUX_VIP_ARTIFACT_ROLE",
-            "driver": "$LINUX_VIP_DRIVER"
+          if (Test-Path -LiteralPath $cloneRoot -PathType Container) {
+            Remove-Item -LiteralPath $cloneRoot -Recurse -Force
           }
-          JSON
+          & git clone --quiet --no-tags $env:ICON_EDITOR_SOURCE_URL $cloneRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to clone icon-editor source into isolated workspace root '$cloneRoot'."
+          }
+          & git -C $cloneRoot checkout --quiet --detach $env:ICON_EDITOR_PINNED_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout pinned SHA '$($env:ICON_EDITOR_PINNED_SHA)' in isolated workspace root '$cloneRoot'."
+          }
+          Write-PreflightLog ("Using isolated icon-editor clone root: {0}" -f $cloneRoot)
 
-      - name: Upload linux parity VIP artifacts (attempt 1)
+          $vipbPath = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -Filter '*.vipb' -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          $releaseNotesPath = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^(release[-_]notes.*)\.md$' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+
+          if ([string]::IsNullOrWhiteSpace($vipbPath)) {
+            Write-PreflightLog 'VIP preflight missing VIPB.'
+            Write-VipReport -Status 'fail' -Reason 'missing_vipb' -X86Ppl $x86Ppl -X64Ppl $x64Ppl
+            throw 'missing_vipb'
+          }
+          if ($vipbPath -match '^[A-Za-z]:\\dev(\\|$)') {
+            Write-VipReport -Status 'fail' -Reason 'unsafe_vipb_mutation_root' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -VipbPath $vipbPath
+            throw "Unsafe VIPB mutation target '$vipbPath'. VIPB must be mutated only inside isolated runner temp workspace."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseNotesPath)) {
+            $releaseNotesPath = Join-Path $cloneRoot 'docs\release-notes.parity.generated.md'
+            $releaseNotesRoot = Split-Path -Parent $releaseNotesPath
+            if (-not (Test-Path -LiteralPath $releaseNotesRoot -PathType Container)) {
+              New-Item -Path $releaseNotesRoot -ItemType Directory -Force | Out-Null
+            }
+            @(
+              '# Linux parity release notes (generated)'
+              "- source_repo: $($env:ICON_EDITOR_SOURCE_URL)"
+              "- pinned_sha: $($env:ICON_EDITOR_PINNED_SHA)"
+              "- lane: $($env:RELEASE_BUILD_LANE)"
+              "- generated_utc: $((Get-Date).ToUniversalTime().ToString('o'))"
+            ) | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
+            Write-PreflightLog ("Generated fallback parity release notes at '{0}'." -f $releaseNotesPath)
+          }
+
+          $linuxX64Ppl = @(
+            Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'linux-gate\linux-ppl-64') -Recurse -Filter 'lv_icon_linux_x64.lvlibp' -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($linuxX64Ppl)) {
+            Write-PreflightLog 'Missing required linux x64 PPL prerequisite.'
+            Write-VipReport -Status 'fail' -Reason 'missing_linux_ppl_prerequisite' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl ([string]$linuxX64Ppl) -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath
+            throw 'missing_linux_ppl_prerequisite'
+          }
+
+          $pluginRoot = Join-Path $cloneRoot 'resource\plugins'
+          if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+            New-Item -Path $pluginRoot -ItemType Directory -Force | Out-Null
+          }
+          Copy-Item -LiteralPath $x86Ppl -Destination (Join-Path $pluginRoot 'lv_icon_x86.lvlibp') -Force
+          Copy-Item -LiteralPath $x64Ppl -Destination (Join-Path $pluginRoot 'lv_icon_x64.lvlibp') -Force
+          Copy-Item -LiteralPath $linuxX64Ppl -Destination (Join-Path $pluginRoot 'lv_icon_linux_x64.lvlibp') -Force
+
+          $vipbPatchReportPath = Join-Path $artifactRoot 'vipb-patch-report.json'
+          $vipbContent = Get-Content -LiteralPath $vipbPath -Raw
+          $vipbBeforeHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $linuxVipbPathLiteral = 'resource/plugins/lv_icon_linux_x64.lvlibp'
+          $linuxVipbPathPattern = '<Path>resource/plugins/lv_icon_linux_x64\.lvlibp</Path>'
+          $vipbAddedLinuxPath = $false
+          if ($vipbContent -notmatch $linuxVipbPathPattern) {
+            $linuxDestinationOverride = @"
+      <Destination_Overrides>
+        <Path>resource/plugins/lv_icon_linux_x64.lvlibp</Path>
+        <Destination>0</Destination>
+        <Additional_Destination>true</Additional_Destination>
+        <Additional_Destination_Index>0</Additional_Destination_Index>
+      </Destination_Overrides>
+"@
+            $updatedVipbContent = [regex]::Replace(
+              $vipbContent,
+              '(?s)(\s*<Destination_Overrides>\s*<Path>resource/plugins/lv_icon_x86\.lvlibp</Path>.*?</Destination_Overrides>)',
+              ('$1' + [Environment]::NewLine + $linuxDestinationOverride),
+              1
+            )
+            if ($updatedVipbContent -eq $vipbContent) {
+              $updatedVipbContent = [regex]::Replace(
+                $vipbContent,
+                '(\s*<Password_Overrides>)',
+                ($linuxDestinationOverride + '$1'),
+                1
+              )
+            }
+            $vipbContent = $updatedVipbContent
+            $vipbContent | Set-Content -LiteralPath $vipbPath -Encoding utf8
+            $vipbAddedLinuxPath = $true
+          }
+          $vipbAfterHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            status = 'pass'
+            clone_root = $cloneRoot
+            vipb_path = $vipbPath
+            linux_vipb_path = $linuxVipbPathLiteral
+            linux_path_present = [bool]([regex]::IsMatch((Get-Content -LiteralPath $vipbPath -Raw), $linuxVipbPathPattern))
+            linux_path_added = $vipbAddedLinuxPath
+            vipb_sha256_before = $vipbBeforeHash
+            vipb_sha256_after = $vipbAfterHash
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $vipbPatchReportPath -Encoding utf8
+
+          $vipm = Get-Command -Name 'vipm' -ErrorAction SilentlyContinue
+          if ($null -eq $vipm -or [string]::IsNullOrWhiteSpace([string]$vipm.Source)) {
+            Write-PreflightLog 'vipm_cli_unavailable: vipm CLI is not available on this runner.'
+            Write-VipReport -Status 'fail' -Reason 'vipm_cli_unavailable' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath
+            throw 'vipm_cli_unavailable'
+          }
+
+          $vipmExe = [string]$vipm.Source
+          $env:VIPM_COMMUNITY_EDITION = 'true'
+          & $vipmExe activate | Tee-Object -FilePath $preflightLogPath -Append | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-VipReport -Status 'fail' -Reason 'vipm_activate_failed' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipmExitCode $LASTEXITCODE
+            throw "vipm activate failed with exit code $LASTEXITCODE."
+          }
+
+          $outputRoot = Join-Path $artifactRoot 'vip'
+          New-Item -Path $outputRoot -ItemType Directory -Force | Out-Null
+          $requiredLabviewYear = [string]$env:REQUIRED_LABVIEW_YEAR
+          if ([string]::IsNullOrWhiteSpace($requiredLabviewYear) -or $requiredLabviewYear -notmatch '^\d{4}$') {
+            $requiredLabviewYear = '2025'
+          }
+
+          $vipCmd = @('--labview-version', $requiredLabviewYear, '--labview-bitness', '64', 'build', $vipbPath, '--output', $outputRoot)
+          Write-PreflightLog ("Executing Windows host VIP build command: {0} {1}" -f $vipmExe, ($vipCmd -join ' '))
+          & $vipmExe @vipCmd | Tee-Object -FilePath $vipLogPath -Append | Out-Null
+          $vipExit = [int]$LASTEXITCODE
+          if ($vipExit -ne 0) {
+            Write-VipReport -Status 'fail' -Reason 'vipm_cli_command_failed' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipmExitCode $vipExit
+            throw "vipm build failed with exit code $vipExit."
+          }
+
+          $builtVip = @(
+            Get-ChildItem -Path $outputRoot -Recurse -Filter '*.vip' -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($builtVip)) {
+            Write-VipReport -Status 'fail' -Reason 'vip_output_missing' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipmExitCode $vipExit
+            throw 'vip_output_missing'
+          }
+
+          Write-VipReport -Status 'pass' -Reason 'none' -X86Ppl $x86Ppl -X64Ppl $x64Ppl -LinuxX64Ppl $linuxX64Ppl -VipbPath $vipbPath -ReleaseNotesPath $releaseNotesPath -VipOutput $builtVip -VipmExitCode $vipExit
+
+      - name: Upload windows host VIP artifacts (attempt 1)
         if: always()
-        id: upload_linux_parity_vip_artifacts_attempt_1
+        id: upload_windows_host_vip_artifacts_attempt_1
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: linux-labview-image-gate-vip-${{ github.run_id }}
-          path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-vip
+          path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/windows-vip
           if-no-files-found: warn
 
-      - name: Upload linux parity VIP artifacts (attempt 2)
-        if: always() && steps.upload_linux_parity_vip_artifacts_attempt_1.outcome == 'failure'
+      - name: Upload windows host VIP artifacts (attempt 2)
+        if: always() && steps.upload_windows_host_vip_artifacts_attempt_1.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: linux-labview-image-gate-vip-${{ github.run_id }}
-          path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/linux-vip
+          path: ${{ github.workspace }}/artifacts/linux-image-gate/parity/windows-vip
           if-no-files-found: warn
 
   gate-summary:
     name: Linux Gate Summary
     if: always()
-    needs: [windows-host-ppl-32, windows-host-ppl-64, linux-parity-projectspec-via-container, linux-parity-vip]
+    needs: [windows-host-ppl-32, windows-host-ppl-64, linux-parity-projectspec-via-container, windows-host-vip-build]
     runs-on: ubuntu-latest
     outputs:
       gate_status: ${{ steps.evaluate.outputs.gate_status }}
@@ -1119,7 +1211,7 @@ jobs:
           ppl32_result='${{ needs.windows-host-ppl-32.result }}'
           ppl64_result='${{ needs.windows-host-ppl-64.result }}'
           projectspec_result='${{ needs.linux-parity-projectspec-via-container.result }}'
-          vip_result='${{ needs.linux-parity-vip.result }}'
+          vip_result='${{ needs.windows-host-vip-build.result }}'
 
           gate_status='fail'
           if [[ "$ppl32_result" == 'success' && "$ppl64_result" == 'success' && "$projectspec_result" == 'success' ]]; then
@@ -1136,12 +1228,12 @@ jobs:
             echo "- Windows host PPL 32 prerequisite: $ppl32_result"
             echo "- Windows host PPL 64 prerequisite: $ppl64_result"
             echo "- Linux parity project-spec lane: $projectspec_result"
-            echo "- Linux parity VIP lane (signal-only): $vip_result"
+            echo "- Windows host VIP lane (signal-only): $vip_result"
             echo "- Overall status: $gate_status"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$vip_result" != 'success' ]]; then
-            echo "::warning::Linux parity VIP signal lane failed. This is non-blocking until deterministic in-image VIPM CLI packaging is available."
+            echo "::warning::Windows host VIP signal lane failed. This is non-blocking while Linux parity remains projectspec-only."
           fi
 
           if [[ "$gate_status" != 'pass' ]]; then
