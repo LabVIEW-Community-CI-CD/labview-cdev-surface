@@ -295,6 +295,7 @@ foreach ($setup in $selectedSetups) {
 
     $record = [ordered]@{
         setup_name = $setupNameToken
+        machine_name = [System.Environment]::MachineName
         runner_labels_csv = $runnerLabelsCsv
         start_docker_desktop_if_needed = $startDockerDesktop
         switch_docker_context = $switchDockerContext

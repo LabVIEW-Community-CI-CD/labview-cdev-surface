@@ -21,6 +21,7 @@ Execution contract:
 3. Wait for all dispatched runs to complete.
 4. Post a comment on the issue with:
    - setup name
+   - machine name
    - run URL
    - conclusion
    - certification artifact URL

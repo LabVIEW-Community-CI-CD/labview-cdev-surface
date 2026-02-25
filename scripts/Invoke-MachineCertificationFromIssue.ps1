@@ -31,11 +31,12 @@ function Get-IssueRepositorySlug {
 
 function New-MarkdownTable {
     param([object[]]$Rows)
-    $lines = @('| Setup | Run URL | Status | Conclusion |')
-    $lines += '|---|---|---|---|'
+    $lines = @('| Setup | Machine | Run URL | Status | Conclusion |')
+    $lines += '|---|---|---|---|---|'
     foreach ($row in $Rows) {
         $urlCell = if ([string]::IsNullOrWhiteSpace([string]$row.run_url)) { 'n/a' } else { "[run]($([string]$row.run_url))" }
-        $lines += ("| {0} | {1} | {2} | {3} |" -f [string]$row.setup_name, $urlCell, [string]$row.status, [string]$row.conclusion)
+        $machineCell = if ([string]::IsNullOrWhiteSpace([string]$row.machine_name)) { 'unknown' } else { [string]$row.machine_name }
+        $lines += ("| {0} | {1} | {2} | {3} | {4} |" -f [string]$row.setup_name, $machineCell, $urlCell, [string]$row.status, [string]$row.conclusion)
     }
     return ($lines -join [Environment]::NewLine)
 }
@@ -284,6 +285,7 @@ function Get-SetupRowsFromRun {
         if ($null -eq $match) {
             $rows += [pscustomobject]@{
                 setup_name = [string]$setup
+                machine_name = 'unknown'
                 run_id = [string]$RunId
                 run_url = [string]$runView.url
                 status = [string]$runView.status
@@ -294,6 +296,7 @@ function Get-SetupRowsFromRun {
 
         $rows += [pscustomobject]@{
             setup_name = [string]$setup
+            machine_name = [string]$match.runnerName
             run_id = [string]$RunId
             run_url = [string]$match.url
             status = [string]$match.status
@@ -361,6 +364,7 @@ $effectiveRecorderName = if (-not [string]::IsNullOrWhiteSpace($RecorderName)) {
 } else {
     'cdev-certification-recorder'
 }
+$orchestratorMachineName = [System.Environment]::MachineName
 
 if ([string]::Equals($effectiveRecorderName, [string]$repoInfo.owner, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "recorder_name must differ from repository owner ('$($repoInfo.owner)')."
@@ -406,6 +410,7 @@ $startCommentLines = @(
     "- issue: $IssueUrl",
     "- workflow: $workflowFile",
     "- ref: $ref",
+    "- orchestrator_machine: $orchestratorMachineName",
     "- started_utc: $($sessionStartedUtc.ToString('o'))",
     "- trigger_mode: $triggerMode",
     "- stale_open_session_count: $(@($staleOpenSessions).Count)",
@@ -544,6 +549,7 @@ if (-not $SkipWatch) {
             foreach ($setupName in $expectedSetupsForRun) {
                 $finalRows += [pscustomobject]@{
                     setup_name = [string]$setupName
+                    machine_name = 'unknown'
                     run_id = [string]$runId
                     run_url = ''
                     status = 'unknown'
@@ -557,6 +563,7 @@ if (-not $SkipWatch) {
         foreach ($setupName in $setupNames) {
             $finalRows += [pscustomobject]@{
                 setup_name = [string]$setupName
+                machine_name = 'unknown'
                 run_id = ''
                 run_url = ''
                 status = 'unknown'
@@ -603,6 +610,7 @@ $report = [ordered]@{
     issue_url = $IssueUrl
     repository = $repositorySlug
     recorder_name = $effectiveRecorderName
+    orchestrator_machine = $orchestratorMachineName
     workflow = $workflowFile
     ref = $ref
     trigger_mode = $triggerMode
@@ -647,6 +655,7 @@ $report | ConvertTo-Json -Depth 8 | Write-Output
                 "- issue: $IssueUrl",
                 "- workflow: $workflowFile",
                 "- ref: $ref",
+                "- orchestrator_machine: $orchestratorMachineName",
                 "- started_utc: $($sessionStartedUtc.ToString('o'))",
                 "- ended_utc: $($sessionEndedUtc.ToString('o'))",
                 "- duration_seconds: $durationSeconds",

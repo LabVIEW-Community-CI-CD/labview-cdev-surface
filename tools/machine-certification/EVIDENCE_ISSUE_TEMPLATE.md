@@ -43,10 +43,10 @@ When merged to `main`, change `ref` to `main`.
 9. Ensure Docker Desktop auto-start is enabled for each setup (`start_docker_desktop_if_needed=true`).
 
 ## Evidence
-| Setup | Run URL | Conclusion | Artifact URL | Certified |
-|---|---|---|---|---|
-| legacy-2020-desktop-linux | pending | pending | pending | pending |
-| legacy-2020-desktop-windows | pending | pending | pending | pending |
+| Setup | Machine | Run URL | Conclusion | Artifact URL | Certified |
+|---|---|---|---|---|---|
+| legacy-2020-desktop-linux | pending | pending | pending | pending | pending |
+| legacy-2020-desktop-windows | pending | pending | pending | pending | pending |
 
 ## Failure Classification
 - runner_label_mismatch
