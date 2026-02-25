@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -108,6 +108,32 @@ function Resolve-Tool {
     }
 }
 
+function Invoke-NativeCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter()][string[]]$Arguments = @()
+    )
+
+    $savedPreference = $ErrorActionPreference
+    $output = ''
+    $exitCode = 1
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = (& $Executable @Arguments 2>&1 | Out-String)
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    } catch {
+        $output = ($_ | Out-String)
+        $exitCode = 1
+    } finally {
+        $ErrorActionPreference = $savedPreference
+    }
+
+    return [pscustomobject]@{
+        output = ([string]$output).Trim()
+        exit_code = $exitCode
+    }
+}
+
 foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli', 'vipm', 'docker')) {
     $resolved = Resolve-Tool -Name $commandName -FallbackPaths @($toolFallbackMap[$commandName])
     $resolvedTools[$commandName] = $resolved
@@ -141,8 +167,9 @@ $dockerContextExists = $false
 $dockerContextInspectOutput = ''
 $dockerTool = $resolvedTools['docker']
 if ($null -ne $dockerTool -and [bool]$dockerTool.found) {
-    $dockerContextInspectOutput = (& $dockerTool.path context inspect $DockerContext 2>&1 | Out-String)
-    if ($LASTEXITCODE -eq 0) {
+    $inspectResult = Invoke-NativeCapture -Executable $dockerTool.path -Arguments @('context', 'inspect', $DockerContext)
+    $dockerContextInspectOutput = [string]$inspectResult.output
+    if ([int]$inspectResult.exit_code -eq 0) {
         $dockerContextExists = $true
     }
 }
@@ -155,8 +182,9 @@ Add-Check `
 $dockerContextReachable = $false
 $dockerInfoDetail = ''
 if ($dockerContextExists) {
-    $dockerInfoOutput = (& $dockerTool.path --context $DockerContext info --format '{{.ServerVersion}}|{{.OSType}}' 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -eq 0) {
+    $infoResult = Invoke-NativeCapture -Executable $dockerTool.path -Arguments @('--context', $DockerContext, 'info', '--format', '{{.ServerVersion}}|{{.OSType}}')
+    $dockerInfoOutput = [string]$infoResult.output
+    if ([int]$infoResult.exit_code -eq 0) {
         $dockerContextReachable = $true
         $dockerInfoDetail = $dockerInfoOutput
     } else {

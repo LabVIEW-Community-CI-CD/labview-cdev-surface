@@ -7,6 +7,11 @@ on:
         description: Optional branch or SHA to evaluate. Defaults to workflow ref.
         required: false
         type: string
+      setup_name:
+        description: Logical setup profile name for evidence.
+        required: false
+        default: manual-dispatch
+        type: string
       runner_labels_json:
         description: JSON array of runner labels used for certification job routing.
         required: true
@@ -25,13 +30,16 @@ on:
       skip_host_ini_mutation:
         description: Skip host LabVIEW.ini updates during matrix execution.
         required: false
-        default: false
+        default: true
         type: boolean
       skip_override_phase:
         description: Skip unofficial override verification phase in matrix execution.
         required: false
         default: false
         type: boolean
+  push:
+    branches:
+      - cert/self-hosted-machine-certification-evidence
 
 permissions:
   contents: read
@@ -42,26 +50,86 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve-setups:
+    name: Resolve certification setups
+    runs-on: ubuntu-latest
+    outputs:
+      setups_json: ${{ steps.resolve.outputs.setups_json }}
+    steps:
+      - id: resolve
+        name: Build setup matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            jq -nc \
+              --arg setup_name "${{ github.event.inputs.setup_name }}" \
+              --arg labels "${{ github.event.inputs.runner_labels_json }}" \
+              --arg year "${{ github.event.inputs.expected_labview_year }}" \
+              --arg docker_context "${{ github.event.inputs.docker_context }}" \
+              --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
+              --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
+              --arg target_ref "${{ github.event.inputs.ref }}" \
+              '[{
+                setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
+                runner_labels_json: $labels,
+                expected_labview_year: $year,
+                docker_context: $docker_context,
+                skip_host_ini_mutation: $skip_ini,
+                skip_override_phase: $skip_override,
+                target_ref: $target_ref
+              }]' > matrix.json
+          else
+            jq -nc '[
+              {
+                setup_name: "legacy-2020-desktop-linux",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
+                expected_labview_year: "2020",
+                docker_context: "desktop-linux",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              },
+              {
+                setup_name: "legacy-2020-desktop-windows",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\"]",
+                expected_labview_year: "2020",
+                docker_context: "desktop-windows",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              }
+            ]' > matrix.json
+          fi
+
+          echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
+
   certify:
-    name: Self-Hosted Machine Certification
-    runs-on: ${{ fromJson(inputs.runner_labels_json) }}
+    name: Self-Hosted Machine Certification (${{ matrix.setup_name }})
+    needs: resolve-setups
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve-setups.outputs.setups_json) }}
+    runs-on: ${{ fromJson(matrix.runner_labels_json) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Resolve workflow_dispatch ref override
-        if: ${{ inputs.ref != '' }}
+        if: ${{ matrix.target_ref != '' }}
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & git fetch --prune origin "${{ inputs.ref }}"
+          & git fetch --prune origin "${{ matrix.target_ref }}"
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to fetch requested ref '${{ inputs.ref }}'."
+            throw "Failed to fetch requested ref '${{ matrix.target_ref }}'."
           }
 
           & git checkout --force FETCH_HEAD
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to checkout requested ref '${{ inputs.ref }}'."
+            throw "Failed to checkout requested ref '${{ matrix.target_ref }}'."
           }
 
       - id: runner-metadata
@@ -69,7 +137,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $metadataRoot = Join-Path $env:RUNNER_TEMP 'machine-certification'
+          $metadataRoot = Join-Path $env:RUNNER_TEMP ("machine-certification-{0}" -f '${{ matrix.setup_name }}')
           New-Item -Path $metadataRoot -ItemType Directory -Force | Out-Null
           $metadataPath = Join-Path $metadataRoot 'runner-metadata.json'
 
@@ -90,12 +158,13 @@ jobs:
             workflow = [string]$env:GITHUB_WORKFLOW
             run_id = [string]$env:GITHUB_RUN_ID
             run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            setup_name = '${{ matrix.setup_name }}'
             runner_name = [string]$env:RUNNER_NAME
             runner_os = [string]$env:RUNNER_OS
             runner_arch = [string]$env:RUNNER_ARCH
             runner_workspace = $runnerWorkspace
             runner_root = $activeRunnerRoot
-            runner_labels_json = '${{ inputs.runner_labels_json }}'
+            runner_labels_json = '${{ matrix.runner_labels_json }}'
             session_name = $sessionName
             user_interactive = [System.Environment]::UserInteractive
           } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding utf8
@@ -110,8 +179,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'machine-preflight-report.json'
           & "$env:GITHUB_WORKSPACE\scripts\Assert-InstallerHarnessMachinePreflight.ps1" `
-            -ExpectedLabviewYear '${{ inputs.expected_labview_year }}' `
-            -DockerContext '${{ inputs.docker_context }}' `
+            -ExpectedLabviewYear '${{ matrix.expected_labview_year }}' `
+            -DockerContext '${{ matrix.docker_context }}' `
             -DockerCheckSeverity warning `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
@@ -188,10 +257,10 @@ jobs:
             OutputPath = $outputRoot
           }
 
-          if ([System.Convert]::ToBoolean('${{ inputs.skip_host_ini_mutation }}')) {
+          if ([System.Convert]::ToBoolean('${{ matrix.skip_host_ini_mutation }}')) {
             $params.SkipHostIniMutation = $true
           }
-          if ([System.Convert]::ToBoolean('${{ inputs.skip_override_phase }}')) {
+          if ([System.Convert]::ToBoolean('${{ matrix.skip_override_phase }}')) {
             $params.SkipOverridePhase = $true
           }
 
@@ -223,15 +292,16 @@ jobs:
             workflow = [string]$env:GITHUB_WORKFLOW
             run_id = [string]$env:GITHUB_RUN_ID
             run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            setup_name = '${{ matrix.setup_name }}'
             runner_name = [string]$env:RUNNER_NAME
-            requested_runner_labels_json = '${{ inputs.runner_labels_json }}'
+            requested_runner_labels_json = '${{ matrix.runner_labels_json }}'
             icon_editor_pinned_sha = '${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}'
-            expected_labview_year = '${{ inputs.expected_labview_year }}'
-            docker_context = '${{ inputs.docker_context }}'
+            expected_labview_year = '${{ matrix.expected_labview_year }}'
+            docker_context = '${{ matrix.docker_context }}'
             matrix = $matrixSummary.summary
             machine_preflight_status = [string]$preflightReport.status
             certified = (
-              [string]$preflightReport.status -eq 'pass' -and
+              [string]$preflightReport.status -eq 'succeeded' -and
               [int]$matrixSummary.summary.strict_failures -eq 0 -and
               [int]$matrixSummary.summary.override_failures -eq 0 -and
               @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
@@ -243,9 +313,10 @@ jobs:
           @(
             "## Self-Hosted Machine Certification",
             "",
-            "- runner: `${{ env.RUNNER_NAME }}`",
-            "- labels: `${{ inputs.runner_labels_json }}`",
-            "- icon-editor pinned sha: `${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}`",
+            "- setup: $($certification.setup_name)",
+            "- runner: $($certification.runner_name)",
+            "- labels: $($certification.requested_runner_labels_json)",
+            "- icon-editor pinned sha: $($certification.icon_editor_pinned_sha)",
             "- strict failures: $($matrixSummary.summary.strict_failures)",
             "- override failures: $($matrixSummary.summary.override_failures)",
             "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
@@ -261,10 +332,10 @@ jobs:
 
       - name: Upload certification artifacts
         if: always()
-        uses: ./.github/actions/upload-artifact-retry
+        uses: actions/upload-artifact@v4
         with:
-          artifact-name: self-hosted-machine-certification-${{ github.run_id }}
-          artifact-path: |
+          name: self-hosted-machine-certification-${{ matrix.setup_name }}-${{ github.run_id }}
+          path: |
             ${{ steps.runner-metadata.outputs.metadata_path }}
             ${{ steps.machine-preflight.outputs.report_path }}
             ${{ steps.port-matrix.outputs.matrix_summary_path }}

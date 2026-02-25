@@ -1,0 +1,48 @@
+# Runner Configuration Starting Prompt
+
+Use this prompt with Codex to configure and certify a new self-hosted machine from a single GitHub issue.
+
+```
+Use issue-driven self-hosted machine certification for LabVIEW cdev surface.
+
+Inputs:
+- Issue URL: <paste issue URL>
+
+Execution contract:
+1. Read the issue config block between <!-- CERT_CONFIG_START --> and <!-- CERT_CONFIG_END -->.
+2. Run `scripts/Invoke-MachineCertificationFromIssue.ps1 -IssueUrl <url>`.
+3. Wait for all dispatched runs to complete.
+4. Post a comment on the issue with:
+   - setup name
+   - run URL
+   - conclusion
+   - certification artifact URL
+   - recorder identity marker from `recorder_name` in issue config
+5. If any setup fails, classify root cause under one of:
+   - runner_label_mismatch
+   - missing_labview_installation
+   - docker_context_unreachable
+   - port_contract_failure
+   - workflow_dependency_missing
+6. Propose exact remediation commands and rerun only failed setups.
+7. Do not mark setup as certified unless run conclusion is success and certification report has `certified=true`.
+```
+
+## Issue Config Block Shape
+
+```json
+{
+  "workflow_file": "self-hosted-machine-certification.yml",
+  "ref": "main",
+  "recorder_name": "cdev-certification-recorder",
+  "setup_names": [
+    "legacy-2020-desktop-linux",
+    "legacy-2020-desktop-windows"
+  ]
+}
+```
+
+## Notes
+- Setup names come from `tools/machine-certification/setup-profiles.json`.
+- `recorder_name` must be different from repository owner.
+- This prompt is intentionally issue-first: Codex can execute end-to-end from issue URL only.
