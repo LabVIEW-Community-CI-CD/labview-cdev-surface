@@ -381,6 +381,30 @@ foreach ($commandName in @('pwsh', 'git', 'gh', 'g-cli', 'vipm', 'docker')) {
         -Severity $severity
 }
 
+$runnerSessionName = [string]$env:SESSIONNAME
+if ([string]::IsNullOrWhiteSpace($runnerSessionName)) {
+    $runnerSessionName = 'unknown'
+}
+$runnerIsInteractive = [System.Environment]::UserInteractive
+$runnerSessionId = -1
+try {
+    $runnerSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+} catch {
+    $runnerSessionId = -1
+}
+$sessionSignalsHeadless = ($runnerSessionId -eq 0) -or ($runnerSessionName -match '^(Services|Service)$')
+$headlessPass = (-not $runnerIsInteractive) -and $sessionSignalsHeadless
+$headlessDetail = if ($headlessPass) {
+    ("session='{0}' session_id={1} interactive={2}" -f $runnerSessionName, $runnerSessionId, $runnerIsInteractive)
+} else {
+    ("runner_not_headless: session='{0}' session_id={1} interactive={2}" -f $runnerSessionName, $runnerSessionId, $runnerIsInteractive)
+}
+Add-Check `
+    -Name 'runner:headless_session' `
+    -Passed $headlessPass `
+    -Detail $headlessDetail `
+    -Severity 'error'
+
 $nsisResolved = $NsisPath
 if (-not (Test-Path -LiteralPath $nsisResolved -PathType Leaf)) {
     $makensis = Get-Command makensis -ErrorAction SilentlyContinue

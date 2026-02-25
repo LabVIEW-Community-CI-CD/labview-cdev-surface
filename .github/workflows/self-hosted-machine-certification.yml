@@ -42,6 +42,11 @@ on:
         required: false
         default: true
         type: boolean
+      allowed_machine_names_csv:
+        description: Comma-separated machine names allowed for this setup (case-insensitive).
+        required: false
+        default: ''
+        type: string
       skip_host_ini_mutation:
         description: Skip host LabVIEW.ini updates during matrix execution.
         required: false
@@ -86,6 +91,7 @@ jobs:
               --arg docker_context "${{ github.event.inputs.docker_context }}" \
               --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
               --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
+              --arg allowed_machine_names_csv "${{ github.event.inputs.allowed_machine_names_csv }}" \
               --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
               --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
               --arg target_ref "${{ github.event.inputs.ref }}" \
@@ -100,6 +106,7 @@ jobs:
                 docker_context: $docker_context,
                 switch_docker_context: $switch_context,
                 start_docker_desktop_if_needed: $startup_docker,
+                allowed_machine_names_csv: $allowed_machine_names_csv,
                 skip_host_ini_mutation: $skip_ini,
                 skip_override_phase: $skip_override,
                 target_ref: $target_ref
@@ -113,6 +120,7 @@ jobs:
                 docker_context: "desktop-linux",
                 switch_docker_context: "true",
                 start_docker_desktop_if_needed: "true",
+                allowed_machine_names_csv: "GHOST,DESKTOP-6Q81H4O",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
@@ -124,6 +132,7 @@ jobs:
                 docker_context: "desktop-windows",
                 switch_docker_context: "true",
                 start_docker_desktop_if_needed: "true",
+                allowed_machine_names_csv: "GHOST",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
@@ -199,6 +208,35 @@ jobs:
 
           "metadata_root=$metadataRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "metadata_path=$metadataPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: machine-affinity
+        name: Assert setup machine affinity
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $allowedCsv = [string]'${{ matrix.allowed_machine_names_csv }}'
+          $allowedMachines = @(
+            $allowedCsv -split ',' |
+            ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+          )
+
+          if (@($allowedMachines).Count -eq 0) {
+            throw "allowed_machine_names_csv_empty: setup '${{ matrix.setup_name }}' must provide allowed machine names."
+          }
+
+          $currentMachine = ([string]$env:COMPUTERNAME).Trim().ToUpperInvariant()
+          if ([string]::IsNullOrWhiteSpace($currentMachine)) {
+            throw "current_machine_name_missing: COMPUTERNAME environment variable is empty."
+          }
+
+          if ($allowedMachines -notcontains $currentMachine) {
+            throw ("runner_machine_not_allowed: setup '{0}' allows [{1}] but job ran on '{2}'." -f '${{ matrix.setup_name }}', ($allowedMachines -join ', '), $currentMachine)
+          }
+
+          "allowed_machine_names_csv=$($allowedMachines -join ',')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "current_machine_name=$currentMachine" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - id: machine-preflight
         name: Assert machine preflight pack
@@ -307,6 +345,107 @@ jobs:
           "matrix_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "matrix_summary_path=$matrixSummaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - id: masscompile
+        name: Run MassCompile certification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'masscompile'
+          $reportPath = Join-Path $outputRoot 'masscompile-certification-report.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-MassCompileCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -TargetRelativePath 'vi.lib\LabVIEW Icon API' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "MassCompile certification report not found: $reportPath"
+          }
+
+          $massCompileReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$massCompileReport.status -ne 'succeeded') {
+            throw ("MassCompile certification status is not succeeded: {0}" -f [string]$massCompileReport.status)
+          }
+
+          "masscompile_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "masscompile_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: vi-analyzer
+        name: Run VI Analyze certification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'vi-analyzer'
+          $reportPath = Join-Path $outputRoot 'vi-analyzer-certification-report.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "VI Analyze certification report not found: $reportPath"
+          }
+
+          $viAnalyzerReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$viAnalyzerReport.status -ne 'succeeded') {
+            throw ("VI Analyze certification status is not succeeded: {0}" -f [string]$viAnalyzerReport.status)
+          }
+
+          "vi_analyzer_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vi_analyzer_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: runnercli-ppl
+        name: Run runner-cli PPL certification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl'
+          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "runner-cli PPL certification report not found: $reportPath"
+          }
+
+          $runnerCliReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$runnerCliReport.status -ne 'succeeded') {
+            throw ("runner-cli PPL certification status is not succeeded: {0}" -f [string]$runnerCliReport.status)
+          }
+
+          "runnercli_ppl_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - id: certification-summary
         name: Write certification summary
         shell: powershell
@@ -315,6 +454,9 @@ jobs:
           $summaryPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'self-hosted-machine-certification-report.json'
           $matrixSummary = Get-Content -LiteralPath '${{ steps.port-matrix.outputs.matrix_summary_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
           $preflightReport = Get-Content -LiteralPath '${{ steps.machine-preflight.outputs.report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $massCompileReport = Get-Content -LiteralPath '${{ steps.masscompile.outputs.masscompile_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $viAnalyzerReport = Get-Content -LiteralPath '${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $runnerCliReport = Get-Content -LiteralPath '${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
 
           $certification = [ordered]@{
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -324,14 +466,29 @@ jobs:
             run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
             setup_name = '${{ matrix.setup_name }}'
             runner_name = [string]$env:RUNNER_NAME
+            current_machine_name = '${{ steps.machine-affinity.outputs.current_machine_name }}'
+            allowed_machine_names_csv = '${{ steps.machine-affinity.outputs.allowed_machine_names_csv }}'
             requested_runner_labels_json = '${{ matrix.runner_labels_json }}'
             icon_editor_pinned_sha = '${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}'
             expected_labview_year = '${{ matrix.expected_labview_year }}'
             docker_context = '${{ matrix.docker_context }}'
             matrix = $matrixSummary.summary
             machine_preflight_status = [string]$preflightReport.status
+            masscompile_status = [string]$massCompileReport.status
+            masscompile_exit_code = [int]$massCompileReport.exit_code
+            masscompile_log_path = [string]$massCompileReport.masscompile_log_path
+            vi_analyzer_status = [string]$viAnalyzerReport.status
+            vi_analyzer_exit_code = [int]$viAnalyzerReport.exit_code
+            vi_analyzer_status_path = [string]$viAnalyzerReport.status_path
+            runnercli_ppl_status = [string]$runnerCliReport.status
+            runnercli_ppl_exit_code = [int]$runnerCliReport.runner_cli.exit_code
+            runnercli_ppl_log_path = [string]$runnerCliReport.runner_cli.log_path
+            runnercli_ppl_output_ppl_path = [string]$runnerCliReport.output_ppl_path
             certified = (
               [string]$preflightReport.status -eq 'succeeded' -and
+              [string]$massCompileReport.status -eq 'succeeded' -and
+              [string]$viAnalyzerReport.status -eq 'succeeded' -and
+              [string]$runnerCliReport.status -eq 'succeeded' -and
               [int]$matrixSummary.summary.strict_failures -eq 0 -and
               [int]$matrixSummary.summary.override_failures -eq 0 -and
               @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
@@ -345,8 +502,16 @@ jobs:
             "",
             "- setup: $($certification.setup_name)",
             "- runner: $($certification.runner_name)",
+            "- machine: $($certification.current_machine_name)",
+            "- allowed machines: $($certification.allowed_machine_names_csv)",
             "- labels: $($certification.requested_runner_labels_json)",
             "- icon-editor pinned sha: $($certification.icon_editor_pinned_sha)",
+            "- masscompile status: $($certification.masscompile_status)",
+            "- masscompile exit code: $($certification.masscompile_exit_code)",
+            "- vi analyze status: $($certification.vi_analyzer_status)",
+            "- vi analyze exit code: $($certification.vi_analyzer_exit_code)",
+            "- runner-cli ppl status: $($certification.runnercli_ppl_status)",
+            "- runner-cli ppl exit code: $($certification.runnercli_ppl_exit_code)",
             "- strict failures: $($matrixSummary.summary.strict_failures)",
             "- override failures: $($matrixSummary.summary.override_failures)",
             "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
@@ -369,6 +534,12 @@ jobs:
             ${{ steps.runner-metadata.outputs.metadata_path }}
             ${{ steps.machine-preflight.outputs.report_path }}
             ${{ steps.port-matrix.outputs.matrix_summary_path }}
+            ${{ steps.masscompile.outputs.masscompile_report_path }}
+            ${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}
+            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}
             ${{ steps.certification-summary.outputs.summary_path }}
             ${{ steps.port-matrix.outputs.matrix_root }}
+            ${{ steps.masscompile.outputs.masscompile_root }}
+            ${{ steps.vi-analyzer.outputs.vi_analyzer_root }}
+            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_root }}
           if-no-files-found: error

@@ -24,6 +24,28 @@ Describe 'Machine certification setup profile contract' {
         }
     }
 
+    It 'requires setup-route labels on active setups' {
+        foreach ($setup in $script:activeSetups) {
+            [string]$setup.setup_route_label | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'enforces machine capability mapping for DESKTOP-6Q81H4O and GHOST' {
+        foreach ($setup in $script:activeSetups) {
+            $allowedMachines = @($setup.allowed_machine_names | ForEach-Object { ([string]$_).ToUpperInvariant() })
+            @($allowedMachines).Count | Should -BeGreaterThan 0
+            $allowedMachines | Should -Contain 'GHOST'
+
+            if ([string]$setup.docker_context -eq 'desktop-windows') {
+                $allowedMachines | Should -Not -Contain 'DESKTOP-6Q81H4O'
+            }
+
+            if ([string]$setup.docker_context -eq 'desktop-linux') {
+                $allowedMachines | Should -Contain 'DESKTOP-6Q81H4O'
+            }
+        }
+    }
+
     It 'requires docker context switch flag on active setups' {
         foreach ($setup in $script:activeSetups) {
             $property = $setup.PSObject.Properties['switch_docker_context']

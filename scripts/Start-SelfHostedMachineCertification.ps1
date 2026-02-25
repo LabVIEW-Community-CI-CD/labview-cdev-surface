@@ -23,6 +23,13 @@ param(
     [int]$DispatchPauseSeconds = 4,
 
     [Parameter()]
+    [string]$ActorMachineName = '',
+
+    [Parameter()]
+    [ValidateSet('machine+setup')]
+    [string]$ActorKeyStrategy = 'machine+setup',
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -84,6 +91,72 @@ function Get-CollisionGuardLabel {
     return (Get-ScalarString -Value $Setup.collision_guard_label)
 }
 
+function Get-SetupRouteLabel {
+    param([Parameter(Mandatory = $true)][object]$Setup)
+
+    $routeLabel = (Get-ScalarString -Value $Setup.setup_route_label).Trim()
+    if ([string]::IsNullOrWhiteSpace($routeLabel)) {
+        throw "setup_route_label_missing: setup '$([string]$Setup.name)' must define setup_route_label."
+    }
+
+    $normalized = Normalize-ActorLabelToken -Value $routeLabel
+    if (-not [string]::Equals($routeLabel, $normalized, [System.StringComparison]::Ordinal)) {
+        throw ("setup_route_label_invalid: setup '{0}' has non-canonical setup_route_label '{1}'. Use '{2}'." -f [string]$Setup.name, $routeLabel, $normalized)
+    }
+
+    return $routeLabel
+}
+
+function Get-ActorMachineName {
+    param([string]$PreferredName)
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredName)) {
+        return [string]$PreferredName
+    }
+    return [System.Environment]::MachineName
+}
+
+function Normalize-ActorLabelToken {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $token = ([string]$Value).Trim().ToLowerInvariant()
+    $token = [Regex]::Replace($token, '[^a-z0-9\-]', '-')
+    $token = [Regex]::Replace($token, '-{2,}', '-')
+    $token = $token.Trim('-')
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return 'unknown'
+    }
+    return $token
+}
+
+function Get-ActorKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string]$SetupName,
+        [Parameter(Mandatory = $true)][string]$Strategy
+    )
+
+    if ($Strategy -eq 'machine+setup') {
+        return ("{0}::{1}" -f [string]$MachineName, [string]$SetupName)
+    }
+    throw "Unsupported actor key strategy '$Strategy'."
+}
+
+function Get-ActorRunnerLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$MachineName,
+        [Parameter(Mandatory = $true)][string]$SetupName
+    )
+
+    $machineToken = Normalize-ActorLabelToken -Value $MachineName
+    $setupToken = Normalize-ActorLabelToken -Value $SetupName
+    $label = ("cert-actor-{0}-{1}" -f $machineToken, $setupToken)
+    if ($label.Length -gt 63) {
+        $label = $label.Substring(0, 63).TrimEnd('-')
+    }
+    return $label
+}
+
 function Get-SetupBoolean {
     param(
         [Parameter(Mandatory = $true)][object]$Setup,
@@ -108,33 +181,67 @@ function Get-SetupBoolean {
     }
 }
 
+function Get-SetupAllowedMachineNames {
+    param([Parameter(Mandatory = $true)][object]$Setup)
+
+    $property = $Setup.PSObject.Properties['allowed_machine_names']
+    if ($null -eq $property -or $null -eq $property.Value) {
+        throw "allowed_machine_names_missing: setup '$([string]$Setup.name)' must define allowed_machine_names."
+    }
+
+    $names = @()
+    foreach ($raw in @($property.Value)) {
+        $name = ([string]$raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $names += $name.ToUpperInvariant()
+    }
+
+    if (@($names).Count -eq 0) {
+        throw "allowed_machine_names_empty: setup '$([string]$Setup.name)' must define at least one allowed machine name."
+    }
+
+    return @($names | Select-Object -Unique)
+}
+
 function Resolve-RunnerLabelsCsv {
     param([Parameter(Mandatory = $true)][object]$Setup)
 
+    $labels = @()
     $csvValue = Get-ScalarString -Value $Setup.runner_labels_csv
     if (-not [string]::IsNullOrWhiteSpace($csvValue)) {
-        return $csvValue
-    }
-
-    $jsonValue = Get-ScalarString -Value $Setup.runner_labels_json
-    if (-not [string]::IsNullOrWhiteSpace($jsonValue)) {
-        try {
-            $labels = @($jsonValue | ConvertFrom-Json -ErrorAction Stop | ForEach-Object { [string]$_ })
-            if (@($labels).Count -gt 0) {
-                return ($labels -join ',')
+        $labels = Split-LabelCsv -Csv $csvValue
+    } else {
+        $jsonValue = Get-ScalarString -Value $Setup.runner_labels_json
+        if (-not [string]::IsNullOrWhiteSpace($jsonValue)) {
+            try {
+                $labels = @(
+                    $jsonValue | ConvertFrom-Json -ErrorAction Stop |
+                    ForEach-Object { ([string]$_).Trim() } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                )
+            } catch {
+                # fall through to explicit error below
             }
-        } catch {
-            # fall through to explicit error below
         }
     }
 
-    throw "Setup '$([string]$Setup.name)' is missing runner labels (runner_labels_csv or valid runner_labels_json)."
+    if (@($labels).Count -eq 0) {
+        throw "Setup '$([string]$Setup.name)' is missing runner labels (runner_labels_csv or valid runner_labels_json)."
+    }
+
+    $setupRouteLabel = Get-SetupRouteLabel -Setup $Setup
+    if ($labels -notcontains $setupRouteLabel) {
+        $labels += $setupRouteLabel
+    }
+
+    return (Join-LabelsCsv -Labels $labels)
 }
 
 function Resolve-UpstreamRunnerLabelsCsv {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
-        [Parameter(Mandatory = $true)][object]$Setup
+        [Parameter(Mandatory = $true)][object]$Setup,
+        [Parameter(Mandatory = $true)][string]$ActorMachine
     )
 
     $baseCsv = Resolve-RunnerLabelsCsv -Setup $Setup
@@ -152,6 +259,12 @@ function Resolve-UpstreamRunnerLabelsCsv {
     if ($labels -notcontains $guardLabel) {
         $labels += $guardLabel
     }
+
+    $actorLabel = Get-ActorRunnerLabel -MachineName $ActorMachine -SetupName ([string]$Setup.name)
+    if ($labels -notcontains $actorLabel) {
+        $labels += $actorLabel
+    }
+
     return (Join-LabelsCsv -Labels $labels)
 }
 
@@ -159,22 +272,28 @@ function Assert-UpstreamRunnerCapacity {
     param(
         [Parameter(Mandatory = $true)][string]$Repository,
         [Parameter(Mandatory = $true)][string]$RunnerLabelsCsv,
-        [Parameter(Mandatory = $true)][string]$SetupName
+        [Parameter(Mandatory = $true)][string]$SetupName,
+        [Parameter()][string]$AllowedMachineNamesCsv = ''
     )
-
-    $owner = Get-RepositoryOwner -Repository $Repository
-    if (-not [string]::Equals($owner, 'LabVIEW-Community-CI-CD', [System.StringComparison]::OrdinalIgnoreCase)) {
-        return
-    }
 
     $requiredLabels = Split-LabelCsv -Csv $RunnerLabelsCsv
     if (@($requiredLabels).Count -eq 0) {
         throw "runner_labels_empty: setup '$SetupName' resolved to no runner labels."
     }
 
+    $allowedMachineNames = @()
+    if (-not [string]::IsNullOrWhiteSpace($AllowedMachineNamesCsv)) {
+        $allowedMachineNames = @(
+            $AllowedMachineNamesCsv -split ',' |
+            ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+        )
+    }
+
     $runnerLines = & gh api "repos/$Repository/actions/runners" --paginate --jq '.runners[] | @json'
     if ($LASTEXITCODE -ne 0) {
-        throw "runner_inventory_query_failed: unable to query upstream runner inventory for '$Repository'."
+        throw "runner_inventory_query_failed: unable to query runner inventory for '$Repository'."
     }
     $runners = @()
     foreach ($line in @($runnerLines)) {
@@ -187,15 +306,30 @@ function Assert-UpstreamRunnerCapacity {
         } | Where-Object {
             $runnerLabels = @($_.labels | ForEach-Object { [string]$_.name })
             @($requiredLabels | Where-Object { $runnerLabels -notcontains $_ }).Count -eq 0
+        } | Where-Object {
+            if (@($allowedMachineNames).Count -eq 0) {
+                return $true
+            }
+
+            $runnerName = [string]$_.name
+            foreach ($allowedMachine in $allowedMachineNames) {
+                if ($runnerName.Equals($allowedMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+                if ($runnerName.StartsWith(($allowedMachine + '-'), [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+            return $false
         }
     )
     $eligibleAvailable = @($eligibleOnline | Where-Object { -not [bool]$_.busy })
 
     if (@($eligibleOnline).Count -eq 0) {
-        throw ("runner_label_collision_guard_unconfigured: no online upstream runner matches setup '{0}' labels '{1}'. Configure runner labels to avoid collisions." -f $SetupName, $RunnerLabelsCsv)
+        throw ("runner_route_unconfigured: no online runner matches setup '{0}' labels '{1}' and allowed machines '{2}' in repository '{3}'." -f $SetupName, $RunnerLabelsCsv, $AllowedMachineNamesCsv, $Repository)
     }
     if (@($eligibleAvailable).Count -eq 0) {
-        Write-Warning ("runner_label_collision_guard_busy: online runners for setup '{0}' labels '{1}' are currently busy; dispatch will queue." -f $SetupName, $RunnerLabelsCsv)
+        Write-Warning ("runner_route_busy: online runners for setup '{0}' labels '{1}' and allowed machines '{2}' are currently busy; dispatch will queue." -f $SetupName, $RunnerLabelsCsv, $AllowedMachineNamesCsv)
     }
 }
 
@@ -229,12 +363,21 @@ if (@($selectedSetups).Count -eq 0) {
 
 $dispatchRecords = @()
 $claimedRunIds = @{}
+$resolvedActorMachineName = Get-ActorMachineName -PreferredName $ActorMachineName
 foreach ($setup in $selectedSetups) {
     $setupNameToken = [string]$setup.name
-    $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup
+    $setupAllowedMachineNames = Get-SetupAllowedMachineNames -Setup $setup
+    $allowedMachineNamesCsv = (@($setupAllowedMachineNames) -join ',')
+    $actorKey = Get-ActorKey -MachineName $resolvedActorMachineName -SetupName $setupNameToken -Strategy $ActorKeyStrategy
+    $actorRunnerLabel = Get-ActorRunnerLabel -MachineName $resolvedActorMachineName -SetupName $setupNameToken
+    $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup -ActorMachine $resolvedActorMachineName
     $switchDockerContext = (Get-SetupBoolean -Setup $setup -PropertyName 'switch_docker_context' -Default $true).ToString().ToLowerInvariant()
     $startDockerDesktop = (Get-SetupBoolean -Setup $setup -PropertyName 'start_docker_desktop_if_needed' -Default $true).ToString().ToLowerInvariant()
-    Assert-UpstreamRunnerCapacity -Repository $Repository -RunnerLabelsCsv $runnerLabelsCsv -SetupName $setupNameToken
+    Assert-UpstreamRunnerCapacity `
+        -Repository $Repository `
+        -RunnerLabelsCsv $runnerLabelsCsv `
+        -SetupName $setupNameToken `
+        -AllowedMachineNamesCsv $allowedMachineNamesCsv
     Write-Host ("Dispatching setup: {0}" -f $setupNameToken)
     $dispatchStartUtc = (Get-Date).ToUniversalTime()
 
@@ -248,6 +391,7 @@ foreach ($setup in $selectedSetups) {
         '-f', ("docker_context={0}" -f ([string]$setup.docker_context)),
         '-f', ("switch_docker_context={0}" -f $switchDockerContext),
         '-f', ("start_docker_desktop_if_needed={0}" -f $startDockerDesktop),
+        '-f', ("allowed_machine_names_csv={0}" -f $allowedMachineNamesCsv),
         '-f', ("skip_host_ini_mutation={0}" -f ([string]$setup.skip_host_ini_mutation).ToLowerInvariant()),
         '-f', ("skip_override_phase={0}" -f ([string]$setup.skip_override_phase).ToLowerInvariant())
     )
@@ -295,8 +439,12 @@ foreach ($setup in $selectedSetups) {
 
     $record = [ordered]@{
         setup_name = $setupNameToken
-        machine_name = [System.Environment]::MachineName
+        machine_name = $resolvedActorMachineName
+        actor_key = $actorKey
+        actor_runner_label = $actorRunnerLabel
+        actor_key_strategy = $ActorKeyStrategy
         runner_labels_csv = $runnerLabelsCsv
+        allowed_machine_names_csv = $allowedMachineNamesCsv
         start_docker_desktop_if_needed = $startDockerDesktop
         switch_docker_context = $switchDockerContext
         run_id = if ($null -ne $run) { (Get-ScalarString -Value $run.databaseId) } else { '' }
@@ -317,6 +465,8 @@ $report = [ordered]@{
     repository = $Repository
     workflow = $WorkflowFile
     ref = $Ref
+    actor_machine_name = $resolvedActorMachineName
+    actor_key_strategy = $ActorKeyStrategy
     profiles_path = $resolvedProfilesPath
     dispatched_setups = @($selectedSetups | ForEach-Object { [string]$_.name })
     runs = @($dispatchRecords)

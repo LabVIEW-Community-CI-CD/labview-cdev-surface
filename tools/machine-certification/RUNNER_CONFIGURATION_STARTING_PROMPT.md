@@ -13,7 +13,8 @@ Execution contract:
    - Checkout repository at issue `ref`.
    - Verify local `HEAD` equals remote head SHA of `ref`.
    - Validate `required_script_paths` from issue config.
-   - Emit `CERT_SESSION_START` marker comment and detect stale open sessions.
+   - Emit `CERT_SESSION_START` marker comment and detect stale open sessions/runs.
+   - Resolve actor keys as `<machine>::<setup>` and enforce actor lock mode.
    - If any are missing, stop with `branch_drift_missing_script`.
    - Do **not** implement missing scripts in this flow.
 1. Read the issue config block between <!-- CERT_CONFIG_START --> and <!-- CERT_CONFIG_END -->.
@@ -26,13 +27,16 @@ Execution contract:
    - conclusion
    - certification artifact URL
    - recorder identity marker from `recorder_name` in issue config
+   - masscompile status from certification report
 5. If any setup fails, classify root cause under one of:
    - runner_label_mismatch
    - runner_label_collision_guard_unconfigured
+   - actor_lock_violation
    - missing_labview_installation
    - docker_context_switch_failed
    - docker_context_unreachable
    - port_contract_failure
+   - masscompile_certification_failed
    - workflow_dependency_missing
 6. Propose exact remediation commands and rerun only failed setups.
 7. Do not mark setup as certified unless run conclusion is success and certification report has `certified=true`.
@@ -46,26 +50,34 @@ Execution contract:
   "ref": "cert/self-hosted-machine-certification-evidence",
   "trigger_mode": "auto",
   "recorder_name": "cdev-certification-recorder",
+  "actor_key_strategy": "machine+setup",
+  "actor_lock_mode": "fail-closed",
   "require_local_ref_sync": true,
   "required_script_paths": [
     "scripts/Invoke-MachineCertificationFromIssue.ps1",
     "scripts/Start-SelfHostedMachineCertification.ps1",
     "scripts/Assert-InstallerHarnessMachinePreflight.ps1",
+    "scripts/Invoke-MassCompileCertification.ps1",
     "scripts/Invoke-EndToEndPortMatrixLocal.ps1"
   ],
   "setup_names": [
     "legacy-2020-desktop-linux",
-    "legacy-2020-desktop-windows"
+    "legacy-2020-desktop-windows",
+    "host-2026-desktop-linux",
+    "host-2026-desktop-windows"
   ]
 }
 ```
 
 ## Notes
 - Setup names come from `tools/machine-certification/setup-profiles.json`.
+- The setup catalog now covers host LabVIEW 2020 and host LabVIEW 2026 paths for both Docker desktop contexts.
 - `trigger_mode=auto` attempts dispatch first and falls back to rerunning the latest run on `ref` when workflow dispatch is unavailable pre-merge.
 - `require_local_ref_sync=true` fails closed if local checkout is stale versus issue `ref`.
 - Certification automation switches Docker Desktop context per setup before preflight when `switch_docker_context=true`.
 - Certification automation can start Docker Desktop automatically when `start_docker_desktop_if_needed=true`.
 - On upstream repos, setup collision-guard labels are enforced to avoid runner pickup collisions.
+- On upstream repos, actor-specific labels are appended per setup (`cert-actor-<machine>-<setup>`).
+- `actor_lock_mode=fail-closed` blocks dispatch until stale actor sessions are explicitly reconciled with a closure comment.
 - `recorder_name` must be different from repository owner.
 - This prompt is intentionally issue-first: Codex can execute end-to-end from issue URL only.
