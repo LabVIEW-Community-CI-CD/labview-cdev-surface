@@ -21,6 +21,12 @@ Describe 'Self-hosted machine certification workflow contract' {
         $script:workflowContent | Should -Match 'default:\s*true'
     }
 
+    It 'uses setup-aware concurrency to avoid workflow-dispatch run cancellation' {
+        $script:workflowContent | Should -Match 'concurrency:'
+        $script:workflowContent | Should -Match 'self-hosted-machine-certification-\$\{\{\s*github\.ref\s*\}\}-\$\{\{\s*github\.event\.inputs\.setup_name\s*\|\|\s*''push-matrix''\s*\}\}'
+        $script:workflowContent | Should -Match 'cancel-in-progress:\s*false'
+    }
+
     It 'passes switch and strict docker checks into machine preflight' {
         $script:workflowContent | Should -Match 'Assert-InstallerHarnessMachinePreflight\.ps1'
         $script:workflowContent | Should -Match '-DockerCheckSeverity error'

@@ -61,7 +61,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: self-hosted-machine-certification-${{ github.ref }}
+  group: self-hosted-machine-certification-${{ github.ref }}-${{ github.event.inputs.setup_name || 'push-matrix' }}
   cancel-in-progress: false
 
 jobs:
