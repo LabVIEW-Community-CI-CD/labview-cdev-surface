@@ -1110,6 +1110,28 @@ jobs:
             $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
           }
 
+          function Get-Sha256Hex {
+            param(
+              [Parameter(Mandatory = $true)][string]$LiteralPath
+            )
+
+            $fileStream = [System.IO.File]::OpenRead($LiteralPath)
+            try {
+              $sha256 = [System.Security.Cryptography.SHA256]::Create()
+              try {
+                $hashBytes = $sha256.ComputeHash($fileStream)
+              }
+              finally {
+                $sha256.Dispose()
+              }
+            }
+            finally {
+              $fileStream.Dispose()
+            }
+
+            return [string]::Join('', ($hashBytes | ForEach-Object { $_.ToString('x2') }))
+          }
+
           $x86Ppl = @(
             Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP 'linux-gate\windows-ppl-32') -Recurse -Filter 'lv_icon_x86.lvlibp' -File -ErrorAction SilentlyContinue |
               Select-Object -First 1 -ExpandProperty FullName
@@ -1198,7 +1220,7 @@ jobs:
 
           $vipbPatchReportPath = Join-Path $artifactRoot 'vipb-patch-report.json'
           $vipbContent = Get-Content -LiteralPath $vipbPath -Raw
-          $vipbBeforeHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $vipbBeforeHash = Get-Sha256Hex -LiteralPath $vipbPath
           $linuxVipbPathLiteral = 'resource/plugins/lv_icon_linux_x64.lvlibp'
           $linuxVipbPathPattern = '<Path>resource/plugins/lv_icon_linux_x64\.lvlibp</Path>'
           $vipbAddedLinuxPath = $false
@@ -1229,7 +1251,7 @@ jobs:
             $vipbContent | Set-Content -LiteralPath $vipbPath -Encoding utf8
             $vipbAddedLinuxPath = $true
           }
-          $vipbAfterHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $vipbAfterHash = Get-Sha256Hex -LiteralPath $vipbPath
           [ordered]@{
             status = 'pass'
             clone_root = $cloneRoot
