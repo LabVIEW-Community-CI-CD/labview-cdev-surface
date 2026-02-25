@@ -1205,14 +1205,14 @@ jobs:
           $linuxVipbPathPattern = '<Path>resource/plugins/lv_icon_linux_x64\.lvlibp</Path>'
           $vipbAddedLinuxPath = $false
           if ($vipbContent -notmatch $linuxVipbPathPattern) {
-            $linuxDestinationOverride = @"
-      <Destination_Overrides>
-        <Path>resource/plugins/lv_icon_linux_x64.lvlibp</Path>
-        <Destination>0</Destination>
-        <Additional_Destination>true</Additional_Destination>
-        <Additional_Destination_Index>0</Additional_Destination_Index>
-      </Destination_Overrides>
-"@
+            $linuxDestinationOverride = @(
+              '      <Destination_Overrides>'
+              '        <Path>resource/plugins/lv_icon_linux_x64.lvlibp</Path>'
+              '        <Destination>0</Destination>'
+              '        <Additional_Destination>true</Additional_Destination>'
+              '        <Additional_Destination_Index>0</Additional_Destination_Index>'
+              '      </Destination_Overrides>'
+            ) -join [Environment]::NewLine
             $updatedVipbContent = [regex]::Replace(
               $vipbContent,
               '(?s)(\s*<Destination_Overrides>\s*<Path>resource/plugins/lv_icon_x86\.lvlibp</Path>.*?</Destination_Overrides>)',
