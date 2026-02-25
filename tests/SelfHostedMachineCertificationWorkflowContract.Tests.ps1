@@ -50,25 +50,39 @@ Describe 'Self-hosted machine certification workflow contract' {
         $script:workflowContent | Should -Match 'cdev-surface-windows-gate'
     }
 
-    It 'runs MassCompile certification and includes status in certification summary' {
+    It 'runs MassCompile, VI Analyze, and runner-cli PPL certification with summary fields' {
         $script:workflowContent | Should -Match 'Run MassCompile certification'
         $script:workflowContent | Should -Match 'Invoke-MassCompileCertification\.ps1'
         $script:workflowContent | Should -Match '-TargetRelativePath ''vi\.lib\\LabVIEW Icon API'''
         $script:workflowContent | Should -Match 'masscompile_report_path'
         $script:workflowContent | Should -Match 'masscompile_status'
         $script:workflowContent | Should -Match 'masscompile_exit_code'
+        $script:workflowContent | Should -Match 'Run VI Analyze certification'
+        $script:workflowContent | Should -Match 'Invoke-ViAnalyzerCertification\.ps1'
+        $script:workflowContent | Should -Match 'vi_analyzer_report_path'
+        $script:workflowContent | Should -Match 'vi_analyzer_status'
+        $script:workflowContent | Should -Match 'Run runner-cli PPL certification'
+        $script:workflowContent | Should -Match 'Invoke-RunnerCliPplCertification\.ps1'
+        $script:workflowContent | Should -Match 'runnercli_ppl_report_path'
+        $script:workflowContent | Should -Match 'runnercli_ppl_status'
     }
 
     It 'requires headless runner enforcement in machine preflight and MassCompile script' {
         $preflightScriptPath = Join-Path $script:repoRoot 'scripts\Assert-InstallerHarnessMachinePreflight.ps1'
         $massCompileScriptPath = Join-Path $script:repoRoot 'scripts\Invoke-MassCompileCertification.ps1'
+        $viAnalyzerScriptPath = Join-Path $script:repoRoot 'scripts\Invoke-ViAnalyzerCertification.ps1'
+        $runnerCliPplScriptPath = Join-Path $script:repoRoot 'scripts\Invoke-RunnerCliPplCertification.ps1'
         $preflightContent = Get-Content -LiteralPath $preflightScriptPath -Raw
         $massCompileContent = Get-Content -LiteralPath $massCompileScriptPath -Raw
+        $viAnalyzerContent = Get-Content -LiteralPath $viAnalyzerScriptPath -Raw
+        $runnerCliPplContent = Get-Content -LiteralPath $runnerCliPplScriptPath -Raw
 
         $preflightContent | Should -Match 'runner:headless_session'
         $preflightContent | Should -Match 'runner_not_headless'
         $massCompileContent | Should -Match 'runner_not_headless'
         $massCompileContent | Should -Match "'-Headless'"
+        $viAnalyzerContent | Should -Match 'runner_not_headless'
+        $runnerCliPplContent | Should -Match 'runner_not_headless'
     }
 
     It 'enforces setup-specific machine affinity before preflight execution' {

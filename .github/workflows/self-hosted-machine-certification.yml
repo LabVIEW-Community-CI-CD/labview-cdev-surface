@@ -379,6 +379,73 @@ jobs:
           "masscompile_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "masscompile_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - id: vi-analyzer
+        name: Run VI Analyze certification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'vi-analyzer'
+          $reportPath = Join-Path $outputRoot 'vi-analyzer-certification-report.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "VI Analyze certification report not found: $reportPath"
+          }
+
+          $viAnalyzerReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$viAnalyzerReport.status -ne 'succeeded') {
+            throw ("VI Analyze certification status is not succeeded: {0}" -f [string]$viAnalyzerReport.status)
+          }
+
+          "vi_analyzer_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vi_analyzer_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: runnercli-ppl
+        name: Run runner-cli PPL certification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl'
+          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "runner-cli PPL certification report not found: $reportPath"
+          }
+
+          $runnerCliReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$runnerCliReport.status -ne 'succeeded') {
+            throw ("runner-cli PPL certification status is not succeeded: {0}" -f [string]$runnerCliReport.status)
+          }
+
+          "runnercli_ppl_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - id: certification-summary
         name: Write certification summary
         shell: powershell
@@ -388,6 +455,8 @@ jobs:
           $matrixSummary = Get-Content -LiteralPath '${{ steps.port-matrix.outputs.matrix_summary_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
           $preflightReport = Get-Content -LiteralPath '${{ steps.machine-preflight.outputs.report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
           $massCompileReport = Get-Content -LiteralPath '${{ steps.masscompile.outputs.masscompile_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $viAnalyzerReport = Get-Content -LiteralPath '${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $runnerCliReport = Get-Content -LiteralPath '${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
 
           $certification = [ordered]@{
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -408,9 +477,18 @@ jobs:
             masscompile_status = [string]$massCompileReport.status
             masscompile_exit_code = [int]$massCompileReport.exit_code
             masscompile_log_path = [string]$massCompileReport.masscompile_log_path
+            vi_analyzer_status = [string]$viAnalyzerReport.status
+            vi_analyzer_exit_code = [int]$viAnalyzerReport.exit_code
+            vi_analyzer_status_path = [string]$viAnalyzerReport.status_path
+            runnercli_ppl_status = [string]$runnerCliReport.status
+            runnercli_ppl_exit_code = [int]$runnerCliReport.runner_cli.exit_code
+            runnercli_ppl_log_path = [string]$runnerCliReport.runner_cli.log_path
+            runnercli_ppl_output_ppl_path = [string]$runnerCliReport.output_ppl_path
             certified = (
               [string]$preflightReport.status -eq 'succeeded' -and
               [string]$massCompileReport.status -eq 'succeeded' -and
+              [string]$viAnalyzerReport.status -eq 'succeeded' -and
+              [string]$runnerCliReport.status -eq 'succeeded' -and
               [int]$matrixSummary.summary.strict_failures -eq 0 -and
               [int]$matrixSummary.summary.override_failures -eq 0 -and
               @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
@@ -430,6 +508,10 @@ jobs:
             "- icon-editor pinned sha: $($certification.icon_editor_pinned_sha)",
             "- masscompile status: $($certification.masscompile_status)",
             "- masscompile exit code: $($certification.masscompile_exit_code)",
+            "- vi analyze status: $($certification.vi_analyzer_status)",
+            "- vi analyze exit code: $($certification.vi_analyzer_exit_code)",
+            "- runner-cli ppl status: $($certification.runnercli_ppl_status)",
+            "- runner-cli ppl exit code: $($certification.runnercli_ppl_exit_code)",
             "- strict failures: $($matrixSummary.summary.strict_failures)",
             "- override failures: $($matrixSummary.summary.override_failures)",
             "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
@@ -453,7 +535,11 @@ jobs:
             ${{ steps.machine-preflight.outputs.report_path }}
             ${{ steps.port-matrix.outputs.matrix_summary_path }}
             ${{ steps.masscompile.outputs.masscompile_report_path }}
+            ${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}
+            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}
             ${{ steps.certification-summary.outputs.summary_path }}
             ${{ steps.port-matrix.outputs.matrix_root }}
             ${{ steps.masscompile.outputs.masscompile_root }}
+            ${{ steps.vi-analyzer.outputs.vi_analyzer_root }}
+            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_root }}
           if-no-files-found: error
