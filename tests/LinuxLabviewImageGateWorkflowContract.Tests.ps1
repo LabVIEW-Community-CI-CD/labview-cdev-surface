@@ -53,6 +53,12 @@ Describe 'Linux LabVIEW image gate workflow contract' {
         $script:coreWorkflowContent | Should -Match '2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c'
         $script:coreWorkflowContent | Should -Match '2025q3'
         $script:coreWorkflowContent | Should -Match 'resolved_linux_tag'
+        $script:coreWorkflowContent | Should -Match 'derived_linux_tag'
+        $script:coreWorkflowContent | Should -Match 'resolved_tag_was_allowed'
+        $script:coreWorkflowContent | Should -Match 'fallback_to_locked_image'
+        $script:coreWorkflowContent | Should -Match 'fallback_reason'
+        $script:coreWorkflowContent | Should -Match 'Using locked_linux_image tag'
+        $script:coreWorkflowContent | Should -Not -Match 'does not match resolved_linux_tag'
         $script:coreWorkflowContent | Should -Match 'linux-image-resolution\.json'
     }
 

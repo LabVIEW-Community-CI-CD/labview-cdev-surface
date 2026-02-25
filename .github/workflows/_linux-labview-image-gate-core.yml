@@ -160,22 +160,18 @@ jobs:
           }
 
           $rawTag = [string]$imageMatch.Groups[1].Value
-          $resolvedLinuxTag = $rawTag
+          $derivedLinuxTag = $rawTag
           switch ($linuxTagStrategy.ToLowerInvariant()) {
             'sibling-windows-to-linux' {
-              if ($resolvedLinuxTag -match 'windows') {
-                $resolvedLinuxTag = ($resolvedLinuxTag -replace 'windows', 'linux')
-              } elseif ($resolvedLinuxTag -notmatch 'linux') {
-                $resolvedLinuxTag = "$resolvedLinuxTag-linux"
+              if ($derivedLinuxTag -match 'windows') {
+                $derivedLinuxTag = ($derivedLinuxTag -replace 'windows', 'linux')
+              } elseif ($derivedLinuxTag -notmatch 'linux') {
+                $derivedLinuxTag = "$derivedLinuxTag-linux"
               }
             }
             default {
               throw "Unsupported linux_tag_strategy '$linuxTagStrategy'."
             }
-          }
-
-          if ($allowedLinuxTags -notcontains $resolvedLinuxTag) {
-            throw "Resolved Linux tag '$resolvedLinuxTag' is not in allowed_linux_tags: $([string]::Join(', ', $allowedLinuxTags))."
           }
 
           $lockedLinuxImage = [string]$containerParityContract.locked_linux_image
@@ -190,8 +186,25 @@ jobs:
           }
 
           $lockedImageTag = [string]$lockedImageTagMatch.Groups[1].Value
-          if ($lockedImageTag -ne $resolvedLinuxTag) {
-            throw "locked_linux_image tag '$lockedImageTag' does not match resolved_linux_tag '$resolvedLinuxTag'."
+          if ($allowedLinuxTags -notcontains $lockedImageTag) {
+            throw "locked_linux_image tag '$lockedImageTag' is not in allowed_linux_tags: $([string]::Join(', ', $allowedLinuxTags))."
+          }
+
+          $resolvedLinuxTag = $derivedLinuxTag
+          $resolvedTagWasAllowed = $allowedLinuxTags -contains $resolvedLinuxTag
+          $fallbackToLockedImage = $false
+          $fallbackReason = ''
+          if (-not $resolvedTagWasAllowed) {
+            $fallbackToLockedImage = $true
+            $fallbackReason = "Resolved Linux tag '$resolvedLinuxTag' is not in allowed_linux_tags. Using locked_linux_image tag '$lockedImageTag'."
+            Write-Host "::warning::$fallbackReason"
+          } elseif ($lockedImageTag -ne $resolvedLinuxTag) {
+            $fallbackToLockedImage = $true
+            $fallbackReason = "Resolved Linux tag '$resolvedLinuxTag' differs from locked_linux_image tag '$lockedImageTag'. Using locked_linux_image deterministically."
+            Write-Host "::notice::$fallbackReason"
+          }
+          if ($fallbackToLockedImage) {
+            $resolvedLinuxTag = $lockedImageTag
           }
 
           $linuxTagVersionMatch = [regex]::Match($resolvedLinuxTag, '^([0-9]{4})q([0-9]+)-linux$')
@@ -229,10 +242,15 @@ jobs:
             source_sha = $pinnedSha
             lvcontainer_path = $lvcontainerPath
             raw_lvcontainer_tag = $rawTag
+            derived_linux_tag = $derivedLinuxTag
             linux_tag_strategy = $linuxTagStrategy
             resolved_linux_tag = $resolvedLinuxTag
+            resolved_tag_was_allowed = $resolvedTagWasAllowed
+            fallback_to_locked_image = $fallbackToLockedImage
+            fallback_reason = $fallbackReason
             linux_image = $linuxImage
             locked_linux_image = $lockedLinuxImage
+            locked_image_tag = $lockedImageTag
             allowed_linux_tags = $allowedLinuxTags
             windows_host_execution_mode = $windowsHostExecutionMode
             windows_host_native_labview_version = $windowsHostNativeLabviewVersion
@@ -258,10 +276,14 @@ jobs:
             "## Linux parity context resolved"
             ""
             "- Raw .lvcontainer tag: $rawTag"
+            "- Derived Linux tag: $derivedLinuxTag"
             "- Resolved Linux tag: $resolvedLinuxTag"
             "- Linux image: $linuxImage"
             "- Locked Linux image: $lockedLinuxImage"
             "- Allowed tags: $([string]::Join(', ', $allowedLinuxTags))"
+            "- Resolved tag allowed: $resolvedTagWasAllowed"
+            "- Fallback to locked image: $fallbackToLockedImage"
+            "- Fallback reason: $fallbackReason"
             "- Windows host execution mode: $windowsHostExecutionMode"
             "- Windows host native LabVIEW version: $windowsHostNativeLabviewVersion"
             "- Linux LabVIEW path: $linuxLabviewPath"
