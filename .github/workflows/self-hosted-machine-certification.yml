@@ -124,6 +124,13 @@ jobs:
                       end
                     ),
                     expected_labview_year: $year,
+                    contract_labview_year: (
+                      if ((($setup_name | if . == "" then "manual-dispatch" else . end) == "host-2025-desktop-windows") and ($year == "2025")) then
+                        "2026"
+                      else
+                        $year
+                      end
+                    ),
                     execution_bitness: ($execution_bitness | ascii_downcase),
                     require_secondary_32: $require_secondary_32,
                     docker_context: $docker_context,
@@ -145,6 +152,7 @@ jobs:
                     setup_name: "legacy-2020-desktop-windows-32",
                     runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows-32\",\"cdev-surface-windows-gate\"]",
                     expected_labview_year: $year,
+                    contract_labview_year: $year,
                     execution_bitness: "32",
                     require_secondary_32: "false",
                     docker_context: $docker_context,
@@ -187,6 +195,13 @@ jobs:
                     end
                   ),
                   expected_labview_year: $year,
+                  contract_labview_year: (
+                    if ((($setup_name | if . == "" then "manual-dispatch" else . end) == "host-2025-desktop-windows") and ($year == "2025")) then
+                      "2026"
+                    else
+                      $year
+                    end
+                  ),
                   execution_bitness: ($execution_bitness | ascii_downcase),
                   require_secondary_32: $require_secondary_32,
                   docker_context: $docker_context,
@@ -212,6 +227,7 @@ jobs:
                 setup_name: "legacy-2020-desktop-linux",
                 runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-linux\",\"linux-gate-windows-ready\"]",
                 expected_labview_year: "2020",
+                contract_labview_year: "2020",
                 execution_bitness: "64",
                 require_secondary_32: "false",
                 docker_context: "desktop-linux",
@@ -227,6 +243,7 @@ jobs:
                 setup_name: "legacy-2020-desktop-windows",
                 runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows\",\"cdev-surface-windows-gate\"]",
                 expected_labview_year: "2020",
+                contract_labview_year: "2020",
                 execution_bitness: "64",
                 require_secondary_32: "false",
                 docker_context: "desktop-windows",
@@ -242,6 +259,7 @@ jobs:
                 setup_name: "legacy-2020-desktop-windows-32",
                 runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows-32\",\"cdev-surface-windows-gate\"]",
                 expected_labview_year: "2020",
+                contract_labview_year: "2020",
                 execution_bitness: "32",
                 require_secondary_32: "false",
                 docker_context: "desktop-windows",
@@ -257,6 +275,7 @@ jobs:
                 setup_name: "host-2025-desktop-windows",
                 runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-host-2025-desktop-windows\",\"cdev-surface-windows-gate\",\"cert-actor-ghost-host-2025-desktop-windows\"]",
                 expected_labview_year: "2025",
+                contract_labview_year: "2026",
                 execution_bitness: "64",
                 require_secondary_32: "false",
                 docker_context: "desktop-windows",
@@ -281,6 +300,7 @@ jobs:
               | {
                   setup_name: $setup_name,
                   expected_labview_year: .expected_labview_year,
+                  contract_labview_year: .contract_labview_year,
                   required_setup_label: ("cert-setup-" + $setup_name),
                   requires_actor_label: ((.expected_labview_year == "2025") or (.expected_labview_year == "2026")),
                   has_setup_label: ($labels | index("cert-setup-" + $setup_name) != null),
@@ -679,7 +699,15 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $year = [string]'${{ matrix.expected_labview_year }}'
+          $setupName = [string]'${{ matrix.setup_name }}'
+          $expectedYear = [string]'${{ matrix.expected_labview_year }}'
+          $contractYear = ([string]'${{ matrix.contract_labview_year }}').Trim()
+          if ([string]::IsNullOrWhiteSpace($contractYear)) {
+            $contractYear = $expectedYear
+          }
+          if ($contractYear -notmatch '^\d{4}$') {
+            throw ("execution_contract_year_invalid: setup '{0}' produced invalid contract year '{1}' (expected year '{2}')." -f $setupName, $contractYear, $expectedYear)
+          }
           $requestedBitness = ([string]'${{ matrix.execution_bitness }}').Trim().ToLowerInvariant()
           if ([string]::IsNullOrWhiteSpace($requestedBitness)) {
             $requestedBitness = 'auto'
@@ -697,9 +725,16 @@ jobs:
             throw "LabVIEW CLI port contract is missing 'labview_cli_ports': $contractPath"
           }
 
-          $yearPortEntryProperty = $contract.labview_cli_ports.PSObject.Properties[$year]
+          $yearPortEntryProperty = $contract.labview_cli_ports.PSObject.Properties[$contractYear]
           if ($null -eq $yearPortEntryProperty) {
-            throw "LabVIEW CLI port contract does not define year '$year': $contractPath"
+            $availableContractYears = @(
+              $contract.labview_cli_ports.PSObject.Properties.Name |
+              ForEach-Object { ([string]$_).Trim() } |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+              Select-Object -Unique
+            )
+            $availableYearsCsv = if (@($availableContractYears).Count -gt 0) { [string]::Join(',', $availableContractYears) } else { '(none)' }
+            throw ("execution_contract_year_unmapped: setup '{0}' expected year '{1}' resolved contract year '{2}' but contract '{3}' only defines years [{4}]. Add/update matrix.contract_labview_year for this setup." -f $setupName, $expectedYear, $contractYear, $contractPath, $availableYearsCsv)
           }
 
           $availableBitness = @(
@@ -719,12 +754,12 @@ jobs:
             }
           } else {
             if ($availableBitness -notcontains $requestedBitness) {
-              throw ("execution_bitness_unavailable: requested bitness '{0}' not defined for year '{1}' in contract '{2}'." -f $requestedBitness, $year, $contractPath)
+              throw ("execution_bitness_unavailable: requested bitness '{0}' not defined for contract year '{1}' (setup expected year '{2}') in contract '{3}'." -f $requestedBitness, $contractYear, $expectedYear, $contractPath)
             }
             $orderedBitness += $requestedBitness
           }
           if (@($orderedBitness).Count -eq 0) {
-            throw ("LabVIEW CLI port contract year '{0}' does not define 32/64 bitness in {1}" -f $year, $contractPath)
+            throw ("LabVIEW CLI port contract year '{0}' does not define 32/64 bitness in {1}" -f $contractYear, $contractPath)
           }
 
           $supportedBitness = [string]$orderedBitness[0]
@@ -732,8 +767,9 @@ jobs:
           $hasBitness64 = [bool]($orderedBitness -contains '64')
           $hasBitness32 = [bool]($orderedBitness -contains '32')
 
-          Write-Host ("Resolved certification execution bitness: year={0}, requested={1}, available=[{2}], selected={3}" -f $year, $requestedBitness, $availableBitnessCsv, $supportedBitness)
+          Write-Host ("Resolved certification execution bitness: setup={0}, expected_year={1}, contract_year={2}, requested={3}, available=[{4}], selected={5}" -f $setupName, $expectedYear, $contractYear, $requestedBitness, $availableBitnessCsv, $supportedBitness)
           "requested_bitness=$requestedBitness" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "contract_year=$contractYear" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "supported_bitness=$supportedBitness" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "available_bitness_csv=$availableBitnessCsv" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "has_bitness_64=$($hasBitness64.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -750,7 +786,7 @@ jobs:
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-MassCompileCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '64' `
               -TargetRelativePath 'vi.lib\LabVIEW Icon API' `
               -ArtifactRoot $outputRoot `
@@ -801,7 +837,7 @@ jobs:
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-MassCompileCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '32' `
               -TargetRelativePath 'vi.lib\LabVIEW Icon API' `
               -ArtifactRoot $outputRoot `
@@ -836,7 +872,7 @@ jobs:
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '64' `
               -ArtifactRoot $outputRoot `
               -OutputPath $reportPath
@@ -886,7 +922,7 @@ jobs:
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '32' `
               -ArtifactRoot $outputRoot `
               -OutputPath $reportPath
@@ -921,7 +957,7 @@ jobs:
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
               -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '64' `
               -TimeoutSeconds 300 `
               -ArtifactRoot $outputRoot `
@@ -957,7 +993,7 @@ jobs:
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
               -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '64' `
               -TimeoutSeconds 300 `
               -ArtifactRoot $outputRoot `
@@ -1009,7 +1045,7 @@ jobs:
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
               -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
-              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -ExecutionLabviewYear '${{ steps.execution-contract.outputs.contract_year }}' `
               -SupportedBitness '32' `
               -TimeoutSeconds 300 `
               -ArtifactRoot $outputRoot `
@@ -1424,6 +1460,7 @@ jobs:
 
   package-vip:
     name: Build VI Package From Certification Outputs (${{ matrix.setup_name }})
+    if: ${{ needs.resolve-setups.outputs.package_setups_json != '[]' }}
     needs:
       - resolve-setups
       - certify
@@ -2000,4 +2037,5 @@ jobs:
             ${{ steps.build-vip.outputs.vip_output_path }}
             ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
+
 
