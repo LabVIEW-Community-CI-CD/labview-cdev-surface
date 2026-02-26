@@ -92,11 +92,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PS4='+ [trace:${LINENO}] '
+          set -x
+          trace_jq() { echo "::notice::trace_jq_stage=$1"; }
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             DISPATCH_SETUP="${{ github.event.inputs.setup_name }}"
             DISPATCH_REQUIRE_SECONDARY="${{ github.event.inputs.require_secondary_32 }}"
             if [[ "$DISPATCH_SETUP" == "legacy-2020-desktop-windows" && "$DISPATCH_REQUIRE_SECONDARY" == "true" ]]; then
+              trace_jq matrix_build_dispatch_with_secondary
               jq -nc \
                 --arg setup_name "$DISPATCH_SETUP" \
                 --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
@@ -160,6 +164,7 @@ jobs:
                   }
                 ]' > matrix.json
             else
+              trace_jq matrix_build_dispatch_single
               jq -nc \
                 --arg setup_name "${{ github.event.inputs.setup_name }}" \
                 --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
@@ -201,6 +206,7 @@ jobs:
                 }]' > matrix.json
             fi
           else
+            trace_jq matrix_build_push_default
             jq -nc '[
               {
                 setup_name: "legacy-2020-desktop-linux",
@@ -265,7 +271,9 @@ jobs:
             ]' > matrix.json
           fi
 
+          trace_jq matrix_validate_nonempty
           jq -e 'type == "array" and length > 0' matrix.json > /dev/null
+          trace_jq matrix_routing_diagnostics
           jq -c '
             map(
               (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";""))) as $labels
@@ -281,22 +289,28 @@ jobs:
                 }
             )' matrix.json > matrix-routing-diagnostics.json
 
+          trace_jq routing_failure_count
           ROUTING_FAILURE_COUNT="$(jq '[ .[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not))) ] | length' matrix-routing-diagnostics.json)"
           {
             echo "### Routing matrix contract"
+            trace_jq matrix_count
             echo "- setups: $(jq 'length' matrix.json)"
             echo "- failures: $ROUTING_FAILURE_COUNT"
             echo "- diagnostics file: matrix-routing-diagnostics.json"
           } >> "$GITHUB_STEP_SUMMARY"
+          trace_jq matrix_has_actor_requirements
           if jq -e '.[] | select(.requires_actor_label == true)' matrix-routing-diagnostics.json > /dev/null; then
             echo "#### 2025/2026 actor-label diagnostics" >> "$GITHUB_STEP_SUMMARY"
+            trace_jq matrix_actor_diagnostics
             jq -r '.[] | select(.requires_actor_label == true) | "- \(.setup_name): setup_label=\(.has_setup_label) actor_label=\(.has_actor_label) actor_tokens=\(.actor_labels | join(","))"' matrix-routing-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
           fi
           if [[ "$ROUTING_FAILURE_COUNT" != "0" ]]; then
             echo "::error::routing_matrix_contract_failed: setup and actor label contract violations detected."
+            trace_jq matrix_routing_failures_dump
             jq '.[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not)))' matrix-routing-diagnostics.json
             exit 1
           fi
+          trace_jq matrix_emit_setups_json
           echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             PACKAGE_SETUP_TARGET="${{ github.event.inputs.setup_name }}"
@@ -310,6 +324,7 @@ jobs:
             PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
           fi
           if [[ "$PACKAGE_SETUP_TARGET" == "legacy-2020-desktop-windows" ]]; then
+            trace_jq package_setup_selection_legacy
             PACKAGE_SETUPS_JSON="$(jq -c --arg setup_name "$PACKAGE_SETUP_TARGET" '
               [ .[] | select(type == "object") | select((.setup_name // "") == $setup_name) ]
             ' matrix.json)"
