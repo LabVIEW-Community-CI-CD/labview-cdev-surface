@@ -59,8 +59,25 @@ Describe 'Self-hosted machine certification workflow contract' {
         $script:workflowContent | Should -Match 'expected_labview_year:\s*"2025"'
         $script:workflowContent | Should -Match 'setup_name:\s*"host-2025-desktop-windows"[\s\S]*?actor_lock_group:\s*"actor-ghost-windows"'
         $script:workflowContent | Should -Match 'cert-setup-host-2025-desktop-windows'
+        $script:workflowContent | Should -Match 'cert-actor-ghost-host-2025-desktop-windows'
     }
 
+    It 'enforces setup and actor routing labels in matrix resolution with fail-fast diagnostics' {
+        $script:workflowContent | Should -Match 'matrix-routing-diagnostics\.json'
+        $script:workflowContent | Should -Match 'Routing matrix contract'
+        $script:workflowContent | Should -Match '2025/2026 actor-label diagnostics'
+        $script:workflowContent | Should -Match 'routing_matrix_contract_failed'
+        $script:workflowContent | Should -Match 'required_setup_label'
+        $script:workflowContent | Should -Match 'requires_actor_label'
+        $script:workflowContent | Should -Match '\.expected_labview_year == "2025"\) or \(\.expected_labview_year == "2026"'
+    }
+    It 'fails fast per lane when setup or actor routing labels are missing' {
+        $script:workflowContent | Should -Match 'id:\s*routing-contract'
+        $script:workflowContent | Should -Match 'Assert setup/actor routing labels'
+        $script:workflowContent | Should -Match 'routing_label_contract_failed'
+        $script:workflowContent | Should -Match 'routing-contract-report\.json'
+        $script:workflowContent | Should -Match '2025/2026 routing diagnostics'
+    }
     It 'runs per-bitness MassCompile and VI Analyzer certification with summary fields' {
         $script:workflowContent | Should -Match 'Run MassCompile certification \(64-bit\)'
         $script:workflowContent | Should -Match 'Run MassCompile certification \(32-bit\)'
@@ -202,3 +219,4 @@ Describe 'Self-hosted machine certification workflow contract' {
         $script:workflowContent | Should -Match 'machine-affinity'
     }
 }
+

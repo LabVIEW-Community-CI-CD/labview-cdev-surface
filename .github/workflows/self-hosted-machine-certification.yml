@@ -249,7 +249,7 @@ jobs:
               },
               {
                 setup_name: "host-2025-desktop-windows",
-                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-host-2025-desktop-windows\",\"cdev-surface-windows-gate\"]",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-host-2025-desktop-windows\",\"cdev-surface-windows-gate\",\"cert-actor-ghost-host-2025-desktop-windows\"]",
                 expected_labview_year: "2025",
                 execution_bitness: "64",
                 require_secondary_32: "false",
@@ -265,6 +265,38 @@ jobs:
             ]' > matrix.json
           fi
 
+          jq -e 'type == "array" and length > 0' matrix.json > /dev/null
+          jq -c '
+            map(
+              (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";""))) as $labels
+              | {
+                  setup_name: .setup_name,
+                  expected_labview_year: .expected_labview_year,
+                  required_setup_label: ("cert-setup-" + .setup_name),
+                  requires_actor_label: ((.expected_labview_year == "2025") or (.expected_labview_year == "2026")),
+                  has_setup_label: ($labels | index("cert-setup-" + .setup_name) != null),
+                  actor_labels: ($labels | map(select(startswith("cert-actor-")))),
+                  has_actor_label: (($labels | map(select(startswith("cert-actor-"))) | length) > 0),
+                  labels: $labels
+                }
+            )' matrix.json > matrix-routing-diagnostics.json
+
+          ROUTING_FAILURE_COUNT="$(jq '[ .[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not))) ] | length' matrix-routing-diagnostics.json)"
+          {
+            echo "### Routing matrix contract"
+            echo "- setups: $(jq 'length' matrix.json)"
+            echo "- failures: $ROUTING_FAILURE_COUNT"
+            echo "- diagnostics file: matrix-routing-diagnostics.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if jq -e '.[] | select(.requires_actor_label == true)' matrix-routing-diagnostics.json > /dev/null; then
+            echo "#### 2025/2026 actor-label diagnostics" >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.[] | select(.requires_actor_label == true) | "- \(.setup_name): setup_label=\(.has_setup_label) actor_label=\(.has_actor_label) actor_tokens=\(.actor_labels | join(","))"' matrix-routing-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$ROUTING_FAILURE_COUNT" != "0" ]]; then
+            echo "::error::routing_matrix_contract_failed: setup and actor label contract violations detected."
+            jq '.[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not)))' matrix-routing-diagnostics.json
+            exit 1
+          fi
           echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             PACKAGE_SETUP_TARGET="${{ github.event.inputs.setup_name }}"
@@ -282,6 +314,7 @@ jobs:
             PACKAGE_SETUPS_JSON='[]'
           fi
           echo "package_setups_json=$PACKAGE_SETUPS_JSON" >> "$GITHUB_OUTPUT"
+          echo "routing_diagnostics_path=matrix-routing-diagnostics.json" >> "$GITHUB_OUTPUT"
 
   certify:
     name: Self-Hosted Machine Certification (${{ matrix.setup_name }})
@@ -382,6 +415,86 @@ jobs:
           "allowed_machine_names_csv=$($allowedMachines -join ',')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "current_machine_name=$currentMachine" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - id: routing-contract
+        name: Assert setup/actor routing labels
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setupName = [string]'${{ matrix.setup_name }}'
+          $expectedYear = [string]'${{ matrix.expected_labview_year }}'
+          $labelsJson = [string]'${{ matrix.runner_labels_json }}'
+          $allowedMachines = [string]'${{ steps.machine-affinity.outputs.allowed_machine_names_csv }}'
+          $currentMachine = [string]'${{ steps.machine-affinity.outputs.current_machine_name }}'
+          $is2025Or2026 = @('2025', '2026') -contains $expectedYear
+
+          try {
+            $labels = @(
+              $labelsJson |
+                ConvertFrom-Json -ErrorAction Stop |
+                ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -Unique
+            )
+          } catch {
+            throw ("routing_labels_json_invalid: setup '{0}' has invalid runner_labels_json payload." -f $setupName)
+          }
+
+          if (@($labels).Count -eq 0) {
+            throw ("routing_labels_empty: setup '{0}' has no resolved runner labels." -f $setupName)
+          }
+
+          $requiredSetupLabel = ("cert-setup-{0}" -f $setupName).ToLowerInvariant()
+          $hasSetupLabel = @($labels | Where-Object { [string]$_ -eq $requiredSetupLabel }).Count -gt 0
+          $actorLabels = @($labels | Where-Object { [string]$_ -like 'cert-actor-*' } | Select-Object -Unique)
+          $requiresActorLabel = $is2025Or2026
+          $hasActorLabel = @($actorLabels).Count -gt 0
+
+          $failures = @()
+          if (-not $hasSetupLabel) {
+            $failures += ("missing setup route label '{0}'." -f $requiredSetupLabel)
+          }
+          if ($requiresActorLabel -and -not $hasActorLabel) {
+            $failures += "missing required actor route label token 'cert-actor-*'."
+          }
+
+          $reportPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'routing-contract-report.json'
+          [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            setup_name = $setupName
+            expected_labview_year = $expectedYear
+            allowed_machine_names_csv = $allowedMachines
+            current_machine_name = $currentMachine
+            required_setup_label = $requiredSetupLabel
+            requires_actor_label = $requiresActorLabel
+            has_setup_label = $hasSetupLabel
+            has_actor_label = $hasActorLabel
+            actor_labels = @($actorLabels)
+            labels = @($labels)
+            failures = @($failures)
+            pass = (@($failures).Count -eq 0)
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+          "report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          if ($is2025Or2026 -or @($failures).Count -gt 0) {
+            @(
+              "### 2025/2026 routing diagnostics",
+              "- setup: $setupName",
+              "- expected year: $expectedYear",
+              "- allowed machines: $allowedMachines",
+              "- current machine: $currentMachine",
+              "- required setup label: $requiredSetupLabel",
+              "- setup label present: $hasSetupLabel",
+              "- actor labels: $(if (@($actorLabels).Count -gt 0) { $actorLabels -join ', ' } else { '(none)' })",
+              "- actor label required: $requiresActorLabel",
+              "- actor label present: $hasActorLabel",
+              "- pass: $(@($failures).Count -eq 0)"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          if (@($failures).Count -gt 0) {
+            throw ("routing_label_contract_failed: setup '{0}' failed routing contract: {1}" -f $setupName, ($failures -join ' | '))
+          }
       - id: machine-preflight
         name: Assert machine preflight pack
         shell: powershell
@@ -1216,6 +1329,7 @@ jobs:
             ${{ steps.bitness-handoff-masscompile.outputs.bitness_handoff_masscompile_report_path }}
             ${{ steps.bitness-handoff-vi-analyzer.outputs.bitness_handoff_vi_analyzer_report_path }}
             ${{ steps.bitness-handoff-runnercli.outputs.bitness_handoff_runnercli_report_path }}
+            ${{ steps.routing-contract.outputs.report_path }}
             ${{ steps.certification-summary.outputs.summary_path }}
             ${{ steps.port-matrix.outputs.matrix_root }}
             ${{ steps.masscompile-64.outputs.masscompile_64_root }}
@@ -1814,3 +1928,4 @@ jobs:
             ${{ steps.build-vip.outputs.vip_output_path }}
             ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
+
