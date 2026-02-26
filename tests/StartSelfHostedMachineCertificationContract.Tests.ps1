@@ -42,11 +42,15 @@ Describe 'Start self-hosted machine certification dispatch contract' {
         $script:startScriptContent | Should -Match 'function Get-SetupExpectedLabviewYear'
         $script:startScriptContent | Should -Match 'function Test-SetupRequiresActorLabel'
         $script:startScriptContent | Should -Match 'function Assert-DispatchRoutingContract'
-        $script:startScriptContent | Should -Match 'dispatch_routing_setup_label_missing'
+        $script:startScriptContent | Should -Match 'dispatch_routing_setup_label_count_invalid'
+        $script:startScriptContent | Should -Match 'dispatch_routing_setup_label_mismatch'
         $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_missing'
+        $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_count_invalid'
+        $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_format_invalid'
         $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_mismatch'
         $script:startScriptContent | Should -Match '\$routingContract = Assert-DispatchRoutingContract'
         $script:startScriptContent | Should -Match 'routing_contract_requires_actor_label = \[bool\]\$routingContract\.requires_actor_label'
+        $script:startScriptContent | Should -Match 'routing_contract_required_actor_label = \[string\]\$routingContract\.required_actor_label'
     }
 }
 
