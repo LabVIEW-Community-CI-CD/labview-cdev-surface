@@ -107,6 +107,79 @@ function Get-SetupRouteLabel {
     return $routeLabel
 }
 
+function Get-SetupExpectedLabviewYear {
+    param([Parameter(Mandatory = $true)][object]$Setup)
+
+    $year = (Get-ScalarString -Value $Setup.expected_labview_year).Trim()
+    if ([string]::IsNullOrWhiteSpace($year)) {
+        throw "expected_labview_year_missing: setup '$([string]$Setup.name)' must define expected_labview_year."
+    }
+    if ($year -notmatch '^[0-9]{4}$') {
+        throw ("expected_labview_year_invalid: setup '{0}' has invalid expected_labview_year '{1}'." -f [string]$Setup.name, $year)
+    }
+    return $year
+}
+
+function Test-SetupRequiresActorLabel {
+    param([Parameter(Mandatory = $true)][string]$ExpectedLabviewYear)
+
+    return @('2025', '2026') -contains ([string]$ExpectedLabviewYear)
+}
+
+function Assert-DispatchRoutingContract {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][object]$Setup,
+        [Parameter(Mandatory = $true)][string]$RunnerLabelsCsv,
+        [Parameter(Mandatory = $true)][string]$ActorRunnerLabel
+    )
+
+    $labels = @(
+        Split-LabelCsv -Csv $RunnerLabelsCsv |
+        ForEach-Object { ([string]$_).Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+    )
+    if (@($labels).Count -eq 0) {
+        throw ("dispatch_routing_labels_empty: setup '{0}' resolved empty runner labels." -f [string]$Setup.name)
+    }
+
+    $requiredSetupLabel = Get-SetupRouteLabel -Setup $Setup
+    $setupLabels = @($labels | Where-Object { [string]$_ -like 'cert-setup-*' })
+    if ($labels -notcontains $requiredSetupLabel) {
+        throw ("dispatch_routing_setup_label_missing: setup '{0}' requires setup label '{1}' in runner labels '{2}'." -f [string]$Setup.name, $requiredSetupLabel, ($labels -join ','))
+    }
+    if (@($setupLabels | Where-Object { [string]$_ -ne $requiredSetupLabel }).Count -gt 0) {
+        throw ("dispatch_routing_setup_label_ambiguous: setup '{0}' resolved multiple setup route labels '{1}'." -f [string]$Setup.name, ($setupLabels -join ','))
+    }
+
+    $expectedLabviewYear = Get-SetupExpectedLabviewYear -Setup $Setup
+    $requiresActorLabelByYear = Test-SetupRequiresActorLabel -ExpectedLabviewYear $expectedLabviewYear
+    $owner = Get-RepositoryOwner -Repository $Repository
+    $requiresActorLabel = $requiresActorLabelByYear -and [string]::Equals($owner, 'LabVIEW-Community-CI-CD', [System.StringComparison]::OrdinalIgnoreCase)
+
+    $actorLabels = @($labels | Where-Object { [string]$_ -like 'cert-actor-*' })
+    $actorLabelPresent = @($actorLabels).Count -gt 0
+    if ($requiresActorLabel -and -not $actorLabelPresent) {
+        throw ("dispatch_routing_actor_label_missing: setup '{0}' (LabVIEW {1}) requires actor label for upstream dispatch; labels='{2}'." -f [string]$Setup.name, $expectedLabviewYear, ($labels -join ','))
+    }
+    if ($requiresActorLabel -and $labels -notcontains $ActorRunnerLabel) {
+        throw ("dispatch_routing_actor_label_mismatch: setup '{0}' expected actor label '{1}' but resolved labels were '{2}'." -f [string]$Setup.name, $ActorRunnerLabel, ($labels -join ','))
+    }
+
+    return [pscustomobject]@{
+        pass = $true
+        expected_labview_year = $expectedLabviewYear
+        required_setup_label = $requiredSetupLabel
+        setup_labels_csv = ($setupLabels -join ',')
+        requires_actor_label = $requiresActorLabel
+        required_actor_label = $ActorRunnerLabel
+        actor_label_present = $actorLabelPresent
+        actor_labels_csv = ($actorLabels -join ',')
+        resolved_labels_csv = ($labels -join ',')
+    }
+}
+
 function Get-ActorMachineName {
     param([string]$PreferredName)
 
@@ -464,6 +537,7 @@ foreach ($setup in $selectedSetups) {
     $actorKey = Get-ActorKey -MachineName $resolvedActorMachineName -SetupName $setupNameToken -Strategy $ActorKeyStrategy
     $actorRunnerLabel = Get-ActorRunnerLabel -MachineName $resolvedActorMachineName -SetupName $setupNameToken
     $runnerLabelsCsv = Resolve-UpstreamRunnerLabelsCsv -Repository $Repository -Setup $setup -ActorMachine $resolvedActorMachineName
+    $routingContract = Assert-DispatchRoutingContract -Repository $Repository -Setup $setup -RunnerLabelsCsv $runnerLabelsCsv -ActorRunnerLabel $actorRunnerLabel
     $switchDockerContext = (Get-SetupBoolean -Setup $setup -PropertyName 'switch_docker_context' -Default $true).ToString().ToLowerInvariant()
     $startDockerDesktop = (Get-SetupBoolean -Setup $setup -PropertyName 'start_docker_desktop_if_needed' -Default $true).ToString().ToLowerInvariant()
     $executionBitness = Get-SetupExecutionBitness -Setup $setup -Default 'auto'
@@ -541,6 +615,14 @@ foreach ($setup in $selectedSetups) {
         actor_runner_label = $actorRunnerLabel
         actor_key_strategy = $ActorKeyStrategy
         runner_labels_csv = $runnerLabelsCsv
+        routing_contract_pass = [bool]$routingContract.pass
+        routing_contract_expected_labview_year = [string]$routingContract.expected_labview_year
+        routing_contract_required_setup_label = [string]$routingContract.required_setup_label
+        routing_contract_setup_labels_csv = [string]$routingContract.setup_labels_csv
+        routing_contract_requires_actor_label = [bool]$routingContract.requires_actor_label
+        routing_contract_required_actor_label = [string]$routingContract.required_actor_label
+        routing_contract_actor_label_present = [bool]$routingContract.actor_label_present
+        routing_contract_actor_labels_csv = [string]$routingContract.actor_labels_csv
         allowed_machine_names_csv = $allowedMachineNamesCsv
         execution_bitness = $executionBitness
         require_secondary_32 = $requireSecondary32

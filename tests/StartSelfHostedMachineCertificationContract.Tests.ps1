@@ -37,5 +37,16 @@ Describe 'Start self-hosted machine certification dispatch contract' {
         $script:startScriptContent | Should -Match 'actions/runners/\{0\}/labels'
         $script:startScriptContent | Should -Match 'labels\[\]='
     }
+
+    It 'enforces setup/actor routing contract before dispatch' {
+        $script:startScriptContent | Should -Match 'function Get-SetupExpectedLabviewYear'
+        $script:startScriptContent | Should -Match 'function Test-SetupRequiresActorLabel'
+        $script:startScriptContent | Should -Match 'function Assert-DispatchRoutingContract'
+        $script:startScriptContent | Should -Match 'dispatch_routing_setup_label_missing'
+        $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_missing'
+        $script:startScriptContent | Should -Match 'dispatch_routing_actor_label_mismatch'
+        $script:startScriptContent | Should -Match '\$routingContract = Assert-DispatchRoutingContract'
+        $script:startScriptContent | Should -Match 'routing_contract_requires_actor_label = \[bool\]\$routingContract\.requires_actor_label'
+    }
 }
 
