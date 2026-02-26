@@ -241,6 +241,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `-Mode full` for isolated smoke install validation.
   - `-Watch` to auto-rerun on contract file changes without manual restarts.
 - Use `scripts/Invoke-DockerDesktopLinuxIteration.ps1 -DockerContext desktop-linux` for Docker Desktop Linux command-surface checks (`runner-cli --help`, `runner-cli ppl --help`) before full Windows LabVIEW image runs.
+- Use `scripts/Invoke-ReleaseControlPlaneLocalDocker.ps1` for local containerized release-control-plane exercise (`Validate` + `DryRun` default).
 - If Docker Desktop Linux context is unavailable, confirm `Microsoft-Hyper-V-All`, `VirtualMachinePlatform`, and `Microsoft-Windows-Subsystem-Linux` are enabled, then reboot before retrying.
 - Use `scripts/Test-RunnerCliBundleDeterminism.ps1` and `scripts/Test-WorkspaceInstallerDeterminism.ps1` locally before proposing release-tag publication.
 - Keep local iteration artifacts under `artifacts\release\iteration`.

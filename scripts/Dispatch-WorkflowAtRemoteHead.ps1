@@ -58,15 +58,7 @@ Invoke-Gh -Arguments $dispatchArgs
 
 Start-Sleep -Seconds $DispatchPauseSeconds
 
-$runList = @(Invoke-GhJson -Arguments @(
-    'run', 'list',
-    '-R', $Repository,
-    '--workflow', $WorkflowFile,
-    '--branch', $Branch,
-    '--event', 'workflow_dispatch',
-    '--limit', '30',
-    '--json', 'databaseId,status,conclusion,url,createdAt,headSha,displayTitle'
-))
+$runList = @(Get-GhWorkflowRunsPortable -Repository $Repository -Workflow $WorkflowFile -Branch $Branch -Event 'workflow_dispatch' -Limit 30)
 
 $candidates = @(
     $runList | Where-Object {

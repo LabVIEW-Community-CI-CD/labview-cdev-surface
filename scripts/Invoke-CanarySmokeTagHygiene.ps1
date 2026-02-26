@@ -57,13 +57,7 @@ $report = [ordered]@{
 }
 
 try {
-    $releaseList = @(Invoke-GhJson -Arguments @(
-        'release', 'list',
-        '-R', $Repository,
-        '--limit', '200',
-        '--exclude-drafts',
-        '--json', 'tagName,isPrerelease,publishedAt'
-    ))
+    $releaseList = @(Get-GhReleasesPortable -Repository $Repository -Limit 100 -ExcludeDrafts)
     $report.releases_scanned = @($releaseList).Count
 
     $candidates = @()

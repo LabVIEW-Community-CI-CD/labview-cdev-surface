@@ -36,7 +36,7 @@ Describe 'Canary smoke tag hygiene workflow contract' {
     }
 
     It 'enforces keep-latest canary tag cleanup behavior' {
-        $script:scriptContent | Should -Match 'release''\s*,\s*''list'''
+        $script:scriptContent | Should -Match 'Get-GhReleasesPortable'
         $script:scriptContent | Should -Match 'release''\s*,\s*''delete'''
         $script:scriptContent | Should -Match '--cleanup-tag'
         $script:scriptContent | Should -Match 'KeepLatestN'
