@@ -250,6 +250,11 @@ jobs:
             -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
           if ($LASTEXITCODE -ne 0) { throw "Provenance contract validation failed." }
 
+          $reproReleasePath = Join-Path $releaseRoot 'reproducibility-report.json'
+          Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination $reproReleasePath -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.spdx.json') -Destination (Join-Path $releaseRoot 'workspace-installer.spdx.json') -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.slsa.json') -Destination (Join-Path $releaseRoot 'workspace-installer.slsa.json') -Force
+
           $releaseManifestPath = Join-Path $releaseRoot 'release-manifest.json'
           & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseManifest.ps1') `
             -Repository '${{ github.repository }}' `
@@ -260,7 +265,7 @@ jobs:
             -InstallerShaPath (Join-Path $releaseRoot "$assetName.sha256") `
             -SpdxPath (Join-Path $provRoot 'workspace-installer.spdx.json') `
             -SlsaPath (Join-Path $provRoot 'workspace-installer.slsa.json') `
-            -ReproducibilityPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') `
+            -ReproducibilityPath $reproReleasePath `
             -OutputPath $releaseManifestPath `
             -PublishedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) `
             -SignatureStatus $signatureStatus `
@@ -285,10 +290,6 @@ jobs:
             signature_thumbprint = $signatureThumbprint
             signature_timestamp_utc = $signatureTimestampUtc
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
-
-          Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination (Join-Path $releaseRoot 'reproducibility-report.json') -Force
-          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.spdx.json') -Destination (Join-Path $releaseRoot 'workspace-installer.spdx.json') -Force
-          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.slsa.json') -Destination (Join-Path $releaseRoot 'workspace-installer.slsa.json') -Force
 
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_sha256=$assetSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
