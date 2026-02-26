@@ -42,8 +42,86 @@ permissions:
   contents: write
 
 jobs:
+  runner_preflight:
+    name: Release Runner Availability Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      reason_code: ${{ steps.check.outputs.reason_code }}
+    steps:
+      - id: check
+        name: Validate eligible self-hosted release runner availability
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $repo = [string]'${{ github.repository }}'
+          $requiredLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv')
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-runner-availability-preflight.json'
+
+          $runnersJson = & gh api "repos/$repo/actions/runners?per_page=100" 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to list runners for '$repo'. $([string]::Join("`n", @($runnersJson)))"
+          }
+
+          $runnerPayload = $runnersJson | ConvertFrom-Json -ErrorAction Stop
+          $onlineRunners = @()
+          $eligibleRunners = @()
+          foreach ($runner in @($runnerPayload.runners)) {
+            if ([string]$runner.status -ne 'online') {
+              continue
+            }
+
+            $onlineRunners += [string]$runner.name
+            $runnerLabels = @{}
+            foreach ($label in @($runner.labels)) {
+              $runnerLabels[[string]$label.name.ToLowerInvariant()] = $true
+            }
+
+            $missingLabels = @($requiredLabels | Where-Object { -not $runnerLabels.ContainsKey($_) })
+            if ($missingLabels.Count -eq 0) {
+              $eligibleRunners += [ordered]@{
+                name = [string]$runner.name
+                labels = @($runner.labels | ForEach-Object { [string]$_.name })
+              }
+            }
+          }
+
+          $report = [ordered]@{
+            schema_version = '1.0'
+            repository = $repo
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+            required_labels = $requiredLabels
+            online_runners = $onlineRunners
+            eligible_runners = $eligibleRunners
+            status = if ($eligibleRunners.Count -gt 0) { 'pass' } else { 'fail' }
+            reason_code = if ($eligibleRunners.Count -gt 0) { 'ok' } else { 'runner_unavailable' }
+            remediation = 'Register at least one online self-hosted runner with labels self-hosted, windows, self-hosted-windows-lv.'
+          }
+
+          $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+          if ($eligibleRunners.Count -gt 0) {
+            "reason_code=ok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "Runner preflight passed. Eligible runners: $($eligibleRunners.Count)."
+            exit 0
+          }
+
+          "reason_code=runner_unavailable" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          throw "[runner_unavailable] No online runner matched required labels ($($requiredLabels -join ', ')). Remediation: $($report.remediation)"
+
+      - name: Upload runner availability preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-runner-availability-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-runner-availability-preflight.json
+          if-no-files-found: error
+
   package:
     name: Package Workspace Installer
+    needs: [runner_preflight]
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
