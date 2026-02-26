@@ -152,6 +152,7 @@ Describe 'Self-hosted machine certification workflow contract' {
 
     It 'builds VIP package in a downstream artifact-consuming job with VIPB contract mapping' {
         $script:workflowContent | Should -Match 'Build VI Package From Certification Outputs'
+        $script:workflowContent | Should -Match 'if:\s*\$\{\{\s*needs\.resolve-setups\.outputs\.package_setups_json != ''\[\]''\s*\}\}'
         $script:workflowContent | Should -Match 'package_setups_json'
         $script:workflowContent | Should -Match 'fromJson\(needs\.resolve-setups\.outputs\.package_setups_json\)'
         $script:workflowContent | Should -Match 'PACKAGE_SETUP_TARGET='

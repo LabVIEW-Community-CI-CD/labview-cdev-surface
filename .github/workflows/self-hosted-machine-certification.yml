@@ -1460,6 +1460,7 @@ jobs:
 
   package-vip:
     name: Build VI Package From Certification Outputs (${{ matrix.setup_name }})
+    if: ${{ needs.resolve-setups.outputs.package_setups_json != '[]' }}
     needs:
       - resolve-setups
       - certify
@@ -2036,4 +2037,5 @@ jobs:
             ${{ steps.build-vip.outputs.vip_output_path }}
             ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
+
 
