@@ -42,9 +42,49 @@ permissions:
   contents: write
 
 jobs:
+  ops_health_preflight:
+    name: Release Ops Health Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      reason_code: ${{ steps.preflight.outputs.reason_code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: preflight
+        name: Enforce ops health preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-ops-health-preflight.json'
+          try {
+            & pwsh -NoProfile -File ./scripts/Invoke-OpsMonitoringSnapshot.ps1 `
+              -SurfaceRepository '${{ github.repository }}' `
+              -RequiredRunnerLabels @('self-hosted', 'windows', 'self-hosted-windows-lv') `
+              -OutputPath $reportPath
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Ops monitoring snapshot returned non-zero exit.'
+            }
+            "reason_code=ok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            "reason_code=ops_unhealthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            throw "[ops_unhealthy] $($_.Exception.Message)"
+          }
+
+      - name: Upload ops health preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ops-health-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-ops-health-preflight.json
+          if-no-files-found: error
+
   runner_preflight:
     name: Release Runner Availability Preflight
     runs-on: ubuntu-latest
+    needs: [ops_health_preflight]
     outputs:
       reason_code: ${{ steps.check.outputs.reason_code }}
     steps:
@@ -121,7 +161,7 @@ jobs:
 
   package:
     name: Package Workspace Installer
-    needs: [runner_preflight]
+    needs: [ops_health_preflight, runner_preflight]
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
@@ -214,6 +254,10 @@ jobs:
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $releaseArtifactRoot = [string]$manifest.installer_contract.release_build_contract.artifact_root
           $parityArtifactRoot = [string]$manifest.installer_contract.container_parity_contract.artifact_root
+          $signaturePolicy = $manifest.installer_contract.release_client.signature_policy
+          $signatureDualModeStartUtc = [DateTime]::Parse([string]$signaturePolicy.dual_mode_start_utc).ToUniversalTime()
+          $signatureCanaryEnforceUtc = [DateTime]::Parse([string]$signaturePolicy.canary_enforce_utc).ToUniversalTime()
+          $signatureGraceEndUtc = [DateTime]::Parse([string]$signaturePolicy.grace_end_utc).ToUniversalTime()
           if ([string]::IsNullOrWhiteSpace($releaseArtifactRoot)) { $releaseArtifactRoot = 'artifacts\release' }
           if ([string]::IsNullOrWhiteSpace($parityArtifactRoot)) { $parityArtifactRoot = 'artifacts\parity' }
 
@@ -309,6 +353,29 @@ jobs:
             Write-Warning 'No code-signing certificate configured. Publishing unsigned installer metadata.'
           }
 
+          $nowUtc = (Get-Date).ToUniversalTime()
+          $signatureRequired = $false
+          $signatureEnforcementState = 'pre_dual_mode'
+          if ($nowUtc -ge $signatureDualModeStartUtc) {
+            $signatureEnforcementState = 'dual_mode_warning'
+            if ($releaseChannel -eq 'canary' -and $nowUtc -ge $signatureCanaryEnforceUtc) {
+              $signatureRequired = $true
+              $signatureEnforcementState = 'canary_enforced'
+            } elseif (($releaseChannel -eq 'stable' -or $releaseChannel -eq 'prerelease') -and $nowUtc -ge $signatureGraceEndUtc) {
+              $signatureRequired = $true
+              $signatureEnforcementState = 'stable_prerelease_enforced'
+            }
+          }
+
+          if ($signatureStatus -ne 'signed_valid') {
+            if ($signatureRequired) {
+              throw "[signature_required] Channel '$releaseChannel' requires signed installer artifacts after policy cutoff. now_utc=$($nowUtc.ToString('o')) signature_status=$signatureStatus"
+            }
+            if ($nowUtc -ge $signatureDualModeStartUtc) {
+              Write-Warning "[signature_warning] Unsigned installer is allowed during dual-mode transition. channel=$releaseChannel dual_mode_start_utc=$($signatureDualModeStartUtc.ToString('o')) canary_enforce_utc=$($signatureCanaryEnforceUtc.ToString('o')) grace_end_utc=$($signatureGraceEndUtc.ToString('o'))"
+            }
+          }
+
           $assetSha = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "{0} *{1}" -f $assetSha, $assetName | Set-Content -LiteralPath (Join-Path $releaseRoot "$assetName.sha256") -Encoding ascii
 
@@ -367,6 +434,11 @@ jobs:
             signature_subject = $signatureSubject
             signature_thumbprint = $signatureThumbprint
             signature_timestamp_utc = $signatureTimestampUtc
+            signature_enforcement_state = $signatureEnforcementState
+            signature_required = $signatureRequired
+            signature_dual_mode_start_utc = $signatureDualModeStartUtc.ToString('o')
+            signature_canary_enforce_utc = $signatureCanaryEnforceUtc.ToString('o')
+            signature_grace_end_utc = $signatureGraceEndUtc.ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
 
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8

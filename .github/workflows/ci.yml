@@ -65,13 +65,19 @@ jobs:
             './tests/VsCodeTasksContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
+            './tests/OpsMonitoringWorkflowContract.Tests.ps1',
+            './tests/OpsAutoRemediationWorkflowContract.Tests.ps1',
+            './tests/ReleaseControlPlaneWorkflowContract.Tests.ps1',
+            './tests/CanarySmokeTagHygieneWorkflowContract.Tests.ps1',
+            './tests/WeeklyOpsSloReportWorkflowContract.Tests.ps1',
             './tests/NightlySupplyChainCanaryWorkflowContract.Tests.ps1',
             './tests/WindowsLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/LinuxLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/ReleaseWithWindowsGateWorkflowContract.Tests.ps1',
             './tests/DockerDesktopLinuxIterationContract.Tests.ps1',
             './tests/WorkspaceInstallerExerciseContract.Tests.ps1',
-            './tests/WorkspaceInstallerIterationContract.Tests.ps1'
+            './tests/WorkspaceInstallerIterationContract.Tests.ps1',
+            './tests/ScopeAOpsRunbookContract.Tests.ps1'
           ) -CI -Output Detailed
 
   workspace-installer-contract:

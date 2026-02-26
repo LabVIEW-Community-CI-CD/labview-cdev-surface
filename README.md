@@ -296,6 +296,39 @@ Fork/upstream cdev-cli synchronization policy starts with full sync metadata:
 
 Release channel metadata can be set during publish with workflow input `release_channel` (`stable`, `prerelease`, `canary`).
 
+## Ops monitoring and hygiene
+
+`ops-monitoring.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-OpsMonitoringSnapshot.ps1` and fails on:
+- runner availability drift (`runner_unavailable`)
+- cdev-cli sync-guard drift/failure (`sync_guard_failed`, `sync_guard_stale`, `sync_guard_missing`, `sync_guard_incomplete`)
+
+Every run uploads `ops-monitoring-report.json`. On failure, automation updates a single tracking issue (`Ops Monitoring Alert`).
+
+`canary-smoke-tag-hygiene.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-CanarySmokeTagHygiene.ps1` to keep latest `v0.YYYYMMDD.N` canary smoke tag(s) for a UTC date and delete older tags deterministically.
+
+`ops-autoremediate.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-OpsAutoRemediation.ps1` to:
+- auto-dispatch and verify cdev-cli sync-guard when sync drift is detected
+- re-evaluate health after remediation
+- fail with deterministic reason codes when manual intervention is still required
+
+`release-control-plane.yml` is the autonomous orchestrator. It runs `scripts/Invoke-ReleaseControlPlane.ps1` with modes:
+- `CanaryCycle`
+- `PromotePrerelease`
+- `PromoteStable`
+- `FullCycle`
+- `Validate`
+
+Control-plane behavior:
+1. Runs ops health gate and optional auto-remediation.
+2. Dispatches release workflow with deterministic channel-specific tag windows (`canary=1-49`, `prerelease=50-79`, `stable=80-99` for `v0.YYYYMMDD.N`).
+3. Verifies run completion.
+4. Applies canary smoke tag hygiene after canary publish.
+
+`weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
+
+Runbook for incidents:
+- `docs/runbooks/release-ops-incident-response.md`
+
 ## Nightly canary
 
 `nightly-supplychain-canary.yml` runs on a nightly schedule and on demand. It executes:

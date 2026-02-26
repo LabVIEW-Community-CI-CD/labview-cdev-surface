@@ -1,0 +1,159 @@
+name: release-control-plane
+
+on:
+  schedule:
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Control-plane mode.
+        required: false
+        default: FullCycle
+        type: choice
+        options:
+          - Validate
+          - CanaryCycle
+          - PromotePrerelease
+          - PromoteStable
+          - FullCycle
+      sync_guard_max_age_hours:
+        description: Maximum age in hours for latest successful sync-guard run.
+        required: false
+        default: '12'
+        type: string
+      auto_remediate:
+        description: Auto-remediate ops drift before release dispatch.
+        required: false
+        default: true
+        type: boolean
+      keep_latest_canary_n:
+        description: Number of canary smoke tags to keep per date.
+        required: false
+        default: '1'
+        type: string
+      dry_run:
+        description: Run planning and health gates only; do not dispatch releases.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+jobs:
+  release-control-plane:
+    name: Release Control Plane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Execute autonomous release control plane
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-report.json'
+
+          $mode = [string]'${{ inputs.mode }}'
+          if ([string]::IsNullOrWhiteSpace($mode)) {
+            $mode = 'FullCycle'
+          }
+
+          $syncGuardAgeHoursText = [string]'${{ inputs.sync_guard_max_age_hours }}'
+          $syncGuardAgeHours = 12
+          if (-not [string]::IsNullOrWhiteSpace($syncGuardAgeHoursText)) {
+            $parsedSyncGuardAgeHours = 0
+            if (-not [int]::TryParse($syncGuardAgeHoursText, [ref]$parsedSyncGuardAgeHours)) {
+              throw "sync_guard_max_age_hours must be an integer. actual='$syncGuardAgeHoursText'"
+            }
+            $syncGuardAgeHours = $parsedSyncGuardAgeHours
+          }
+
+          $keepLatestCanaryNText = [string]'${{ inputs.keep_latest_canary_n }}'
+          $keepLatestCanaryN = 1
+          if (-not [string]::IsNullOrWhiteSpace($keepLatestCanaryNText)) {
+            $parsedKeepLatestCanaryN = 0
+            if (-not [int]::TryParse($keepLatestCanaryNText, [ref]$parsedKeepLatestCanaryN)) {
+              throw "keep_latest_canary_n must be an integer. actual='$keepLatestCanaryNText'"
+            }
+            $keepLatestCanaryN = $parsedKeepLatestCanaryN
+          }
+
+          $autoRemediateText = [string]'${{ inputs.auto_remediate }}'
+          $autoRemediate = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoRemediateText)) {
+            $autoRemediate = [System.Convert]::ToBoolean($autoRemediateText)
+          }
+
+          $dryRunText = [string]'${{ inputs.dry_run }}'
+          $dryRun = $false
+          if (-not [string]::IsNullOrWhiteSpace($dryRunText)) {
+            $dryRun = [System.Convert]::ToBoolean($dryRunText)
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-ReleaseControlPlane.ps1 `
+            -Repository '${{ github.repository }}' `
+            -Branch 'main' `
+            -Mode $mode `
+            -SyncGuardMaxAgeHours $syncGuardAgeHours `
+            -KeepLatestCanaryN $keepLatestCanaryN `
+            -AutoRemediate:$autoRemediate `
+            -DryRun:$dryRun `
+            -OutputPath $reportPath
+
+      - name: Upload release control plane report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-control-plane-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-control-plane-report.json
+          if-no-files-found: error
+
+      - name: Open or update release control plane incident issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Control Plane Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Release control plane report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $body = @"
+          Release control plane failed.
+
+          - Run: $env:RUN_URL
+          - Mode: $($report.mode)
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Repository: $($report.repository)
+          "@
+
+          $existingJson = & gh issue list -R $env:REPOSITORY --state open --search "$title in:title" --json number --limit 1
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to query existing release control plane incident issue.'
+          }
+
+          $existing = @($existingJson | ConvertFrom-Json)
+          if ($existing.Count -gt 0) {
+            $number = [string]$existing[0].number
+            & gh issue comment $number -R $env:REPOSITORY --body $body
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to append release control plane issue comment to #$number."
+            }
+          } else {
+            & gh issue create -R $env:REPOSITORY --title $title --body $body
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Failed to create release control plane incident issue.'
+            }
+          }

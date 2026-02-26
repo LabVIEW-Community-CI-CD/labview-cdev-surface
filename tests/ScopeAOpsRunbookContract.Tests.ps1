@@ -1,0 +1,42 @@
+#Requires -Version 7.0
+#Requires -Modules Pester
+
+$ErrorActionPreference = 'Stop'
+
+Describe 'Scope A ops runbook contract' {
+    BeforeAll {
+        $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
+        $script:runbookPath = Join-Path $script:repoRoot 'docs/runbooks/release-ops-incident-response.md'
+        $script:readmePath = Join-Path $script:repoRoot 'README.md'
+        $script:agentsPath = Join-Path $script:repoRoot 'AGENTS.md'
+
+        foreach ($path in @($script:runbookPath, $script:readmePath, $script:agentsPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Required ops hardening contract file missing: $path"
+            }
+        }
+
+        $script:runbookContent = Get-Content -LiteralPath $script:runbookPath -Raw
+        $script:readmeContent = Get-Content -LiteralPath $script:readmePath -Raw
+        $script:agentsContent = Get-Content -LiteralPath $script:agentsPath -Raw
+    }
+
+    It 'documents deterministic incident commands for runner, sync-guard, and canary hygiene' {
+        $script:runbookContent | Should -Match 'Get-Service'
+        $script:runbookContent | Should -Match 'fork-upstream-sync-guard'
+        $script:runbookContent | Should -Match 'Invoke-ControlledForkForceAlign\.ps1'
+        $script:runbookContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
+        $script:runbookContent | Should -Match '20260226'
+    }
+
+    It 'keeps README and AGENTS aligned to Scope A workflows' {
+        $script:readmeContent | Should -Match 'ops-monitoring\.yml'
+        $script:readmeContent | Should -Match 'canary-smoke-tag-hygiene\.yml'
+        $script:readmeContent | Should -Match 'release-ops-incident-response\.md'
+
+        $script:agentsContent | Should -Match 'Ops Monitoring Policy'
+        $script:agentsContent | Should -Match 'runner_unavailable'
+        $script:agentsContent | Should -Match 'sync_guard_failed'
+        $script:agentsContent | Should -Match 'canary-smoke-tag-hygiene\.yml'
+    }
+}

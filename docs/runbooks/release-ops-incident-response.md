@@ -1,0 +1,126 @@
+# Release Ops Incident Response Runbook
+
+## Purpose
+Deterministic operator response for Scope A hardening controls:
+- runner availability monitoring
+- cdev-cli fork/upstream sync-guard monitoring
+- canary smoke tag hygiene
+
+## Inputs
+- Surface repository: `LabVIEW-Community-CI-CD/labview-cdev-surface-fork`
+- Sync-guard repository: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+- Runner root (service mode): `D:\dev\gh-runner-surface-fork`
+
+## Triage
+1. Open latest `ops-monitoring` run and inspect `ops-monitoring-report-<run_id>` artifact.
+2. Read `reason_codes`.
+3. Execute remediation by reason code.
+4. If remediation is automatable, dispatch `ops-autoremediate.yml` first and re-check health.
+
+Reason code mapping:
+- `runner_unavailable`: no online self-hosted runner matched required labels.
+- `sync_guard_failed`: latest completed cdev-cli sync-guard run failed.
+- `sync_guard_stale`: latest successful sync-guard run exceeded max-age policy.
+- `sync_guard_missing`: no sync-guard run found for branch.
+- `sync_guard_incomplete`: only in-progress/queued runs exist; no completed run yet.
+
+## Runner Unavailable Remediation
+1. Verify repository runner state:
+
+```powershell
+gh api repos/LabVIEW-Community-CI-CD/labview-cdev-surface-fork/actions/runners `
+  --jq '.runners[] | {name,status,busy,labels:(.labels|map(.name))}'
+```
+
+2. On runner host, verify service is running and automatic:
+
+```powershell
+Get-Service -Name 'actions.runner.LabVIEW-Community-CI-CD-labview-cdev-surface-fork*' |
+  Select-Object Name, Status, StartType
+```
+
+3. If stopped, restart:
+
+```powershell
+Start-Service -Name 'actions.runner.LabVIEW-Community-CI-CD-labview-cdev-surface-fork*'
+```
+
+4. Re-run `ops-monitoring` by dispatch and confirm pass.
+
+## Sync Guard Drift Remediation
+1. Dispatch upstream sync guard:
+
+```powershell
+gh workflow run fork-upstream-sync-guard --repo LabVIEW-Community-CI-CD/labview-cdev-cli
+```
+
+2. Watch result:
+
+```powershell
+gh run list --repo LabVIEW-Community-CI-CD/labview-cdev-cli --workflow fork-upstream-sync-guard --limit 1
+```
+
+3. If failed due fork/upstream drift, run controlled force-align from cdev-cli repo:
+
+```powershell
+Set-Location D:\dev\labview-cdev-cli
+pwsh -File .\scripts\Invoke-ControlledForkForceAlign.ps1
+```
+
+4. Re-check parity:
+
+```powershell
+gh api repos/LabVIEW-Community-CI-CD/labview-cdev-cli/commits/main --jq .sha
+gh api repos/svelderrainruiz/labview-cdev-cli/commits/main --jq .sha
+```
+
+5. Dispatch auto-remediation workflow (preferred control-plane path):
+
+```powershell
+gh workflow run ops-autoremediate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+## Canary Smoke Tag Hygiene Remediation
+Keep latest only for one UTC date key (`YYYYMMDD`):
+
+```powershell
+Set-Location D:\dev\labview-cdev-surface-fork
+pwsh -File .\scripts\Invoke-CanarySmokeTagHygiene.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -DateUtc 20260226 `
+  -KeepLatestN 1 `
+  -Delete
+```
+
+Dry-run before deletion:
+
+```powershell
+pwsh -File .\scripts\Invoke-CanarySmokeTagHygiene.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -DateUtc 20260226 `
+  -KeepLatestN 1
+```
+
+## Autonomous Control Plane Dispatch
+Run full autonomous cycle manually:
+
+```powershell
+gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f mode=FullCycle `
+  -f auto_remediate=true `
+  -f dry_run=false
+```
+
+Run validation-only health/policy gate:
+
+```powershell
+gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f mode=Validate `
+  -f dry_run=true
+```
+
+## Evidence to Attach to Incident
+- `ops-monitoring-report.json`
+- `canary-smoke-tag-hygiene-report.json`
+- sync guard run URL
+- parity SHAs (upstream and fork)

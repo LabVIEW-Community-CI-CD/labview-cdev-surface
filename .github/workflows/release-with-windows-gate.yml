@@ -60,15 +60,49 @@ jobs:
             throw "Release orchestration is restricted to '$expectedRepo'. Current repository '$actualRepo' is not allowed."
           }
 
+  ops_health_gate:
+    name: Ops Health Gate
+    runs-on: ubuntu-latest
+    needs: [repo_guard]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enforce ops health preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-ops-health-gate-report.json'
+          try {
+            & pwsh -NoProfile -File ./scripts/Invoke-OpsMonitoringSnapshot.ps1 `
+              -SurfaceRepository '${{ github.repository }}' `
+              -OutputPath $reportPath
+            if ($LASTEXITCODE -ne 0) {
+              throw 'ops snapshot failed.'
+            }
+          } catch {
+            throw "[ops_unhealthy] $($_.Exception.Message)"
+          }
+
+      - name: Upload ops health gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ops-health-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-ops-health-gate-report.json
+          if-no-files-found: error
+
   windows_gate:
     name: Windows Gate
-    needs: [repo_guard]
+    needs: [repo_guard, ops_health_gate]
     uses: ./.github/workflows/_windows-labview-image-gate-core.yml
     secrets: inherit
 
   linux_gate:
     name: Linux Gate
-    needs: [repo_guard]
+    needs: [repo_guard, ops_health_gate]
     uses: ./.github/workflows/_linux-labview-image-gate-core.yml
     secrets: inherit
 
@@ -76,7 +110,7 @@ jobs:
     name: Gate Policy
     runs-on: ubuntu-latest
     if: ${{ always() }}
-    needs: [repo_guard, windows_gate, linux_gate]
+    needs: [repo_guard, ops_health_gate, windows_gate, linux_gate]
     outputs:
       override_applied: ${{ steps.evaluate.outputs.override_applied }}
       override_reason: ${{ steps.evaluate.outputs.override_reason }}
@@ -87,6 +121,7 @@ jobs:
         shell: pwsh
         env:
           REPO_GUARD_RESULT: ${{ needs.repo_guard.result }}
+          OPS_HEALTH_GATE_RESULT: ${{ needs.ops_health_gate.result }}
           WINDOWS_GATE_RESULT: ${{ needs.windows_gate.result }}
           LINUX_GATE_RESULT: ${{ needs.linux_gate.result }}
           ALLOW_GATE_OVERRIDE: ${{ inputs.allow_gate_override }}
@@ -96,6 +131,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $repoGuardResult = [string]$env:REPO_GUARD_RESULT
+          $opsHealthGateResult = [string]$env:OPS_HEALTH_GATE_RESULT
           $windowsGateResult = [string]$env:WINDOWS_GATE_RESULT
           $linuxGateResult = [string]$env:LINUX_GATE_RESULT
           $allowOverride = [System.Convert]::ToBoolean([string]$env:ALLOW_GATE_OVERRIDE)
@@ -105,6 +141,9 @@ jobs:
           $overrideApplied = $false
           if ($repoGuardResult -ne 'success') {
             throw "Repository guard did not succeed. Blocking release publish."
+          }
+          if ($opsHealthGateResult -ne 'success') {
+            throw "Ops health gate did not succeed. Blocking release publish."
           }
           if ($windowsGateResult -eq 'success' -and $linuxGateResult -eq 'success') {
             Write-Host 'Windows and Linux gates passed. Release publish is allowed.'

@@ -46,6 +46,12 @@ Describe 'Workspace installer release workflow contract' {
     }
 
     It 'defines package and publish jobs with release asset upload' {
+        $script:coreWorkflowContent | Should -Match 'name:\s*Release Ops Health Preflight'
+        $script:coreWorkflowContent | Should -Match 'Enforce ops health preflight'
+        $script:coreWorkflowContent | Should -Match 'Invoke-OpsMonitoringSnapshot\.ps1'
+        $script:coreWorkflowContent | Should -Match 'reason_code=ops_unhealthy'
+        $script:coreWorkflowContent | Should -Match '\[ops_unhealthy\]'
+        $script:coreWorkflowContent | Should -Match 'release-ops-health-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Release Runner Availability Preflight'
         $script:coreWorkflowContent | Should -Match 'Validate eligible self-hosted release runner availability'
         $script:coreWorkflowContent | Should -Match 'repos/\$repo/actions/runners\?per_page=100'
@@ -53,7 +59,7 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match '\[runner_unavailable\]'
         $script:coreWorkflowContent | Should -Match 'release-runner-availability-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Package Workspace Installer'
-        $script:coreWorkflowContent | Should -Match 'needs:\s*\[runner_preflight\]'
+        $script:coreWorkflowContent | Should -Match 'needs:\s*\[ops_health_preflight,\s*runner_preflight\]'
         $script:coreWorkflowContent | Should -Match 'name:\s*Publish GitHub Release Asset'
         $script:coreWorkflowContent | Should -Match 'Release preflight - verify icon-editor upstream pin freshness'
         $script:coreWorkflowContent | Should -Match 'repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop'
@@ -68,6 +74,11 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Get-AuthenticodeSignature'
         $script:coreWorkflowContent | Should -Match 'WORKSPACE_INSTALLER_CODESIGN_PFX_B64'
         $script:coreWorkflowContent | Should -Match 'WORKSPACE_INSTALLER_CODESIGN_PFX_PASSWORD'
+        $script:coreWorkflowContent | Should -Match 'signatureDualModeStartUtc'
+        $script:coreWorkflowContent | Should -Match 'signatureCanaryEnforceUtc'
+        $script:coreWorkflowContent | Should -Match 'signatureGraceEndUtc'
+        $script:coreWorkflowContent | Should -Match '\[signature_required\]'
+        $script:coreWorkflowContent | Should -Match '\[signature_warning\]'
         $script:coreWorkflowContent | Should -Match 'release-manifest\.json'
         $script:coreWorkflowContent | Should -Match 'release and parity artifact roots are identical'
         $script:coreWorkflowContent | Should -Match 'must not point to parity path'
