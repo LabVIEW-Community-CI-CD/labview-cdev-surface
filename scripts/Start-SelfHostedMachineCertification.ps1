@@ -136,7 +136,7 @@ function Assert-DispatchRoutingContract {
 
     $labels = @(
         Split-LabelCsv -Csv $RunnerLabelsCsv |
-        ForEach-Object { ([string]$_).Trim() } |
+        ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Select-Object -Unique
     )
@@ -145,12 +145,13 @@ function Assert-DispatchRoutingContract {
     }
 
     $requiredSetupLabel = Get-SetupRouteLabel -Setup $Setup
-    $setupLabels = @($labels | Where-Object { [string]$_ -like 'cert-setup-*' })
-    if ($labels -notcontains $requiredSetupLabel) {
-        throw ("dispatch_routing_setup_label_missing: setup '{0}' requires setup label '{1}' in runner labels '{2}'." -f [string]$Setup.name, $requiredSetupLabel, ($labels -join ','))
+    $setupLabels = @($labels | Where-Object { [string]$_ -like 'cert-setup-*' } | Select-Object -Unique)
+    $setupLabelCount = @($setupLabels).Count
+    if ($setupLabelCount -ne 1) {
+        throw ("dispatch_routing_setup_label_count_invalid: setup '{0}' requires exactly one setup route label '{1}', found count={2} labels='{3}'." -f [string]$Setup.name, $requiredSetupLabel, $setupLabelCount, ($setupLabels -join ','))
     }
-    if (@($setupLabels | Where-Object { [string]$_ -ne $requiredSetupLabel }).Count -gt 0) {
-        throw ("dispatch_routing_setup_label_ambiguous: setup '{0}' resolved multiple setup route labels '{1}'." -f [string]$Setup.name, ($setupLabels -join ','))
+    if (-not [string]::Equals([string]$setupLabels[0], $requiredSetupLabel, [System.StringComparison]::Ordinal)) {
+        throw ("dispatch_routing_setup_label_mismatch: setup '{0}' requires setup label '{1}' but resolved '{2}'." -f [string]$Setup.name, $requiredSetupLabel, [string]$setupLabels[0])
     }
 
     $expectedLabviewYear = Get-SetupExpectedLabviewYear -Setup $Setup
@@ -158,28 +159,37 @@ function Assert-DispatchRoutingContract {
     $owner = Get-RepositoryOwner -Repository $Repository
     $requiresActorLabel = $requiresActorLabelByYear -and [string]::Equals($owner, 'LabVIEW-Community-CI-CD', [System.StringComparison]::OrdinalIgnoreCase)
 
-    $actorLabels = @($labels | Where-Object { [string]$_ -like 'cert-actor-*' })
-    $actorLabelPresent = @($actorLabels).Count -gt 0
+    $expectedActorLabel = ([string]$ActorRunnerLabel).Trim().ToLowerInvariant()
+    $actorLabels = @($labels | Where-Object { [string]$_ -like 'cert-actor-*' } | Select-Object -Unique)
+    $actorLabelCount = @($actorLabels).Count
+    $actorLabelPresent = $actorLabelCount -gt 0
     if ($requiresActorLabel -and -not $actorLabelPresent) {
         throw ("dispatch_routing_actor_label_missing: setup '{0}' (LabVIEW {1}) requires actor label for upstream dispatch; labels='{2}'." -f [string]$Setup.name, $expectedLabviewYear, ($labels -join ','))
     }
-    if ($requiresActorLabel -and $labels -notcontains $ActorRunnerLabel) {
-        throw ("dispatch_routing_actor_label_mismatch: setup '{0}' expected actor label '{1}' but resolved labels were '{2}'." -f [string]$Setup.name, $ActorRunnerLabel, ($labels -join ','))
+    if ($requiresActorLabel -and $actorLabelCount -ne 1) {
+        throw ("dispatch_routing_actor_label_count_invalid: setup '{0}' expected exactly one actor label '{1}', found count={2} labels='{3}'." -f [string]$Setup.name, $expectedActorLabel, $actorLabelCount, ($actorLabels -join ','))
+    }
+    if ($requiresActorLabel -and $actorLabelCount -gt 0 -and $actorLabels[0] -notmatch '^cert-actor-[a-z0-9-]+-[a-z0-9-]+$') {
+        throw ("dispatch_routing_actor_label_format_invalid: setup '{0}' resolved actor label '{1}' with invalid format." -f [string]$Setup.name, [string]$actorLabels[0])
+    }
+    if ($requiresActorLabel -and $actorLabelCount -eq 1 -and -not [string]::Equals([string]$actorLabels[0], $expectedActorLabel, [System.StringComparison]::Ordinal)) {
+        throw ("dispatch_routing_actor_label_mismatch: setup '{0}' expected actor label '{1}' but resolved '{2}'." -f [string]$Setup.name, $expectedActorLabel, [string]$actorLabels[0])
     }
 
     return [pscustomobject]@{
         pass = $true
         expected_labview_year = $expectedLabviewYear
         required_setup_label = $requiredSetupLabel
+        setup_label_count = $setupLabelCount
         setup_labels_csv = ($setupLabels -join ',')
         requires_actor_label = $requiresActorLabel
-        required_actor_label = $ActorRunnerLabel
+        required_actor_label = $expectedActorLabel
+        actor_label_count = $actorLabelCount
         actor_label_present = $actorLabelPresent
         actor_labels_csv = ($actorLabels -join ',')
         resolved_labels_csv = ($labels -join ',')
     }
 }
-
 function Get-ActorMachineName {
     param([string]$PreferredName)
 

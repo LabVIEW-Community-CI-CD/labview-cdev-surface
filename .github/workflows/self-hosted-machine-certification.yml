@@ -295,23 +295,32 @@ jobs:
           trace_jq matrix_routing_diagnostics
           jq -c '
             map(
-              (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";""))) as $labels
+              (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";"") | ascii_downcase)) as $labels
               | (.setup_name // "") as $setup_name
+              | ($labels | map(select(startswith("cert-setup-")))) as $setup_labels
+              | ($labels | map(select(startswith("cert-actor-")))) as $actor_labels
               | {
                   setup_name: $setup_name,
                   expected_labview_year: .expected_labview_year,
                   contract_labview_year: .contract_labview_year,
                   required_setup_label: ("cert-setup-" + $setup_name),
                   requires_actor_label: ((.expected_labview_year == "2025") or (.expected_labview_year == "2026")),
+                  labels: $labels,
+                  setup_labels: $setup_labels,
+                  setup_label_count: ($setup_labels | length),
                   has_setup_label: ($labels | index("cert-setup-" + $setup_name) != null),
-                  actor_labels: ($labels | map(select(startswith("cert-actor-")))),
-                  has_actor_label: (($labels | map(select(startswith("cert-actor-"))) | length) > 0),
-                  labels: $labels
+                  has_single_setup_label: (($setup_labels | length) == 1),
+                  has_only_required_setup_label: (($setup_labels | length) == 1 and $setup_labels[0] == ("cert-setup-" + $setup_name)),
+                  actor_labels: $actor_labels,
+                  actor_label_count: ($actor_labels | length),
+                  has_actor_label: (($actor_labels | length) > 0),
+                  has_single_actor_label: (($actor_labels | length) == 1),
+                  has_actor_label_format: (($actor_labels | all(test("^cert-actor-[a-z0-9-]+-[a-z0-9-]+$"))))
                 }
             )' matrix.json > matrix-routing-diagnostics.json
 
           trace_jq routing_failure_count
-          ROUTING_FAILURE_COUNT="$(jq '[ .[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not))) ] | length' matrix-routing-diagnostics.json)"
+          ROUTING_FAILURE_COUNT="$(jq '[ .[] | select((.has_setup_label | not) or (.has_single_setup_label | not) or (.has_only_required_setup_label | not) or (.requires_actor_label and ((.has_actor_label | not) or (.has_single_actor_label | not) or (.has_actor_label_format | not)))) ] | length' matrix-routing-diagnostics.json)"
           {
             echo "### Routing matrix contract"
             trace_jq matrix_count
@@ -323,12 +332,12 @@ jobs:
           if jq -e '.[] | select(.requires_actor_label == true)' matrix-routing-diagnostics.json > /dev/null; then
             echo "#### 2025/2026 actor-label diagnostics" >> "$GITHUB_STEP_SUMMARY"
             trace_jq matrix_actor_diagnostics
-            jq -r '.[] | select(.requires_actor_label == true) | "- \(.setup_name): setup_label=\(.has_setup_label) actor_label=\(.has_actor_label) actor_tokens=\(.actor_labels | join(","))"' matrix-routing-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.[] | select(.requires_actor_label == true) | "- \(.setup_name): setup_labels=\(.setup_labels | join(",")) setup_count=\(.setup_label_count) actor_labels=\(.actor_labels | join(",")) actor_count=\(.actor_label_count) actor_format=\(.has_actor_label_format)"' matrix-routing-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
           fi
           if [[ "$ROUTING_FAILURE_COUNT" != "0" ]]; then
-            echo "::error::routing_matrix_contract_failed: setup and actor label contract violations detected."
+            echo "::error::routing_matrix_contract_failed: setup/actor label cardinality or format contract violations detected."
             trace_jq matrix_routing_failures_dump
-            jq '.[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not)))' matrix-routing-diagnostics.json
+            jq '.[] | select((.has_setup_label | not) or (.has_single_setup_label | not) or (.has_only_required_setup_label | not) or (.requires_actor_label and ((.has_actor_label | not) or (.has_single_actor_label | not) or (.has_actor_label_format | not))))' matrix-routing-diagnostics.json
             exit 1
           fi
           trace_jq matrix_emit_setups_json
@@ -530,17 +539,62 @@ jobs:
           }
 
           $requiredSetupLabel = ("cert-setup-{0}" -f $setupName).ToLowerInvariant()
+          $setupLabels = @($labels | Where-Object { [string]$_ -like 'cert-setup-*' } | Select-Object -Unique)
+          $setupLabelCount = @($setupLabels).Count
           $hasSetupLabel = @($labels | Where-Object { [string]$_ -eq $requiredSetupLabel }).Count -gt 0
+          $hasSingleSetupLabel = $setupLabelCount -eq 1
+          $hasOnlyRequiredSetupLabel = $hasSingleSetupLabel -and [string]::Equals([string]$setupLabels[0], $requiredSetupLabel, [System.StringComparison]::Ordinal)
+
           $actorLabels = @($labels | Where-Object { [string]$_ -like 'cert-actor-*' } | Select-Object -Unique)
+          $actorLabelCount = @($actorLabels).Count
           $requiresActorLabel = $is2025Or2026
-          $hasActorLabel = @($actorLabels).Count -gt 0
+          $hasActorLabel = $actorLabelCount -gt 0
+          $hasSingleActorLabel = $actorLabelCount -eq 1
+          $hasActorLabelFormat = @($actorLabels | Where-Object { [string]$_ -notmatch '^cert-actor-[a-z0-9-]+-[a-z0-9-]+$' }).Count -eq 0
+          $expectedActorLabel = if ($requiresActorLabel) {
+            $machineToken = ([string]$currentMachine).Trim().ToLowerInvariant()
+            $machineToken = [Regex]::Replace($machineToken, '[^a-z0-9\-]', '-')
+            $machineToken = [Regex]::Replace($machineToken, '-{2,}', '-')
+            $machineToken = $machineToken.Trim('-')
+            if ([string]::IsNullOrWhiteSpace($machineToken)) { $machineToken = 'unknown' }
+
+            $setupToken = ([string]$setupName).Trim().ToLowerInvariant()
+            $setupToken = [Regex]::Replace($setupToken, '[^a-z0-9\-]', '-')
+            $setupToken = [Regex]::Replace($setupToken, '-{2,}', '-')
+            $setupToken = $setupToken.Trim('-')
+            if ([string]::IsNullOrWhiteSpace($setupToken)) { $setupToken = 'unknown' }
+
+            $label = ("cert-actor-{0}-{1}" -f $machineToken, $setupToken)
+            if ($label.Length -gt 63) {
+              $label = $label.Substring(0, 63).TrimEnd('-')
+            }
+            $label
+          } else {
+            ''
+          }
+          $hasExpectedActorLabel = if ($requiresActorLabel) { $actorLabels -contains $expectedActorLabel } else { $true }
 
           $failures = @()
           if (-not $hasSetupLabel) {
             $failures += ("missing setup route label '{0}'." -f $requiredSetupLabel)
           }
+          if (-not $hasSingleSetupLabel) {
+            $failures += ("setup route label cardinality invalid; expected exactly 1 cert-setup-* label, found {0}." -f $setupLabelCount)
+          }
+          if (-not $hasOnlyRequiredSetupLabel) {
+            $failures += ("setup route label mismatch; expected '{0}', resolved '{1}'." -f $requiredSetupLabel, ($setupLabels -join ','))
+          }
           if ($requiresActorLabel -and -not $hasActorLabel) {
             $failures += "missing required actor route label token 'cert-actor-*'."
+          }
+          if ($requiresActorLabel -and -not $hasSingleActorLabel) {
+            $failures += ("actor route label cardinality invalid; expected exactly 1 cert-actor-* label, found {0}." -f $actorLabelCount)
+          }
+          if ($requiresActorLabel -and -not $hasActorLabelFormat) {
+            $failures += "actor route label format invalid; expected pattern '^cert-actor-[a-z0-9-]+-[a-z0-9-]+$'."
+          }
+          if ($requiresActorLabel -and $hasActorLabel -and -not $hasExpectedActorLabel) {
+            $failures += ("actor route label mismatch; expected '{0}', resolved '{1}'." -f $expectedActorLabel, ($actorLabels -join ','))
           }
 
           $reportPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'routing-contract-report.json'
@@ -548,16 +602,25 @@ jobs:
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
             setup_name = $setupName
             expected_labview_year = $expectedYear
-            allowed_machine_names_csv = $allowedMachines
-            current_machine_name = $currentMachine
-            required_setup_label = $requiredSetupLabel
-            requires_actor_label = $requiresActorLabel
             labels_parse_mode = $labelsParseMode
             labels_raw_count = [int]$labelsRawCount
             labels_flattened_count = [int]$labelsFlattenedCount
+            allowed_machine_names_csv = $allowedMachines
+            current_machine_name = $currentMachine
+            required_setup_label = $requiredSetupLabel
+            setup_labels = @($setupLabels)
+            setup_label_count = $setupLabelCount
             has_setup_label = $hasSetupLabel
-            has_actor_label = $hasActorLabel
+            has_single_setup_label = $hasSingleSetupLabel
+            has_only_required_setup_label = $hasOnlyRequiredSetupLabel
+            requires_actor_label = $requiresActorLabel
+            expected_actor_label = $expectedActorLabel
+            has_expected_actor_label = $hasExpectedActorLabel
             actor_labels = @($actorLabels)
+            actor_label_count = $actorLabelCount
+            has_actor_label = $hasActorLabel
+            has_single_actor_label = $hasSingleActorLabel
+            has_actor_label_format = $hasActorLabelFormat
             labels = @($labels)
             failures = @($failures)
             pass = (@($failures).Count -eq 0)
@@ -576,12 +639,25 @@ jobs:
               "- labels raw count: $labelsRawCount",
               "- labels flattened count: $labelsFlattenedCount",
               "- required setup label: $requiredSetupLabel",
+              "- setup labels: $(if (@($setupLabels).Count -gt 0) { $setupLabels -join ', ' } else { '(none)' })",
+              "- setup label count: $setupLabelCount",
               "- setup label present: $hasSetupLabel",
+              "- setup label cardinality valid: $hasSingleSetupLabel",
+              "- setup label exact match: $hasOnlyRequiredSetupLabel",
               "- actor labels: $(if (@($actorLabels).Count -gt 0) { $actorLabels -join ', ' } else { '(none)' })",
               "- actor label required: $requiresActorLabel",
+              "- expected actor label: $(if ($requiresActorLabel) { $expectedActorLabel } else { '(n/a)' })",
+              "- actor label count: $actorLabelCount",
               "- actor label present: $hasActorLabel",
+              "- actor label cardinality valid: $hasSingleActorLabel",
+              "- actor label format valid: $hasActorLabelFormat",
+              "- actor label exact match: $hasExpectedActorLabel",
               "- pass: $(@($failures).Count -eq 0)"
             ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+            if (@($failures).Count -gt 0) {
+              @("- failures:") + @($failures | ForEach-Object { "  - $_" }) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
           }
 
           if (@($failures).Count -gt 0) {
@@ -2037,5 +2113,6 @@ jobs:
             ${{ steps.build-vip.outputs.vip_output_path }}
             ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
+
 
 
