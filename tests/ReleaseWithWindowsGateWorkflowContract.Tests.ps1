@@ -21,6 +21,7 @@ Describe 'Release with Windows gate workflow contract' {
         $script:workflowContent | Should -Match 'release_tag:'
         $script:workflowContent | Should -Match 'allow_existing_tag:'
         $script:workflowContent | Should -Match 'prerelease:'
+        $script:workflowContent | Should -Match 'release_channel:'
         $script:workflowContent | Should -Match 'allow_gate_override:'
         $script:workflowContent | Should -Match 'override_reason:'
         $script:workflowContent | Should -Match 'override_incident_url:'

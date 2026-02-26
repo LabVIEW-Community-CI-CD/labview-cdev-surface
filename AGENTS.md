@@ -17,6 +17,10 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Required CLI command surface (stable tokens):
   - `repos doctor`
   - `installer exercise`
+  - `installer install --mode release`
+  - `installer upgrade`
+  - `installer rollback`
+  - `installer status`
   - `postactions collect`
   - `linux deploy-ni`
 - Linux deploy defaults must stay documented as:
@@ -74,13 +78,24 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - `.github/workflows/release-workspace-installer.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_release-workspace-installer-core.yml`.
 - `.github/workflows/windows-labview-image-gate.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_windows-labview-image-gate-core.yml`.
 - Publishing mode is manual dispatch only with explicit semantic tag input (`v<major>.<minor>.<patch>`).
+- Release channel metadata is supported via `release_channel` input (`stable`, `prerelease`, `canary`); default is derived from `prerelease`.
 - Release tags are immutable by default: existing tags must fail publication unless `allow_existing_tag=true` is explicitly set for break-glass recovery.
 - Release creation must bind tag creation to the exact workflow commit SHA (`github.sha`), not a moving branch target.
 - Keep fork-first mutation rules when preparing release changes:
   - mutate `origin` (`svelderrainruiz/labview-cdev-surface`) only
   - open PRs to `LabVIEW-Community-CI-CD/labview-cdev-surface:main`
 - Do not add push-triggered or scheduled release publishing in this repository.
-- Phase-1 release policy is unsigned installer with mandatory SHA256 provenance in release notes.
+- Release packaging must publish:
+  - `lvie-cdev-workspace-installer.exe`
+  - `lvie-cdev-workspace-installer.exe.sha256`
+  - `reproducibility-report.json`
+  - `workspace-installer.spdx.json`
+  - `workspace-installer.slsa.json`
+  - `release-manifest.json`
+- Installer signing policy is Authenticode dual-mode transition:
+  - dual-mode start: `2026-03-15T00:00:00Z`
+  - canary enforce date: `2026-05-15T00:00:00Z`
+  - stable/prerelease enforce date (`grace_end_utc`): `2026-07-01T00:00:00Z`
 
 ## Installer Build Contract
 - `CI Pipeline` (GitHub-hosted) is the required merge check.
@@ -95,6 +110,37 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `Reproducibility Contract` (bit-for-bit hash checks for runner-cli and installer).
   - `Provenance Contract` (SPDX/SLSA generation + hash-link validation).
 - Keep default-branch required checks unchanged until branch-protection contract is intentionally updated.
+
+## Release Client Runtime Contract
+- `scripts/Install-WorkspaceInstallerFromRelease.ps1` is the canonical release-client runtime fallback for install/upgrade/rollback operations.
+- Runtime modes must remain:
+  - `Install`
+  - `Upgrade`
+  - `Rollback`
+  - `Status`
+  - `ValidatePolicy`
+- Runtime must enforce policy allowlist on release source repositories before download.
+- Runtime failure model must preserve deterministic reason codes:
+  - `source_blocked`
+  - `asset_missing`
+  - `hash_mismatch`
+  - `signature_missing`
+  - `signature_invalid`
+  - `provenance_invalid`
+  - `installer_exit_nonzero`
+  - `install_report_missing`
+- Runtime must verify `release-manifest.json`, installer SHA256, Authenticode status (with channel-aware enforcement), SPDX/SLSA linkage, and installer smoke report presence.
+- Release-client state/report policy files:
+  - `C:\dev\workspace-governance\release-policy.json`
+  - `C:\dev\artifacts\workspace-release-state.json`
+  - `C:\dev\artifacts\workspace-release-client-latest.json`
+- Allowed installer release repositories default to:
+  - `LabVIEW-Community-CI-CD/labview-cdev-surface`
+  - `svelderrainruiz/labview-cdev-surface`
+- cdev-cli fork/upstream full-sync alignment metadata is required in `installer_contract.release_client.cdev_cli_sync`:
+  - primary repo: `svelderrainruiz/labview-cdev-cli`
+  - mirror repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+  - strategy: `fork-and-upstream-full-sync`
 
 ## Installer Runtime Gate Contract
 - Installer runtime (`scripts/Install-WorkspaceFromManifest.ps1`) must fail fast if bundled `runner-cli` integrity checks fail.

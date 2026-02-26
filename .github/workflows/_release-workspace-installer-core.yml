@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_channel:
+        description: Explicit release channel metadata (stable, prerelease, canary).
+        required: false
+        default: ''
+        type: string
       override_applied:
         description: Whether controlled gate override was used.
         required: false
@@ -95,6 +100,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          $releaseChannel = [string]'${{ inputs.release_channel }}'
+          $isPrereleaseInput = [System.Convert]::ToBoolean([string]'${{ inputs.prerelease }}')
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = if ($isPrereleaseInput) { 'prerelease' } else { 'stable' }
+          }
+          if ($releaseChannel -notin @('stable', 'prerelease', 'canary')) {
+            throw "Unsupported release channel '$releaseChannel'. Expected stable, prerelease, or canary."
+          }
+
           $assetName = 'lvie-cdev-workspace-installer.exe'
           $releaseRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
           $payloadRoot = Join-Path $releaseRoot 'payload'
@@ -169,6 +183,54 @@ jobs:
 
           $assetPath = Join-Path $releaseRoot $assetName
           Copy-Item -LiteralPath $deterministicInstallerPath -Destination $assetPath -Force
+
+          $signatureStatus = 'not_signed'
+          $signatureSubject = ''
+          $signatureThumbprint = ''
+          $signatureTimestampUtc = ''
+          $codesignPfxB64 = [string]'${{ secrets.WORKSPACE_INSTALLER_CODESIGN_PFX_B64 }}'
+          $codesignPfxPassword = [string]'${{ secrets.WORKSPACE_INSTALLER_CODESIGN_PFX_PASSWORD }}'
+          $timestampServer = [string]'${{ vars.WORKSPACE_INSTALLER_TIMESTAMP_SERVER }}'
+          if ([string]::IsNullOrWhiteSpace($timestampServer)) {
+            $timestampServer = 'http://timestamp.digicert.com'
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($codesignPfxB64) -or -not [string]::IsNullOrWhiteSpace($codesignPfxPassword)) {
+            if ([string]::IsNullOrWhiteSpace($codesignPfxB64) -or [string]::IsNullOrWhiteSpace($codesignPfxPassword)) {
+              throw 'Incomplete signing configuration. Configure WORKSPACE_INSTALLER_CODESIGN_PFX_B64 and WORKSPACE_INSTALLER_CODESIGN_PFX_PASSWORD together.'
+            }
+
+            $pfxPath = Join-Path $releaseRoot 'workspace-installer-signing-cert.pfx'
+            [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($codesignPfxB64))
+
+            $securePassword = ConvertTo-SecureString -String $codesignPfxPassword -AsPlainText -Force
+            $certificate = Get-PfxCertificate -FilePath $pfxPath -Password $securePassword
+            if ($null -eq $certificate) {
+              throw 'Failed to load code-signing certificate from PFX.'
+            }
+
+            $signResult = Set-AuthenticodeSignature -FilePath $assetPath -Certificate $certificate -HashAlgorithm SHA256 -TimestampServer $timestampServer
+            if ($null -eq $signResult -or [string]$signResult.Status -ne 'Valid') {
+              throw "Set-AuthenticodeSignature failed. status=$([string]$signResult.Status)"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath $assetPath
+            if ([string]$signature.Status -ne 'Valid') {
+              throw "Signed installer failed signature verification. status=$([string]$signature.Status)"
+            }
+
+            $signatureStatus = 'signed_valid'
+            if ($null -ne $signature.SignerCertificate) {
+              $signatureSubject = [string]$signature.SignerCertificate.Subject
+              $signatureThumbprint = [string]$signature.SignerCertificate.Thumbprint
+            }
+            if ($null -ne $signature.TimeStamperCertificate) {
+              $signatureTimestampUtc = (Get-Date $signature.TimeStamperCertificate.NotBefore).ToUniversalTime().ToString('o')
+            }
+          } else {
+            Write-Warning 'No code-signing certificate configured. Publishing unsigned installer metadata.'
+          }
+
           $assetSha = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "{0} *{1}" -f $assetSha, $assetName | Set-Content -LiteralPath (Join-Path $releaseRoot "$assetName.sha256") -Encoding ascii
 
@@ -188,15 +250,40 @@ jobs:
             -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
           if ($LASTEXITCODE -ne 0) { throw "Provenance contract validation failed." }
 
+          $releaseManifestPath = Join-Path $releaseRoot 'release-manifest.json'
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseManifest.ps1') `
+            -Repository '${{ github.repository }}' `
+            -ReleaseTag '${{ inputs.release_tag }}' `
+            -Channel $releaseChannel `
+            -InstallerPath $assetPath `
+            -InstallerSha256 $assetSha `
+            -InstallerShaPath (Join-Path $releaseRoot "$assetName.sha256") `
+            -SpdxPath (Join-Path $provRoot 'workspace-installer.spdx.json') `
+            -SlsaPath (Join-Path $provRoot 'workspace-installer.slsa.json') `
+            -ReproducibilityPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') `
+            -OutputPath $releaseManifestPath `
+            -PublishedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) `
+            -SignatureStatus $signatureStatus `
+            -SignatureSubject $signatureSubject `
+            -SignatureThumbprint $signatureThumbprint `
+            -SignatureTimestampUtc $signatureTimestampUtc
+          if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed." }
+
           $metadataPath = Join-Path $releaseRoot 'workspace-installer-metadata.json'
           [ordered]@{
             asset_name = $assetName
             asset_path = $assetPath
             asset_sha256 = $assetSha
+            release_channel = $releaseChannel
             install_command = 'lvie-cdev-workspace-installer.exe /S'
             repro_report = (Join-Path $reproRoot 'workspace-installer-determinism-summary.json')
             spdx_path = (Join-Path $provRoot 'workspace-installer.spdx.json')
             slsa_path = (Join-Path $provRoot 'workspace-installer.slsa.json')
+            release_manifest_name = 'release-manifest.json'
+            signature_status = $signatureStatus
+            signature_subject = $signatureSubject
+            signature_thumbprint = $signatureThumbprint
+            signature_timestamp_utc = $signatureTimestampUtc
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
 
           Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination (Join-Path $releaseRoot 'reproducibility-report.json') -Force
@@ -216,6 +303,7 @@ jobs:
             ${{ runner.temp }}/workspace-installer-release/reproducibility-report.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer.spdx.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer.slsa.json
+            ${{ runner.temp }}/workspace-installer-release/release-manifest.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer-metadata.json
           if-no-files-found: error
 
@@ -240,6 +328,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           ALLOW_EXISTING_TAG: ${{ inputs.allow_existing_tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_CHANNEL: ${{ inputs.release_channel }}
           RELEASE_TARGET_SHA: ${{ github.sha }}
           OVERRIDE_APPLIED: ${{ inputs.override_applied }}
           OVERRIDE_REASON: ${{ inputs.override_reason }}
@@ -258,9 +347,10 @@ jobs:
           $reproPath = Join-Path $artifactRoot 'reproducibility-report.json'
           $spdxPath = Join-Path $artifactRoot 'workspace-installer.spdx.json'
           $slsaPath = Join-Path $artifactRoot 'workspace-installer.slsa.json'
+          $releaseManifestPath = Join-Path $artifactRoot 'release-manifest.json'
           $metadataPath = Join-Path $artifactRoot 'workspace-installer-metadata.json'
 
-          foreach ($path in @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $metadataPath)) {
+          foreach ($path in @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $releaseManifestPath, $metadataPath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
               throw "Required release artifact missing: $path"
             }
@@ -270,6 +360,13 @@ jobs:
           $assetName = [string]$metadata.asset_name
           $assetSha = [string]$metadata.asset_sha256
           $installCommand = [string]$metadata.install_command
+          $releaseChannel = [string]$metadata.release_channel
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = [string]$env:RELEASE_CHANNEL
+          }
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = if ($prerelease) { 'prerelease' } else { 'stable' }
+          }
           if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
             throw "Installer metadata is missing required fields."
           }
@@ -304,6 +401,10 @@ jobs:
             "- $(Split-Path -Path $reproPath -Leaf)"
             "- $(Split-Path -Path $spdxPath -Leaf)"
             "- $(Split-Path -Path $slsaPath -Leaf)"
+            "- $(Split-Path -Path $releaseManifestPath -Leaf)"
+            ""
+            "Release channel:"
+            "- $releaseChannel"
             ""
             "SHA256:"
             "- $assetSha"
@@ -362,9 +463,9 @@ jobs:
           }
 
           if ($allowExistingTag) {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo --clobber
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath $releaseManifestPath -R $repo --clobber
           } else {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo
+            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath $releaseManifestPath -R $repo
           }
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to upload release assets for '$releaseTag'."
