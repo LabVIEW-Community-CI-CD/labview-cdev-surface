@@ -309,9 +309,13 @@ jobs:
           else
             PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
           fi
-          PACKAGE_SETUPS_JSON="$(jq -c --arg setup_name "$PACKAGE_SETUP_TARGET" '
-            [ .[] | select((tostring | contains("\"setup_name\":\"" + $setup_name + "\""))) ]
-          ' matrix.json)"
+          if [[ "$PACKAGE_SETUP_TARGET" == "legacy-2020-desktop-windows" ]]; then
+            PACKAGE_SETUPS_JSON="$(jq -c --arg setup_name "$PACKAGE_SETUP_TARGET" '
+              [ .[] | select(type == "object") | select((.setup_name // "") == $setup_name) ]
+            ' matrix.json)"
+          else
+            PACKAGE_SETUPS_JSON='[]'
+          fi
           if [[ -z "$PACKAGE_SETUPS_JSON" ]]; then
             PACKAGE_SETUPS_JSON='[]'
           fi
