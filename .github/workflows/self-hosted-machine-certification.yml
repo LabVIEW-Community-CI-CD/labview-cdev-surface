@@ -92,11 +92,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PS4='+ [trace:${LINENO}] '
+          set -x
+          trace_jq() { echo "::notice::trace_jq_stage=$1"; }
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             DISPATCH_SETUP="${{ github.event.inputs.setup_name }}"
             DISPATCH_REQUIRE_SECONDARY="${{ github.event.inputs.require_secondary_32 }}"
             if [[ "$DISPATCH_SETUP" == "legacy-2020-desktop-windows" && "$DISPATCH_REQUIRE_SECONDARY" == "true" ]]; then
+              trace_jq matrix_build_dispatch_with_secondary
               jq -nc \
                 --arg setup_name "$DISPATCH_SETUP" \
                 --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
@@ -160,6 +164,7 @@ jobs:
                   }
                 ]' > matrix.json
             else
+              trace_jq matrix_build_dispatch_single
               jq -nc \
                 --arg setup_name "${{ github.event.inputs.setup_name }}" \
                 --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
@@ -201,6 +206,7 @@ jobs:
                 }]' > matrix.json
             fi
           else
+            trace_jq matrix_build_push_default
             jq -nc '[
               {
                 setup_name: "legacy-2020-desktop-linux",
@@ -265,38 +271,47 @@ jobs:
             ]' > matrix.json
           fi
 
+          trace_jq matrix_validate_nonempty
           jq -e 'type == "array" and length > 0' matrix.json > /dev/null
+          trace_jq matrix_routing_diagnostics
           jq -c '
             map(
               (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";""))) as $labels
+              | (.setup_name // "") as $setup_name
               | {
-                  setup_name: .setup_name,
+                  setup_name: $setup_name,
                   expected_labview_year: .expected_labview_year,
-                  required_setup_label: ("cert-setup-" + .setup_name),
+                  required_setup_label: ("cert-setup-" + $setup_name),
                   requires_actor_label: ((.expected_labview_year == "2025") or (.expected_labview_year == "2026")),
-                  has_setup_label: ($labels | index("cert-setup-" + .setup_name) != null),
+                  has_setup_label: ($labels | index("cert-setup-" + $setup_name) != null),
                   actor_labels: ($labels | map(select(startswith("cert-actor-")))),
                   has_actor_label: (($labels | map(select(startswith("cert-actor-"))) | length) > 0),
                   labels: $labels
                 }
             )' matrix.json > matrix-routing-diagnostics.json
 
+          trace_jq routing_failure_count
           ROUTING_FAILURE_COUNT="$(jq '[ .[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not))) ] | length' matrix-routing-diagnostics.json)"
           {
             echo "### Routing matrix contract"
+            trace_jq matrix_count
             echo "- setups: $(jq 'length' matrix.json)"
             echo "- failures: $ROUTING_FAILURE_COUNT"
             echo "- diagnostics file: matrix-routing-diagnostics.json"
           } >> "$GITHUB_STEP_SUMMARY"
+          trace_jq matrix_has_actor_requirements
           if jq -e '.[] | select(.requires_actor_label == true)' matrix-routing-diagnostics.json > /dev/null; then
             echo "#### 2025/2026 actor-label diagnostics" >> "$GITHUB_STEP_SUMMARY"
+            trace_jq matrix_actor_diagnostics
             jq -r '.[] | select(.requires_actor_label == true) | "- \(.setup_name): setup_label=\(.has_setup_label) actor_label=\(.has_actor_label) actor_tokens=\(.actor_labels | join(","))"' matrix-routing-diagnostics.json >> "$GITHUB_STEP_SUMMARY"
           fi
           if [[ "$ROUTING_FAILURE_COUNT" != "0" ]]; then
             echo "::error::routing_matrix_contract_failed: setup and actor label contract violations detected."
+            trace_jq matrix_routing_failures_dump
             jq '.[] | select((.has_setup_label | not) or (.requires_actor_label and (.has_actor_label | not)))' matrix-routing-diagnostics.json
             exit 1
           fi
+          trace_jq matrix_emit_setups_json
           echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             PACKAGE_SETUP_TARGET="${{ github.event.inputs.setup_name }}"
@@ -310,6 +325,7 @@ jobs:
             PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
           fi
           if [[ "$PACKAGE_SETUP_TARGET" == "legacy-2020-desktop-windows" ]]; then
+            trace_jq package_setup_selection_legacy
             PACKAGE_SETUPS_JSON="$(jq -c --arg setup_name "$PACKAGE_SETUP_TARGET" '
               [ .[] | select(type == "object") | select((.setup_name // "") == $setup_name) ]
             ' matrix.json)"
@@ -434,18 +450,62 @@ jobs:
           $is2025Or2026 = @('2025', '2026') -contains $expectedYear
 
           try {
-            $labels = @(
-              $labelsJson |
-                ConvertFrom-Json -ErrorAction Stop |
-                ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-                Select-Object -Unique
-            )
+            $parsedLabels = $labelsJson | ConvertFrom-Json -ErrorAction Stop
           } catch {
             throw ("routing_labels_json_invalid: setup '{0}' has invalid runner_labels_json payload." -f $setupName)
           }
 
-          if (@($labels).Count -eq 0) {
+          $rawLabels = New-Object 'System.Collections.Generic.List[string]'
+          $labelsParseMode = 'json-array'
+          if ($null -eq $parsedLabels) {
+            $labelsParseMode = 'json-null'
+          } elseif ($parsedLabels -is [string]) {
+            [void]$rawLabels.Add([string]$parsedLabels)
+            $labelsParseMode = 'json-string'
+          } elseif ($parsedLabels -is [System.Collections.IEnumerable]) {
+            foreach ($labelItem in $parsedLabels) {
+              if ($null -ne $labelItem) {
+                [void]$rawLabels.Add([string]$labelItem)
+              }
+            }
+          } else {
+            [void]$rawLabels.Add([string]$parsedLabels)
+            $labelsParseMode = 'json-scalar'
+          }
+
+          $labels = New-Object 'System.Collections.Generic.List[string]'
+          $useWhitespaceFallback = ($rawLabels.Count -eq 1)
+          foreach ($rawLabel in $rawLabels) {
+            $candidate = ([string]$rawLabel).Trim()
+            if ([string]::IsNullOrWhiteSpace($candidate)) {
+              continue
+            }
+
+            $segments = @()
+            if ($candidate -match ',') {
+              $segments = @($candidate -split '\s*,\s*')
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-csv' }
+            } elseif ($useWhitespaceFallback -and $candidate -match '\s+' -and $candidate -notmatch ',') {
+              $segments = @($candidate -split '\s+')
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-whitespace-fallback' }
+              elseif ($labelsParseMode -eq 'json-scalar') { $labelsParseMode = 'json-scalar-whitespace-fallback' }
+            } else {
+              $segments = @($candidate)
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-single' }
+            }
+
+            foreach ($segment in $segments) {
+              $token = ([string]$segment).Trim().ToLowerInvariant()
+              if (-not [string]::IsNullOrWhiteSpace($token)) {
+                [void]$labels.Add($token)
+              }
+            }
+          }
+
+          $labels = @($labels | Select-Object -Unique)
+          $labelsRawCount = $rawLabels.Count
+          $labelsFlattenedCount = @($labels).Count
+          if ($labelsFlattenedCount -eq 0) {
             throw ("routing_labels_empty: setup '{0}' has no resolved runner labels." -f $setupName)
           }
 
@@ -472,6 +532,9 @@ jobs:
             current_machine_name = $currentMachine
             required_setup_label = $requiredSetupLabel
             requires_actor_label = $requiresActorLabel
+            labels_parse_mode = $labelsParseMode
+            labels_raw_count = [int]$labelsRawCount
+            labels_flattened_count = [int]$labelsFlattenedCount
             has_setup_label = $hasSetupLabel
             has_actor_label = $hasActorLabel
             actor_labels = @($actorLabels)
@@ -489,6 +552,9 @@ jobs:
               "- expected year: $expectedYear",
               "- allowed machines: $allowedMachines",
               "- current machine: $currentMachine",
+              "- labels parse mode: $labelsParseMode",
+              "- labels raw count: $labelsRawCount",
+              "- labels flattened count: $labelsFlattenedCount",
               "- required setup label: $requiredSetupLabel",
               "- setup label present: $hasSetupLabel",
               "- actor labels: $(if (@($actorLabels).Count -gt 0) { $actorLabels -join ', ' } else { '(none)' })",
