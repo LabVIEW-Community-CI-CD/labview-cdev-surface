@@ -46,7 +46,14 @@ Describe 'Workspace installer release workflow contract' {
     }
 
     It 'defines package and publish jobs with release asset upload' {
+        $script:coreWorkflowContent | Should -Match 'name:\s*Release Runner Availability Preflight'
+        $script:coreWorkflowContent | Should -Match 'Validate eligible self-hosted release runner availability'
+        $script:coreWorkflowContent | Should -Match 'repos/\$repo/actions/runners\?per_page=100'
+        $script:coreWorkflowContent | Should -Match 'reason_code=runner_unavailable'
+        $script:coreWorkflowContent | Should -Match '\[runner_unavailable\]'
+        $script:coreWorkflowContent | Should -Match 'release-runner-availability-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Package Workspace Installer'
+        $script:coreWorkflowContent | Should -Match 'needs:\s*\[runner_preflight\]'
         $script:coreWorkflowContent | Should -Match 'name:\s*Publish GitHub Release Asset'
         $script:coreWorkflowContent | Should -Match 'Release preflight - verify icon-editor upstream pin freshness'
         $script:coreWorkflowContent | Should -Match 'repos/LabVIEW-Community-CI-CD/labview-icon-editor/branches/develop'
