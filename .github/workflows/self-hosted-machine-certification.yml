@@ -27,6 +27,16 @@ on:
         required: true
         default: '2020'
         type: string
+      execution_bitness:
+        description: Certification bitness mode (auto|32|64).
+        required: false
+        default: 'auto'
+        type: string
+      require_secondary_32:
+        description: Run secondary 32-bit lane after 64-bit lane when both are available.
+        required: false
+        default: false
+        type: boolean
       docker_context:
         description: Docker context expected by machine preflight checks.
         required: true
@@ -75,6 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       setups_json: ${{ steps.resolve.outputs.setups_json }}
+      package_setups_json: ${{ steps.resolve.outputs.package_setups_json }}
     steps:
       - id: resolve
         name: Build setup matrix
@@ -83,56 +94,170 @@ jobs:
           set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            jq -nc \
-              --arg setup_name "${{ github.event.inputs.setup_name }}" \
-              --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
-              --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
-              --arg year "${{ github.event.inputs.expected_labview_year }}" \
-              --arg docker_context "${{ github.event.inputs.docker_context }}" \
-              --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
-              --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
-              --arg allowed_machine_names_csv "${{ github.event.inputs.allowed_machine_names_csv }}" \
-              --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
-              --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
-              --arg target_ref "${{ github.event.inputs.ref }}" \
-              '[{
-                setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
-                runner_labels_json: (
-                  if ($labels_json | length) > 0 then $labels_json
-                  else ($labels_csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | tojson)
-                  end
-                ),
-                expected_labview_year: $year,
-                docker_context: $docker_context,
-                switch_docker_context: $switch_context,
-                start_docker_desktop_if_needed: $startup_docker,
-                allowed_machine_names_csv: $allowed_machine_names_csv,
-                skip_host_ini_mutation: $skip_ini,
-                skip_override_phase: $skip_override,
-                target_ref: $target_ref
-              }]' > matrix.json
+            DISPATCH_SETUP="${{ github.event.inputs.setup_name }}"
+            DISPATCH_REQUIRE_SECONDARY="${{ github.event.inputs.require_secondary_32 }}"
+            if [[ "$DISPATCH_SETUP" == "legacy-2020-desktop-windows" && "$DISPATCH_REQUIRE_SECONDARY" == "true" ]]; then
+              jq -nc \
+                --arg setup_name "$DISPATCH_SETUP" \
+                --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
+                --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
+                --arg year "${{ github.event.inputs.expected_labview_year }}" \
+                --arg execution_bitness "${{ github.event.inputs.execution_bitness }}" \
+                --arg require_secondary_32 "${{ github.event.inputs.require_secondary_32 }}" \
+                --arg docker_context "${{ github.event.inputs.docker_context }}" \
+                --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
+                --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
+                --arg allowed_machine_names_csv "${{ github.event.inputs.allowed_machine_names_csv }}" \
+                --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
+                --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
+                --arg target_ref "${{ github.event.inputs.ref }}" \
+                '[
+                  {
+                    setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
+                    runner_labels_json: (
+                      if ($labels_json | length) > 0 then $labels_json
+                      else ($labels_csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | tojson)
+                      end
+                    ),
+                    expected_labview_year: $year,
+                    execution_bitness: ($execution_bitness | ascii_downcase),
+                    require_secondary_32: $require_secondary_32,
+                    docker_context: $docker_context,
+                    switch_docker_context: $switch_context,
+                    start_docker_desktop_if_needed: $startup_docker,
+                    allowed_machine_names_csv: $allowed_machine_names_csv,
+                    actor_lock_group: (
+                      if (($allowed_machine_names_csv | gsub("\\s+";"")) | length) > 0 then
+                        ($allowed_machine_names_csv | ascii_downcase | gsub("\\s+";""))
+                      else
+                        (($setup_name | if . == "" then "manual-dispatch" else . end) | ascii_downcase)
+                      end
+                    ),
+                    skip_host_ini_mutation: $skip_ini,
+                    skip_override_phase: $skip_override,
+                    target_ref: $target_ref
+                  },
+                  {
+                    setup_name: "legacy-2020-desktop-windows-32",
+                    runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows-32\",\"cdev-surface-windows-gate\"]",
+                    expected_labview_year: $year,
+                    execution_bitness: "32",
+                    require_secondary_32: "false",
+                    docker_context: $docker_context,
+                    switch_docker_context: $switch_context,
+                    start_docker_desktop_if_needed: $startup_docker,
+                    allowed_machine_names_csv: $allowed_machine_names_csv,
+                    actor_lock_group: (
+                      if (($allowed_machine_names_csv | gsub("\\s+";"")) | length) > 0 then
+                        ($allowed_machine_names_csv | ascii_downcase | gsub("\\s+";""))
+                      else
+                        "legacy-2020-desktop-windows-32"
+                      end
+                    ),
+                    skip_host_ini_mutation: $skip_ini,
+                    skip_override_phase: $skip_override,
+                    target_ref: $target_ref
+                  }
+                ]' > matrix.json
+            else
+              jq -nc \
+                --arg setup_name "${{ github.event.inputs.setup_name }}" \
+                --arg labels_csv "${{ github.event.inputs.runner_labels_csv }}" \
+                --arg labels_json "${{ github.event.inputs.runner_labels_json }}" \
+                --arg year "${{ github.event.inputs.expected_labview_year }}" \
+                --arg execution_bitness "${{ github.event.inputs.execution_bitness }}" \
+                --arg require_secondary_32 "${{ github.event.inputs.require_secondary_32 }}" \
+                --arg docker_context "${{ github.event.inputs.docker_context }}" \
+                --arg switch_context "${{ github.event.inputs.switch_docker_context }}" \
+                --arg startup_docker "${{ github.event.inputs.start_docker_desktop_if_needed }}" \
+                --arg allowed_machine_names_csv "${{ github.event.inputs.allowed_machine_names_csv }}" \
+                --arg skip_ini "${{ github.event.inputs.skip_host_ini_mutation }}" \
+                --arg skip_override "${{ github.event.inputs.skip_override_phase }}" \
+                --arg target_ref "${{ github.event.inputs.ref }}" \
+                '[{
+                  setup_name: ($setup_name | if . == "" then "manual-dispatch" else . end),
+                  runner_labels_json: (
+                    if ($labels_json | length) > 0 then $labels_json
+                    else ($labels_csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | tojson)
+                    end
+                  ),
+                  expected_labview_year: $year,
+                  execution_bitness: ($execution_bitness | ascii_downcase),
+                  require_secondary_32: $require_secondary_32,
+                  docker_context: $docker_context,
+                  switch_docker_context: $switch_context,
+                  start_docker_desktop_if_needed: $startup_docker,
+                  allowed_machine_names_csv: $allowed_machine_names_csv,
+                  actor_lock_group: (
+                    if (($allowed_machine_names_csv | gsub("\\s+";"")) | length) > 0 then
+                      ($allowed_machine_names_csv | ascii_downcase | gsub("\\s+";""))
+                    else
+                      (($setup_name | if . == "" then "manual-dispatch" else . end) | ascii_downcase)
+                    end
+                  ),
+                  skip_host_ini_mutation: $skip_ini,
+                  skip_override_phase: $skip_override,
+                  target_ref: $target_ref
+                }]' > matrix.json
+            fi
           else
             jq -nc '[
               {
                 setup_name: "legacy-2020-desktop-linux",
-                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"linux-gate-windows-ready\"]",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-linux\",\"linux-gate-windows-ready\"]",
                 expected_labview_year: "2020",
+                execution_bitness: "64",
+                require_secondary_32: "false",
                 docker_context: "desktop-linux",
                 switch_docker_context: "true",
                 start_docker_desktop_if_needed: "true",
                 allowed_machine_names_csv: "GHOST,DESKTOP-6Q81H4O",
+                actor_lock_group: "actor-linux-desktop-shared",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
               },
               {
                 setup_name: "legacy-2020-desktop-windows",
-                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cdev-surface-windows-gate\"]",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows\",\"cdev-surface-windows-gate\"]",
                 expected_labview_year: "2020",
+                execution_bitness: "64",
+                require_secondary_32: "false",
                 docker_context: "desktop-windows",
                 switch_docker_context: "true",
                 start_docker_desktop_if_needed: "true",
                 allowed_machine_names_csv: "GHOST",
+                actor_lock_group: "actor-ghost-windows",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              },
+              {
+                setup_name: "legacy-2020-desktop-windows-32",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-legacy-2020-desktop-windows-32\",\"cdev-surface-windows-gate\"]",
+                expected_labview_year: "2020",
+                execution_bitness: "32",
+                require_secondary_32: "false",
+                docker_context: "desktop-windows",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
+                allowed_machine_names_csv: "GHOST",
+                actor_lock_group: "actor-ghost-windows",
+                skip_host_ini_mutation: "true",
+                skip_override_phase: "false",
+                target_ref: ""
+              },
+              {
+                setup_name: "host-2025-desktop-windows",
+                runner_labels_json: "[\"self-hosted\",\"windows\",\"self-hosted-windows-lv\",\"headless\",\"cert-setup-host-2025-desktop-windows\",\"cdev-surface-windows-gate\"]",
+                expected_labview_year: "2025",
+                execution_bitness: "64",
+                require_secondary_32: "false",
+                docker_context: "desktop-windows",
+                switch_docker_context: "true",
+                start_docker_desktop_if_needed: "true",
+                allowed_machine_names_csv: "GHOST",
+                actor_lock_group: "actor-ghost-windows",
                 skip_host_ini_mutation: "true",
                 skip_override_phase: "false",
                 target_ref: ""
@@ -141,6 +266,22 @@ jobs:
           fi
 
           echo "setups_json=$(jq -c . matrix.json)" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            PACKAGE_SETUP_TARGET="${{ github.event.inputs.setup_name }}"
+            if [[ -z "$PACKAGE_SETUP_TARGET" ]]; then
+              PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
+            fi
+            if [[ "$PACKAGE_SETUP_TARGET" == "legacy-2020-desktop-windows-32" ]]; then
+              PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
+            fi
+          else
+            PACKAGE_SETUP_TARGET="legacy-2020-desktop-windows"
+          fi
+          PACKAGE_SETUPS_JSON="$(jq -c --arg setup_name "$PACKAGE_SETUP_TARGET" '[ .[] | select(.setup_name == $setup_name) ]' matrix.json)"
+          if [[ -z "$PACKAGE_SETUPS_JSON" ]]; then
+            PACKAGE_SETUPS_JSON='[]'
+          fi
+          echo "package_setups_json=$PACKAGE_SETUPS_JSON" >> "$GITHUB_OUTPUT"
 
   certify:
     name: Self-Hosted Machine Certification (${{ matrix.setup_name }})
@@ -150,6 +291,9 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.resolve-setups.outputs.setups_json) }}
     runs-on: ${{ fromJson(matrix.runner_labels_json) }}
+    concurrency:
+      group: self-hosted-machine-certify-actor-${{ matrix.actor_lock_group || matrix.setup_name }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -345,13 +489,79 @@ jobs:
           "matrix_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "matrix_summary_path=$matrixSummaryPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - id: masscompile
-        name: Run MassCompile certification
+      - id: execution-contract
+        name: Resolve execution LabVIEW bitness for certification
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'masscompile'
-          $reportPath = Join-Path $outputRoot 'masscompile-certification-report.json'
+          $year = [string]'${{ matrix.expected_labview_year }}'
+          $requestedBitness = ([string]'${{ matrix.execution_bitness }}').Trim().ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($requestedBitness)) {
+            $requestedBitness = 'auto'
+          }
+          if (@('auto', '32', '64') -notcontains $requestedBitness) {
+            throw ("execution_bitness_invalid: supported values are auto|32|64. Found '{0}'." -f $requestedBitness)
+          }
+          $contractPath = [string]'${{ steps.seed-contract.outputs.seed_contract_path }}'
+          if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
+            throw "LabVIEW CLI port contract not found for execution bitness resolution: $contractPath"
+          }
+
+          $contract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ($null -eq $contract.labview_cli_ports) {
+            throw "LabVIEW CLI port contract is missing 'labview_cli_ports': $contractPath"
+          }
+
+          $yearPortEntryProperty = $contract.labview_cli_ports.PSObject.Properties[$year]
+          if ($null -eq $yearPortEntryProperty) {
+            throw "LabVIEW CLI port contract does not define year '$year': $contractPath"
+          }
+
+          $availableBitness = @(
+            $yearPortEntryProperty.Value.PSObject.Properties.Name |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+          )
+
+          $orderedBitness = @()
+          if ($requestedBitness -eq 'auto') {
+            if ($availableBitness -contains '64') {
+              $orderedBitness += '64'
+            }
+            if ($availableBitness -contains '32') {
+              $orderedBitness += '32'
+            }
+          } else {
+            if ($availableBitness -notcontains $requestedBitness) {
+              throw ("execution_bitness_unavailable: requested bitness '{0}' not defined for year '{1}' in contract '{2}'." -f $requestedBitness, $year, $contractPath)
+            }
+            $orderedBitness += $requestedBitness
+          }
+          if (@($orderedBitness).Count -eq 0) {
+            throw ("LabVIEW CLI port contract year '{0}' does not define 32/64 bitness in {1}" -f $year, $contractPath)
+          }
+
+          $supportedBitness = [string]$orderedBitness[0]
+          $availableBitnessCsv = [string]::Join(',', @($orderedBitness))
+          $hasBitness64 = [bool]($orderedBitness -contains '64')
+          $hasBitness32 = [bool]($orderedBitness -contains '32')
+
+          Write-Host ("Resolved certification execution bitness: year={0}, requested={1}, available=[{2}], selected={3}" -f $year, $requestedBitness, $availableBitnessCsv, $supportedBitness)
+          "requested_bitness=$requestedBitness" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "supported_bitness=$supportedBitness" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "available_bitness_csv=$availableBitnessCsv" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "has_bitness_64=$($hasBitness64.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "has_bitness_32=$($hasBitness32.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: masscompile-64
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' }}
+        name: Run MassCompile certification (64-bit)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'masscompile-64'
+          $reportPath = Join-Path $outputRoot 'masscompile-certification-report.64.json'
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-MassCompileCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
@@ -376,16 +586,68 @@ jobs:
             throw ("MassCompile certification status is not succeeded: {0}" -f [string]$massCompileReport.status)
           }
 
-          "masscompile_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "masscompile_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "masscompile_64_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "masscompile_64_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - id: vi-analyzer
-        name: Run VI Analyze certification
+      - id: bitness-handoff-masscompile
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && steps.execution-contract.outputs.has_bitness_32 == 'true' }}
+        name: Enforce bitness handoff (MassCompile 64->32)
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'vi-analyzer'
-          $reportPath = Join-Path $outputRoot 'vi-analyzer-certification-report.json'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'bitness-handoff'
+          $reportPath = Join-Path $outputRoot 'masscompile-64-to-32.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Assert-LabVIEWBitnessHandoff.ps1" `
+            -PhaseName 'masscompile-64-to-32' `
+            -ArtifactRoot $outputRoot `
+            -TimeoutSeconds 60 `
+            -PollSeconds 2 `
+            -OutputPath $reportPath
+          "bitness_handoff_masscompile_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: masscompile-32
+        if: ${{ steps.execution-contract.outputs.has_bitness_32 == 'true' }}
+        name: Run MassCompile certification (32-bit)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'masscompile-32'
+          $reportPath = Join-Path $outputRoot 'masscompile-certification-report.32.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-MassCompileCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '32' `
+              -TargetRelativePath 'vi.lib\LabVIEW Icon API' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "MassCompile certification report not found: $reportPath"
+          }
+
+          $massCompileReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$massCompileReport.status -ne 'succeeded') {
+            throw ("MassCompile certification status is not succeeded: {0}" -f [string]$massCompileReport.status)
+          }
+
+          "masscompile_32_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "masscompile_32_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: vi-analyzer-64
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' }}
+        name: Run VI Analyzer certification (64-bit)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'vi-analyzer-64'
+          $reportPath = Join-Path $outputRoot 'vi-analyzer-certification-report.64.json'
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
@@ -401,30 +663,82 @@ jobs:
           }
 
           if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
-            throw "VI Analyze certification report not found: $reportPath"
+            throw "VI Analyzer certification report not found: $reportPath"
           }
 
           $viAnalyzerReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
           if ([string]$viAnalyzerReport.status -ne 'succeeded') {
-            throw ("VI Analyze certification status is not succeeded: {0}" -f [string]$viAnalyzerReport.status)
+            throw ("VI Analyzer certification status is not succeeded: {0}" -f [string]$viAnalyzerReport.status)
           }
 
-          "vi_analyzer_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "vi_analyzer_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vi_analyzer_64_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vi_analyzer_64_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - id: runnercli-ppl
-        name: Run runner-cli PPL certification
+      - id: bitness-handoff-vi-analyzer
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && steps.execution-contract.outputs.has_bitness_32 == 'true' }}
+        name: Enforce bitness handoff (VI Analyzer 64->32)
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl'
-          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.json'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'bitness-handoff'
+          $reportPath = Join-Path $outputRoot 'vi-analyzer-64-to-32.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Assert-LabVIEWBitnessHandoff.ps1" `
+            -PhaseName 'vi-analyzer-64-to-32' `
+            -ArtifactRoot $outputRoot `
+            -TimeoutSeconds 60 `
+            -PollSeconds 2 `
+            -OutputPath $reportPath
+          "bitness_handoff_vi_analyzer_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: vi-analyzer-32
+        if: ${{ steps.execution-contract.outputs.has_bitness_32 == 'true' }}
+        name: Run VI Analyzer certification (32-bit)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'vi-analyzer-32'
+          $reportPath = Join-Path $outputRoot 'vi-analyzer-certification-report.32.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-ViAnalyzerCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '32' `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "VI Analyzer certification report not found: $reportPath"
+          }
+
+          $viAnalyzerReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$viAnalyzerReport.status -ne 'succeeded') {
+            throw ("VI Analyzer certification status is not succeeded: {0}" -f [string]$viAnalyzerReport.status)
+          }
+
+          "vi_analyzer_32_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vi_analyzer_32_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: runnercli-ppl-linux-64
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && matrix.docker_context == 'desktop-linux' }}
+        name: Run runner-cli PPL certification (linux-64)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl-linux-64'
+          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.64.json'
           try {
             & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
               -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
               -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
               -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
               -SupportedBitness '64' `
+              -TimeoutSeconds 300 `
               -ArtifactRoot $outputRoot `
               -OutputPath $reportPath
           } catch {
@@ -443,8 +757,114 @@ jobs:
             throw ("runner-cli PPL certification status is not succeeded: {0}" -f [string]$runnerCliReport.status)
           }
 
-          "runnercli_ppl_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "runnercli_ppl_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_linux_64_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_linux_64_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: runnercli-ppl-windows-64
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && matrix.docker_context == 'desktop-windows' }}
+        name: Run runner-cli PPL certification (windows-64)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl-windows-64'
+          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.64.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '64' `
+              -TimeoutSeconds 300 `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "runner-cli PPL certification report not found: $reportPath"
+          }
+
+          $runnerCliReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$runnerCliReport.status -ne 'succeeded') {
+            throw ("runner-cli PPL certification status is not succeeded: {0}" -f [string]$runnerCliReport.status)
+          }
+
+          "runnercli_ppl_windows_64_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_windows_64_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: bitness-handoff-runnercli
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && steps.execution-contract.outputs.has_bitness_32 == 'true' && matrix.docker_context == 'desktop-windows' && (matrix.require_secondary_32 == 'true' || matrix.require_secondary_32 == true) }}
+        name: Enforce bitness handoff (runner-cli PPL 64->32)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'bitness-handoff'
+          $reportPath = Join-Path $outputRoot 'runnercli-ppl-64-to-32.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Assert-LabVIEWBitnessHandoff.ps1" `
+            -PhaseName 'runnercli-ppl-64-to-32' `
+            -ArtifactRoot $outputRoot `
+            -TimeoutSeconds 90 `
+            -PollSeconds 2 `
+            -OutputPath $reportPath
+          "bitness_handoff_runnercli_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: runnercli-ppl-windows-32
+        if: ${{ steps.execution-contract.outputs.has_bitness_32 == 'true' && matrix.docker_context == 'desktop-windows' && (steps.execution-contract.outputs.supported_bitness == '32' || (steps.execution-contract.outputs.has_bitness_64 == 'true' && (matrix.require_secondary_32 == 'true' || matrix.require_secondary_32 == true))) }}
+        name: Run runner-cli PPL certification (windows-32)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'runnercli-ppl-32'
+          $reportPath = Join-Path $outputRoot 'runner-cli-ppl-certification-report.32.json'
+          try {
+            & "$env:GITHUB_WORKSPACE\scripts\Invoke-RunnerCliPplCertification.ps1" `
+              -RepoPath '${{ steps.seed-contract.outputs.clone_root }}' `
+              -ManifestPath "$env:GITHUB_WORKSPACE\workspace-governance.json" `
+              -ExecutionLabviewYear '${{ matrix.expected_labview_year }}' `
+              -SupportedBitness '32' `
+              -TimeoutSeconds 300 `
+              -ArtifactRoot $outputRoot `
+              -OutputPath $reportPath
+          } catch {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw
+          }
+
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "runner-cli PPL secondary (32-bit) certification report not found: $reportPath"
+          }
+
+          $runnerCliReport = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$runnerCliReport.status -ne 'succeeded') {
+            throw ("runner-cli PPL secondary (32-bit) certification status is not succeeded: {0}" -f [string]$runnerCliReport.status)
+          }
+
+          "runnercli_ppl_windows_32_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runnercli_ppl_windows_32_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - id: bitness-filesize-manifest
+        if: ${{ steps.execution-contract.outputs.has_bitness_64 == 'true' && steps.execution-contract.outputs.has_bitness_32 == 'true' && matrix.docker_context == 'desktop-windows' && matrix.expected_labview_year == '2020' }}
+        name: Compare x64 vs x86 LabVIEW file sizes (manifest + summary)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'labview-bitness-manifest'
+          $manifestPath = Join-Path $outputRoot 'labview-bitness-filesize-manifest.2020.json'
+          & "$env:GITHUB_WORKSPACE\scripts\Export-LabVIEWBitnessFileSizeManifest.ps1" `
+            -LabviewYear '2020' `
+            -OutputPath $manifestPath `
+            | Out-Null
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "LabVIEW bitness file-size manifest was not generated: $manifestPath"
+          }
+          "manifest_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "manifest_path=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - id: certification-summary
         name: Write certification summary
@@ -454,9 +874,195 @@ jobs:
           $summaryPath = Join-Path '${{ steps.runner-metadata.outputs.metadata_root }}' 'self-hosted-machine-certification-report.json'
           $matrixSummary = Get-Content -LiteralPath '${{ steps.port-matrix.outputs.matrix_summary_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
           $preflightReport = Get-Content -LiteralPath '${{ steps.machine-preflight.outputs.report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
-          $massCompileReport = Get-Content -LiteralPath '${{ steps.masscompile.outputs.masscompile_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
-          $viAnalyzerReport = Get-Content -LiteralPath '${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
-          $runnerCliReport = Get-Content -LiteralPath '${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}' -Raw | ConvertFrom-Json -ErrorAction Stop
+          $availableBitnessCsv = [string]'${{ steps.execution-contract.outputs.available_bitness_csv }}'
+          $hasBitness64 = [System.Convert]::ToBoolean('${{ steps.execution-contract.outputs.has_bitness_64 }}')
+          $hasBitness32 = [System.Convert]::ToBoolean('${{ steps.execution-contract.outputs.has_bitness_32 }}')
+          $requireSecondaryInput = '${{ matrix.require_secondary_32 }}'
+          $requireSecondary32 = $false
+          if (-not [string]::IsNullOrWhiteSpace($requireSecondaryInput)) {
+            try {
+              $requireSecondary32 = [System.Convert]::ToBoolean($requireSecondaryInput)
+            } catch {
+              throw ("require_secondary_32_invalid: expected true|false but found '{0}'." -f $requireSecondaryInput)
+            }
+          }
+
+          $massCompile64Status = 'not-required'
+          $massCompile64ExitCode = 0
+          $massCompile64LogPath = ''
+          if ($hasBitness64) {
+            $massCompile64ReportPath = [string]'${{ steps.masscompile-64.outputs.masscompile_64_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($massCompile64ReportPath) -or -not (Test-Path -LiteralPath $massCompile64ReportPath -PathType Leaf)) {
+              throw "MassCompile 64-bit report is required but missing."
+            }
+            $massCompile64Report = Get-Content -LiteralPath $massCompile64ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $massCompile64Status = [string]$massCompile64Report.status
+            $massCompile64ExitCode = [int]$massCompile64Report.exit_code
+            $massCompile64LogPath = [string]$massCompile64Report.masscompile_log_path
+          }
+
+          $massCompile32Status = 'not-required'
+          $massCompile32ExitCode = 0
+          $massCompile32LogPath = ''
+          if ($hasBitness32) {
+            $massCompile32ReportPath = [string]'${{ steps.masscompile-32.outputs.masscompile_32_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($massCompile32ReportPath) -or -not (Test-Path -LiteralPath $massCompile32ReportPath -PathType Leaf)) {
+              throw "MassCompile 32-bit report is required but missing."
+            }
+            $massCompile32Report = Get-Content -LiteralPath $massCompile32ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $massCompile32Status = [string]$massCompile32Report.status
+            $massCompile32ExitCode = [int]$massCompile32Report.exit_code
+            $massCompile32LogPath = [string]$massCompile32Report.masscompile_log_path
+          }
+
+          $viAnalyzer64Status = 'not-required'
+          $viAnalyzer64ExitCode = 0
+          $viAnalyzer64StatusPath = ''
+          if ($hasBitness64) {
+            $viAnalyzer64ReportPath = [string]'${{ steps.vi-analyzer-64.outputs.vi_analyzer_64_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($viAnalyzer64ReportPath) -or -not (Test-Path -LiteralPath $viAnalyzer64ReportPath -PathType Leaf)) {
+              throw "VI Analyzer 64-bit report is required but missing."
+            }
+            $viAnalyzer64Report = Get-Content -LiteralPath $viAnalyzer64ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $viAnalyzer64Status = [string]$viAnalyzer64Report.status
+            $viAnalyzer64ExitCode = [int]$viAnalyzer64Report.exit_code
+            $viAnalyzer64StatusPath = [string]$viAnalyzer64Report.status_path
+          }
+
+          $viAnalyzer32Status = 'not-required'
+          $viAnalyzer32ExitCode = 0
+          $viAnalyzer32StatusPath = ''
+          if ($hasBitness32) {
+            $viAnalyzer32ReportPath = [string]'${{ steps.vi-analyzer-32.outputs.vi_analyzer_32_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($viAnalyzer32ReportPath) -or -not (Test-Path -LiteralPath $viAnalyzer32ReportPath -PathType Leaf)) {
+              throw "VI Analyzer 32-bit report is required but missing."
+            }
+            $viAnalyzer32Report = Get-Content -LiteralPath $viAnalyzer32ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $viAnalyzer32Status = [string]$viAnalyzer32Report.status
+            $viAnalyzer32ExitCode = [int]$viAnalyzer32Report.exit_code
+            $viAnalyzer32StatusPath = [string]$viAnalyzer32Report.status_path
+          }
+
+          $massCompileRequiredStatuses = @()
+          if ($hasBitness64) { $massCompileRequiredStatuses += $massCompile64Status }
+          if ($hasBitness32) { $massCompileRequiredStatuses += $massCompile32Status }
+          $massCompileAllRequiredSucceeded = (@($massCompileRequiredStatuses | Where-Object { [string]$_ -ne 'succeeded' }).Count -eq 0)
+          $massCompileOverallStatus = if ($massCompileAllRequiredSucceeded) { 'succeeded' } else { 'failed' }
+
+          $viAnalyzerRequiredStatuses = @()
+          if ($hasBitness64) { $viAnalyzerRequiredStatuses += $viAnalyzer64Status }
+          if ($hasBitness32) { $viAnalyzerRequiredStatuses += $viAnalyzer32Status }
+          $viAnalyzerAllRequiredSucceeded = (@($viAnalyzerRequiredStatuses | Where-Object { [string]$_ -ne 'succeeded' }).Count -eq 0)
+          $viAnalyzerOverallStatus = if ($viAnalyzerAllRequiredSucceeded) { 'succeeded' } else { 'failed' }
+
+          $primaryBitness = [string]'${{ steps.execution-contract.outputs.supported_bitness }}'
+          $massCompilePrimaryExitCode = if ($primaryBitness -eq '32') { [int]$massCompile32ExitCode } else { [int]$massCompile64ExitCode }
+          $massCompilePrimaryLogPath = if ($primaryBitness -eq '32') { [string]$massCompile32LogPath } else { [string]$massCompile64LogPath }
+          $viAnalyzerPrimaryExitCode = if ($primaryBitness -eq '32') { [int]$viAnalyzer32ExitCode } else { [int]$viAnalyzer64ExitCode }
+          $viAnalyzerPrimaryStatusPath = if ($primaryBitness -eq '32') { [string]$viAnalyzer32StatusPath } else { [string]$viAnalyzer64StatusPath }
+
+          $platformKey = switch ('${{ matrix.docker_context }}') {
+            'desktop-linux' { 'linux' }
+            'desktop-windows' { 'windows' }
+            default { throw ("unsupported_docker_context: {0}" -f [string]'${{ matrix.docker_context }}') }
+          }
+
+          $runnerCli64Status = 'not-required'
+          $runnerCli64ExitCode = 0
+          $runnerCli64LogPath = ''
+          $runnerCli64OutputPplPath = ''
+          $runnerCli64OutputPplSizeBytes = [int64]0
+          if ($hasBitness64) {
+            $runnerCli64ReportPath = if ($platformKey -eq 'linux') { [string]'${{ steps.runnercli-ppl-linux-64.outputs.runnercli_ppl_linux_64_report_path }}' } else { [string]'${{ steps.runnercli-ppl-windows-64.outputs.runnercli_ppl_windows_64_report_path }}' }
+            if ([string]::IsNullOrWhiteSpace($runnerCli64ReportPath) -or -not (Test-Path -LiteralPath $runnerCli64ReportPath -PathType Leaf)) {
+              throw ("runner-cli PPL 64-bit report is required but missing for platform '{0}'." -f $platformKey)
+            }
+
+            $runnerCli64Report = Get-Content -LiteralPath $runnerCli64ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $runnerCli64Status = [string]$runnerCli64Report.status
+            $runnerCli64ExitCode = [int]$runnerCli64Report.runner_cli.exit_code
+            $runnerCli64LogPath = [string]$runnerCli64Report.runner_cli.log_path
+            $runnerCli64OutputPplPath = [string]$runnerCli64Report.output_ppl_path
+            if (-not [string]::IsNullOrWhiteSpace($runnerCli64OutputPplPath) -and (Test-Path -LiteralPath $runnerCli64OutputPplPath -PathType Leaf)) {
+              $runnerCli64OutputPplSizeBytes = [int64](Get-Item -LiteralPath $runnerCli64OutputPplPath).Length
+            }
+          }
+
+          $runnerCli32Status = 'not-required'
+          $runnerCli32ExitCode = 0
+          $runnerCli32LogPath = ''
+          $runnerCli32OutputPplPath = ''
+          $runnerCli32OutputPplSizeBytes = [int64]0
+          if ($platformKey -eq 'windows' -and $hasBitness32) {
+            $runnerCli32ReportPath = [string]'${{ steps.runnercli-ppl-windows-32.outputs.runnercli_ppl_windows_32_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($runnerCli32ReportPath) -or -not (Test-Path -LiteralPath $runnerCli32ReportPath -PathType Leaf)) {
+              throw ("runner-cli PPL 32-bit report is required but missing for setup '{0}'." -f [string]'${{ matrix.setup_name }}')
+            }
+
+            $runnerCli32Report = Get-Content -LiteralPath $runnerCli32ReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $runnerCli32Status = [string]$runnerCli32Report.status
+            $runnerCli32ExitCode = [int]$runnerCli32Report.runner_cli.exit_code
+            $runnerCli32LogPath = [string]$runnerCli32Report.runner_cli.log_path
+            $runnerCli32OutputPplPath = [string]$runnerCli32Report.output_ppl_path
+            if (-not [string]::IsNullOrWhiteSpace($runnerCli32OutputPplPath) -and (Test-Path -LiteralPath $runnerCli32OutputPplPath -PathType Leaf)) {
+              $runnerCli32OutputPplSizeBytes = [int64](Get-Item -LiteralPath $runnerCli32OutputPplPath).Length
+            }
+          }
+
+          $requiresSecondaryPpl = ($platformKey -eq 'windows' -and $hasBitness64 -and $hasBitness32 -and $requireSecondary32)
+          $runnerCliSecondaryStatus = if ($requiresSecondaryPpl) { [string]$runnerCli32Status } else { 'not-required' }
+          $runnerCliSecondaryExitCode = if ($requiresSecondaryPpl) { [int]$runnerCli32ExitCode } else { 0 }
+          $runnerCliSecondaryLogPath = if ($requiresSecondaryPpl) { [string]$runnerCli32LogPath } else { '' }
+          $runnerCliSecondaryOutputPplPath = if ($requiresSecondaryPpl) { [string]$runnerCli32OutputPplPath } else { '' }
+          $runnerCliSecondaryOutputPplSizeBytes = if ($requiresSecondaryPpl) { [int64]$runnerCli32OutputPplSizeBytes } else { [int64]0 }
+
+          $bitnessHandoffMassCompileStatus = 'not-required'
+          $bitnessHandoffViAnalyzerStatus = 'not-required'
+          $bitnessHandoffRunnerCliStatus = 'not-required'
+          if ($hasBitness64 -and $hasBitness32) {
+            $bitnessHandoffMassCompileReportPath = [string]'${{ steps.bitness-handoff-masscompile.outputs.bitness_handoff_masscompile_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($bitnessHandoffMassCompileReportPath) -or -not (Test-Path -LiteralPath $bitnessHandoffMassCompileReportPath -PathType Leaf)) {
+              throw 'MassCompile bitness handoff report is required but missing.'
+            }
+            $bitnessHandoffMassCompileReport = Get-Content -LiteralPath $bitnessHandoffMassCompileReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $bitnessHandoffMassCompileStatus = [string]$bitnessHandoffMassCompileReport.status
+
+            $bitnessHandoffViAnalyzerReportPath = [string]'${{ steps.bitness-handoff-vi-analyzer.outputs.bitness_handoff_vi_analyzer_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($bitnessHandoffViAnalyzerReportPath) -or -not (Test-Path -LiteralPath $bitnessHandoffViAnalyzerReportPath -PathType Leaf)) {
+              throw 'VI Analyzer bitness handoff report is required but missing.'
+            }
+            $bitnessHandoffViAnalyzerReport = Get-Content -LiteralPath $bitnessHandoffViAnalyzerReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $bitnessHandoffViAnalyzerStatus = [string]$bitnessHandoffViAnalyzerReport.status
+          }
+          if ($requiresSecondaryPpl) {
+            $bitnessHandoffRunnerCliReportPath = [string]'${{ steps.bitness-handoff-runnercli.outputs.bitness_handoff_runnercli_report_path }}'
+            if ([string]::IsNullOrWhiteSpace($bitnessHandoffRunnerCliReportPath) -or -not (Test-Path -LiteralPath $bitnessHandoffRunnerCliReportPath -PathType Leaf)) {
+              throw 'runner-cli bitness handoff report is required but missing.'
+            }
+            $bitnessHandoffRunnerCliReport = Get-Content -LiteralPath $bitnessHandoffRunnerCliReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $bitnessHandoffRunnerCliStatus = [string]$bitnessHandoffRunnerCliReport.status
+          }
+
+          $runnerCliPrimaryStatus = if ($primaryBitness -eq '32') { [string]$runnerCli32Status } else { [string]$runnerCli64Status }
+          $runnerCliPrimaryExitCode = if ($primaryBitness -eq '32') { [int]$runnerCli32ExitCode } else { [int]$runnerCli64ExitCode }
+          $runnerCliPrimaryLogPath = if ($primaryBitness -eq '32') { [string]$runnerCli32LogPath } else { [string]$runnerCli64LogPath }
+          $runnerCliPrimaryOutputPplPath = if ($primaryBitness -eq '32') { [string]$runnerCli32OutputPplPath } else { [string]$runnerCli64OutputPplPath }
+          $runnerCliPrimaryOutputPplSizeBytes = if ($primaryBitness -eq '32') { [int64]$runnerCli32OutputPplSizeBytes } else { [int64]$runnerCli64OutputPplSizeBytes }
+
+          $bitnessManifestPath = [string]'${{ steps.bitness-filesize-manifest.outputs.manifest_path }}'
+          $bitnessManifestStatus = 'not-run'
+          $bitnessManifestSummary = $null
+          if (-not [string]::IsNullOrWhiteSpace($bitnessManifestPath) -and (Test-Path -LiteralPath $bitnessManifestPath -PathType Leaf)) {
+            $bitnessManifest = Get-Content -LiteralPath $bitnessManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $bitnessManifestStatus = 'generated'
+            $bitnessManifestSummary = $bitnessManifest.summary
+          }
+
+          $runnerCliRequiredStatuses = @([string]$runnerCliPrimaryStatus)
+          if ($requiresSecondaryPpl) {
+            $runnerCliRequiredStatuses += [string]$runnerCliSecondaryStatus
+          }
+          $runnerCliAllRequiredSucceeded = (@($runnerCliRequiredStatuses | Where-Object { [string]$_ -ne 'succeeded' }).Count -eq 0)
 
           $certification = [ordered]@{
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -471,24 +1077,67 @@ jobs:
             requested_runner_labels_json = '${{ matrix.runner_labels_json }}'
             icon_editor_pinned_sha = '${{ steps.seed-contract.outputs.icon_editor_pinned_sha }}'
             expected_labview_year = '${{ matrix.expected_labview_year }}'
+            execution_lvbitness = '${{ steps.execution-contract.outputs.supported_bitness }}'
+            execution_available_bitness_csv = $availableBitnessCsv
             docker_context = '${{ matrix.docker_context }}'
             matrix = $matrixSummary.summary
             machine_preflight_status = [string]$preflightReport.status
-            masscompile_status = [string]$massCompileReport.status
-            masscompile_exit_code = [int]$massCompileReport.exit_code
-            masscompile_log_path = [string]$massCompileReport.masscompile_log_path
-            vi_analyzer_status = [string]$viAnalyzerReport.status
-            vi_analyzer_exit_code = [int]$viAnalyzerReport.exit_code
-            vi_analyzer_status_path = [string]$viAnalyzerReport.status_path
-            runnercli_ppl_status = [string]$runnerCliReport.status
-            runnercli_ppl_exit_code = [int]$runnerCliReport.runner_cli.exit_code
-            runnercli_ppl_log_path = [string]$runnerCliReport.runner_cli.log_path
-            runnercli_ppl_output_ppl_path = [string]$runnerCliReport.output_ppl_path
+            masscompile_status = [string]$massCompileOverallStatus
+            masscompile_exit_code = [int]$massCompilePrimaryExitCode
+            masscompile_log_path = [string]$massCompilePrimaryLogPath
+            masscompile_64_status = [string]$massCompile64Status
+            masscompile_64_exit_code = [int]$massCompile64ExitCode
+            masscompile_64_log_path = [string]$massCompile64LogPath
+            masscompile_32_status = [string]$massCompile32Status
+            masscompile_32_exit_code = [int]$massCompile32ExitCode
+            masscompile_32_log_path = [string]$massCompile32LogPath
+            vi_analyzer_status = [string]$viAnalyzerOverallStatus
+            vi_analyzer_exit_code = [int]$viAnalyzerPrimaryExitCode
+            vi_analyzer_status_path = [string]$viAnalyzerPrimaryStatusPath
+            vi_analyzer_64_status = [string]$viAnalyzer64Status
+            vi_analyzer_64_exit_code = [int]$viAnalyzer64ExitCode
+            vi_analyzer_64_status_path = [string]$viAnalyzer64StatusPath
+            vi_analyzer_32_status = [string]$viAnalyzer32Status
+            vi_analyzer_32_exit_code = [int]$viAnalyzer32ExitCode
+            vi_analyzer_32_status_path = [string]$viAnalyzer32StatusPath
+            runnercli_ppl_platform = [string]$platformKey
+            runnercli_ppl_status = [string]$runnerCliPrimaryStatus
+            runnercli_ppl_exit_code = [int]$runnerCliPrimaryExitCode
+            runnercli_ppl_log_path = [string]$runnerCliPrimaryLogPath
+            runnercli_ppl_output_ppl_path = [string]$runnerCliPrimaryOutputPplPath
+            runnercli_ppl_output_ppl_size_bytes = [int64]$runnerCliPrimaryOutputPplSizeBytes
+            runnercli_ppl_64_status = [string]$runnerCli64Status
+            runnercli_ppl_64_exit_code = [int]$runnerCli64ExitCode
+            runnercli_ppl_64_log_path = [string]$runnerCli64LogPath
+            runnercli_ppl_64_output_ppl_path = [string]$runnerCli64OutputPplPath
+            runnercli_ppl_64_output_ppl_size_bytes = [int64]$runnerCli64OutputPplSizeBytes
+            runnercli_ppl_secondary_required = [bool]$requiresSecondaryPpl
+            runnercli_ppl_secondary_requested = [bool]$requireSecondary32
+            runnercli_ppl_secondary_status = [string]$runnerCliSecondaryStatus
+            runnercli_ppl_secondary_exit_code = [int]$runnerCliSecondaryExitCode
+            runnercli_ppl_secondary_log_path = [string]$runnerCliSecondaryLogPath
+            runnercli_ppl_secondary_output_ppl_path = [string]$runnerCliSecondaryOutputPplPath
+            runnercli_ppl_secondary_output_ppl_size_bytes = [int64]$runnerCliSecondaryOutputPplSizeBytes
+            runnercli_ppl_32_status = [string]$runnerCli32Status
+            runnercli_ppl_32_exit_code = [int]$runnerCli32ExitCode
+            runnercli_ppl_32_log_path = [string]$runnerCli32LogPath
+            runnercli_ppl_32_output_ppl_path = [string]$runnerCli32OutputPplPath
+            runnercli_ppl_32_output_ppl_size_bytes = [int64]$runnerCli32OutputPplSizeBytes
+            labview_bitness_filesize_manifest_status = [string]$bitnessManifestStatus
+            labview_bitness_filesize_manifest_path = [string]$bitnessManifestPath
+            labview_bitness_filesize_manifest_summary = $bitnessManifestSummary
+            bitness_handoff_masscompile_status = [string]$bitnessHandoffMassCompileStatus
+            bitness_handoff_vi_analyzer_status = [string]$bitnessHandoffViAnalyzerStatus
+            bitness_handoff_runnercli_status = [string]$bitnessHandoffRunnerCliStatus
             certified = (
               [string]$preflightReport.status -eq 'succeeded' -and
-              [string]$massCompileReport.status -eq 'succeeded' -and
-              [string]$viAnalyzerReport.status -eq 'succeeded' -and
-              [string]$runnerCliReport.status -eq 'succeeded' -and
+              $massCompileAllRequiredSucceeded -and
+              $viAnalyzerAllRequiredSucceeded -and
+              $runnerCliAllRequiredSucceeded -and
+              ((-not ($hasBitness64 -and $hasBitness32)) -or [string]$bitnessHandoffMassCompileStatus -eq 'succeeded') -and
+              ((-not ($hasBitness64 -and $hasBitness32)) -or [string]$bitnessHandoffViAnalyzerStatus -eq 'succeeded') -and
+              ((-not $requiresSecondaryPpl) -or [string]$bitnessHandoffRunnerCliStatus -eq 'succeeded') -and
+              ((-not $requiresSecondaryPpl) -or [string]$runnerCliSecondaryStatus -eq 'succeeded') -and
               [int]$matrixSummary.summary.strict_failures -eq 0 -and
               [int]$matrixSummary.summary.override_failures -eq 0 -and
               @($matrixSummary.summary.duplicate_port_groups).Count -eq 0
@@ -506,12 +1155,34 @@ jobs:
             "- allowed machines: $($certification.allowed_machine_names_csv)",
             "- labels: $($certification.requested_runner_labels_json)",
             "- icon-editor pinned sha: $($certification.icon_editor_pinned_sha)",
+            "- execution bitness: $($certification.execution_lvbitness)",
+            "- available bitness: $($certification.execution_available_bitness_csv)",
             "- masscompile status: $($certification.masscompile_status)",
             "- masscompile exit code: $($certification.masscompile_exit_code)",
-            "- vi analyze status: $($certification.vi_analyzer_status)",
-            "- vi analyze exit code: $($certification.vi_analyzer_exit_code)",
+            "- masscompile 64-bit status: $($certification.masscompile_64_status)",
+            "- masscompile 32-bit status: $($certification.masscompile_32_status)",
+            "- vi analyzer status: $($certification.vi_analyzer_status)",
+            "- vi analyzer exit code: $($certification.vi_analyzer_exit_code)",
+            "- vi analyzer 64-bit status: $($certification.vi_analyzer_64_status)",
+            "- vi analyzer 32-bit status: $($certification.vi_analyzer_32_status)",
+            "- runner-cli ppl platform: $($certification.runnercli_ppl_platform)",
             "- runner-cli ppl status: $($certification.runnercli_ppl_status)",
             "- runner-cli ppl exit code: $($certification.runnercli_ppl_exit_code)",
+            "- runner-cli ppl output size bytes: $($certification.runnercli_ppl_output_ppl_size_bytes)",
+            "- runner-cli ppl 64-bit status: $($certification.runnercli_ppl_64_status)",
+            "- runner-cli ppl 64-bit size bytes: $($certification.runnercli_ppl_64_output_ppl_size_bytes)",
+            "- runner-cli ppl 32-bit status: $($certification.runnercli_ppl_32_status)",
+            "- runner-cli ppl 32-bit size bytes: $($certification.runnercli_ppl_32_output_ppl_size_bytes)",
+            "- runner-cli ppl secondary required: $($certification.runnercli_ppl_secondary_required)",
+            "- runner-cli ppl secondary requested: $($certification.runnercli_ppl_secondary_requested)",
+            "- runner-cli ppl secondary status: $($certification.runnercli_ppl_secondary_status)",
+            "- runner-cli ppl secondary exit code: $($certification.runnercli_ppl_secondary_exit_code)",
+            "- runner-cli ppl secondary size bytes: $($certification.runnercli_ppl_secondary_output_ppl_size_bytes)",
+            "- bitness file-size manifest status: $($certification.labview_bitness_filesize_manifest_status)",
+            "- bitness file-size manifest path: $($certification.labview_bitness_filesize_manifest_path)",
+            "- bitness handoff masscompile status: $($certification.bitness_handoff_masscompile_status)",
+            "- bitness handoff vi analyzer status: $($certification.bitness_handoff_vi_analyzer_status)",
+            "- bitness handoff runnercli status: $($certification.bitness_handoff_runnercli_status)",
             "- strict failures: $($matrixSummary.summary.strict_failures)",
             "- override failures: $($matrixSummary.summary.override_failures)",
             "- duplicate port groups: $(@($matrixSummary.summary.duplicate_port_groups).Count)",
@@ -534,12 +1205,612 @@ jobs:
             ${{ steps.runner-metadata.outputs.metadata_path }}
             ${{ steps.machine-preflight.outputs.report_path }}
             ${{ steps.port-matrix.outputs.matrix_summary_path }}
-            ${{ steps.masscompile.outputs.masscompile_report_path }}
-            ${{ steps.vi-analyzer.outputs.vi_analyzer_report_path }}
-            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_report_path }}
+            ${{ steps.masscompile-64.outputs.masscompile_64_report_path }}
+            ${{ steps.masscompile-32.outputs.masscompile_32_report_path }}
+            ${{ steps.vi-analyzer-64.outputs.vi_analyzer_64_report_path }}
+            ${{ steps.vi-analyzer-32.outputs.vi_analyzer_32_report_path }}
+            ${{ steps.runnercli-ppl-linux-64.outputs.runnercli_ppl_linux_64_report_path }}
+            ${{ steps.runnercli-ppl-windows-64.outputs.runnercli_ppl_windows_64_report_path }}
+            ${{ steps.runnercli-ppl-windows-32.outputs.runnercli_ppl_windows_32_report_path }}
+            ${{ steps.bitness-filesize-manifest.outputs.manifest_path }}
+            ${{ steps.bitness-handoff-masscompile.outputs.bitness_handoff_masscompile_report_path }}
+            ${{ steps.bitness-handoff-vi-analyzer.outputs.bitness_handoff_vi_analyzer_report_path }}
+            ${{ steps.bitness-handoff-runnercli.outputs.bitness_handoff_runnercli_report_path }}
             ${{ steps.certification-summary.outputs.summary_path }}
             ${{ steps.port-matrix.outputs.matrix_root }}
-            ${{ steps.masscompile.outputs.masscompile_root }}
-            ${{ steps.vi-analyzer.outputs.vi_analyzer_root }}
-            ${{ steps.runnercli-ppl.outputs.runnercli_ppl_root }}
+            ${{ steps.masscompile-64.outputs.masscompile_64_root }}
+            ${{ steps.masscompile-32.outputs.masscompile_32_root }}
+            ${{ steps.vi-analyzer-64.outputs.vi_analyzer_64_root }}
+            ${{ steps.vi-analyzer-32.outputs.vi_analyzer_32_root }}
+            ${{ steps.runnercli-ppl-linux-64.outputs.runnercli_ppl_linux_64_root }}
+            ${{ steps.runnercli-ppl-windows-64.outputs.runnercli_ppl_windows_64_root }}
+            ${{ steps.runnercli-ppl-windows-32.outputs.runnercli_ppl_windows_32_root }}
+            ${{ steps.bitness-filesize-manifest.outputs.manifest_root }}
+            ${{ steps.runner-metadata.outputs.metadata_root }}\bitness-handoff
+            ${{ steps.runner-metadata.outputs.metadata_root }}\vi-analyzer-64
+            ${{ steps.runner-metadata.outputs.metadata_root }}\vi-analyzer-32
+            ${{ steps.runner-metadata.outputs.metadata_root }}\masscompile-64
+            ${{ steps.runner-metadata.outputs.metadata_root }}\masscompile-32
+            ${{ steps.runner-metadata.outputs.metadata_root }}\runnercli-ppl-linux-64
+            ${{ steps.runner-metadata.outputs.metadata_root }}\runnercli-ppl-windows-64
+            ${{ steps.runner-metadata.outputs.metadata_root }}\runnercli-ppl-32
+          if-no-files-found: error
+
+  package-vip:
+    name: Build VI Package From Certification Outputs (${{ matrix.setup_name }})
+    needs:
+      - resolve-setups
+      - certify
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.resolve-setups.outputs.package_setups_json) }}
+    runs-on: ${{ fromJson(matrix.runner_labels_json) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip non-package setup
+        if: ${{ matrix.setup_name != 'legacy-2020-desktop-windows' }}
+        shell: powershell
+        run: |
+          Write-Host ("Skipping VIP package build for setup '{0}'." -f '${{ matrix.setup_name }}')
+
+      - name: Download certification artifact bundle
+        if: ${{ matrix.setup_name == 'legacy-2020-desktop-windows' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: self-hosted-machine-certification-${{ matrix.setup_name }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/self-hosted-machine-certification/${{ matrix.setup_name }}
+
+      - name: Download secondary 32-bit certification artifact bundle
+        if: ${{ matrix.setup_name == 'legacy-2020-desktop-windows' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: self-hosted-machine-certification-legacy-2020-desktop-windows-32-${{ github.run_id }}
+          path: ${{ runner.temp }}/self-hosted-machine-certification/legacy-2020-desktop-windows-32
+
+      - id: build-vip
+        if: ${{ matrix.setup_name == 'legacy-2020-desktop-windows' }}
+        name: Build VIP from certified PPL inputs
+        shell: powershell
+        env:
+          MATRIX_SETUP_NAME: ${{ matrix.setup_name }}
+          MATRIX_EXPECTED_LABVIEW_YEAR: ${{ matrix.expected_labview_year }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setupName = ([string]$env:MATRIX_SETUP_NAME).Trim()
+          if ([string]::IsNullOrWhiteSpace($setupName)) {
+            throw "MATRIX_SETUP_NAME environment value is required."
+          }
+          $expectedYearFromMatrix = ([string]$env:MATRIX_EXPECTED_LABVIEW_YEAR).Trim()
+          if ($expectedYearFromMatrix -notmatch '^\d{4}$') {
+            throw "MATRIX_EXPECTED_LABVIEW_YEAR must be a 4-digit year. Found '$expectedYearFromMatrix'."
+          }
+
+          $primaryArtifactRoot = Join-Path $env:RUNNER_TEMP ("self-hosted-machine-certification\{0}" -f $setupName)
+          if (-not (Test-Path -LiteralPath $primaryArtifactRoot -PathType Container)) {
+            throw "Certification artifact root not found: $primaryArtifactRoot"
+          }
+
+          $summaryPath = @(
+            Get-ChildItem -Path $primaryArtifactRoot -Recurse -Filter 'self-hosted-machine-certification-report.json' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($summaryPath)) {
+            throw "self-hosted-machine-certification-report.json was not found in downloaded artifact root '$primaryArtifactRoot'."
+          }
+          $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if (-not [bool]$summary.certified) {
+            throw ("Cannot build VIP because certification did not pass for setup '{0}'." -f $setupName)
+          }
+
+          $secondaryArtifactRoot = Join-Path $env:RUNNER_TEMP 'self-hosted-machine-certification\legacy-2020-desktop-windows-32'
+          if (-not (Test-Path -LiteralPath $secondaryArtifactRoot -PathType Container)) {
+            throw "Secondary 32-bit certification artifact root not found: $secondaryArtifactRoot"
+          }
+          $secondarySummaryPath = @(
+            Get-ChildItem -Path $secondaryArtifactRoot -Recurse -Filter 'self-hosted-machine-certification-report.json' -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($secondarySummaryPath)) {
+            throw "self-hosted-machine-certification-report.json was not found in secondary artifact root '$secondaryArtifactRoot'."
+          }
+          $secondarySummary = Get-Content -LiteralPath $secondarySummaryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if (-not [bool]$secondarySummary.certified) {
+            throw "Cannot build VIP because secondary 32-bit certification did not pass."
+          }
+          if ([string]$summary.runnercli_ppl_64_status -ne 'succeeded') {
+            throw ("Primary certification must provide succeeded runner-cli x64 PPL status before VIP build. Found '{0}'." -f [string]$summary.runnercli_ppl_64_status)
+          }
+          if ([int64]$summary.runnercli_ppl_64_output_ppl_size_bytes -le 0) {
+            throw ("Primary certification x64 PPL size must be greater than zero. Found '{0}'." -f [string]$summary.runnercli_ppl_64_output_ppl_size_bytes)
+          }
+          if ([string]$secondarySummary.runnercli_ppl_32_status -ne 'succeeded') {
+            throw ("Secondary certification must provide succeeded runner-cli x86 PPL status before VIP build. Found '{0}'." -f [string]$secondarySummary.runnercli_ppl_32_status)
+          }
+          if ([int64]$secondarySummary.runnercli_ppl_32_output_ppl_size_bytes -le 0) {
+            throw ("Secondary certification x86 PPL size must be greater than zero. Found '{0}'." -f [string]$secondarySummary.runnercli_ppl_32_output_ppl_size_bytes)
+          }
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'workspace-governance.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $iconEditorRepo = @($manifest.managed_repos | Where-Object { [string]$_.repo_name -eq 'labview-icon-editor' }) | Select-Object -First 1
+          if ($null -eq $iconEditorRepo) {
+            throw "Managed repo 'labview-icon-editor' not found in manifest."
+          }
+
+          $pinnedSha = ([string]$summary.icon_editor_pinned_sha).Trim().ToLowerInvariant()
+          if ($pinnedSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Invalid icon-editor pinned SHA in certification summary: '$pinnedSha'."
+          }
+
+          $cloneUrl = [string]$iconEditorRepo.required_remotes.upstream
+          if ([string]::IsNullOrWhiteSpace($cloneUrl)) {
+            $cloneUrl = [string]$iconEditorRepo.required_remotes.origin
+          }
+          if ([string]::IsNullOrWhiteSpace($cloneUrl)) {
+            throw "No clone URL is available for managed repo 'labview-icon-editor'."
+          }
+
+          $workRoot = Join-Path $env:RUNNER_TEMP ("machine-certification-vip-{0}" -f $setupName)
+          if (Test-Path -LiteralPath $workRoot -PathType Container) {
+            Remove-Item -LiteralPath $workRoot -Recurse -Force
+          }
+          New-Item -Path $workRoot -ItemType Directory -Force | Out-Null
+          $cloneRoot = Join-Path $workRoot 'labview-icon-editor'
+
+          & git clone --no-checkout --filter=blob:none $cloneUrl $cloneRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to clone icon-editor repository from '$cloneUrl'."
+          }
+          & git -C $cloneRoot fetch --depth=1 origin $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch pinned SHA '$pinnedSha' for icon-editor repository."
+          }
+          & git -C $cloneRoot checkout --force $pinnedSha
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout pinned SHA '$pinnedSha' in clone root '$cloneRoot'."
+          }
+
+          $vipbPath = Join-Path $cloneRoot 'Tooling\deployment\NI Icon editor.vipb'
+          if (-not (Test-Path -LiteralPath $vipbPath -PathType Leaf)) {
+            throw "VIPB was not found at expected path '$vipbPath'."
+          }
+
+          $pluginRoot = Join-Path $cloneRoot 'resource\plugins'
+          if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+            New-Item -Path $pluginRoot -ItemType Directory -Force | Out-Null
+          }
+
+          $vipbContractContent = Get-Content -LiteralPath $vipbPath -Raw
+          $vipbPathMatches = [regex]::Matches($vipbContractContent, '<Path>(resource/plugins/[^<]+\.lvlibp)</Path>')
+          $vipbPplDestinationMap = @{}
+          foreach ($match in $vipbPathMatches) {
+            $relativePath = [string]$match.Groups[1].Value
+            $fileName = [System.IO.Path]::GetFileName($relativePath).ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($fileName)) { continue }
+            if ($vipbPplDestinationMap.ContainsKey($fileName)) {
+              if (-not [string]::Equals([string]$vipbPplDestinationMap[$fileName], $relativePath, [System.StringComparison]::Ordinal)) {
+                throw ("vipb_destination_ambiguous: filename '{0}' maps to multiple VIPB destinations ('{1}' and '{2}')." -f $fileName, [string]$vipbPplDestinationMap[$fileName], $relativePath)
+              }
+              continue
+            }
+            $vipbPplDestinationMap[$fileName] = $relativePath
+          }
+          if ($vipbPplDestinationMap.Count -eq 0) {
+            throw "vipb_destination_missing: no resource/plugins *.lvlibp destination overrides were found in '$vipbPath'."
+          }
+
+          $stagedPpl = [ordered]@{}
+          function Resolve-PplSourceFromArtifact {
+            param(
+              [Parameter(Mandatory = $true)][string]$ArtifactRoot,
+              [Parameter(Mandatory = $true)][string[]]$SourceCandidates
+            )
+            foreach ($candidate in $SourceCandidates) {
+              $sourcePath = @(
+                Get-ChildItem -Path $ArtifactRoot -Recurse -Filter $candidate -File -ErrorAction SilentlyContinue |
+                  Sort-Object LastWriteTimeUtc -Descending |
+                  Select-Object -First 1 -ExpandProperty FullName
+              ) | Select-Object -First 1
+              if (-not [string]::IsNullOrWhiteSpace($sourcePath)) {
+                return [string]$sourcePath
+              }
+            }
+            return ''
+          }
+          function Resolve-VipbDestination {
+            param(
+              [Parameter(Mandatory = $true)][hashtable]$VipbDestinationMap,
+              [Parameter(Mandatory = $true)][string]$DestinationFileName
+            )
+
+            $fileKey = $DestinationFileName.ToLowerInvariant()
+            if (-not $VipbDestinationMap.ContainsKey($fileKey)) {
+              throw ("vipb_destination_missing: VIPB does not declare destination override for '{0}'." -f $DestinationFileName)
+            }
+            return [string]$VipbDestinationMap[$fileKey]
+          }
+          function Get-DestinationAbsolutePath {
+            param(
+              [Parameter(Mandatory = $true)][string]$RepoRoot,
+              [Parameter(Mandatory = $true)][string]$DestinationRelativePath
+            )
+            $normalizedRelativePath = $DestinationRelativePath -replace '/', '\'
+            return (Join-Path $RepoRoot $normalizedRelativePath)
+          }
+          function Stage-PplToVipbDestination {
+            param(
+              [Parameter(Mandatory = $true)][string]$DestinationRelativePath,
+              [Parameter(Mandatory = $true)][string]$DestinationAbsolutePath,
+              [Parameter(Mandatory = $true)][string]$SourcePath,
+              [Parameter(Mandatory = $true)][System.Collections.Specialized.OrderedDictionary]$StagedMap
+            )
+
+            if ($StagedMap.Contains($DestinationRelativePath)) {
+              throw ("vipb_destination_collision: destination '{0}' is already staged from '{1}'." -f $DestinationRelativePath, [string]$StagedMap[$DestinationRelativePath])
+            }
+            $sourceItem = Get-Item -LiteralPath $SourcePath -ErrorAction Stop
+            if ([int64]$sourceItem.Length -le 0) {
+              throw ("ppl_rename_source_empty: source PPL '{0}' for destination '{1}' has zero bytes." -f $SourcePath, $DestinationRelativePath)
+            }
+            $destinationDir = Split-Path -Path $DestinationAbsolutePath -Parent
+            if (-not (Test-Path -LiteralPath $destinationDir -PathType Container)) {
+              New-Item -Path $destinationDir -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $SourcePath -Destination $DestinationAbsolutePath -Force
+            $destinationItem = Get-Item -LiteralPath $DestinationAbsolutePath -ErrorAction Stop
+            if ([int64]$destinationItem.Length -le 0) {
+              throw ("ppl_rename_destination_empty: renamed PPL destination '{0}' has zero bytes." -f $DestinationRelativePath)
+            }
+            $StagedMap[$DestinationRelativePath] = $SourcePath
+          }
+
+          if ([string]$summary.runnercli_ppl_64_status -eq 'succeeded') {
+            if ([string]$summary.runnercli_ppl_platform -eq 'linux') {
+              $destinationRelative = Resolve-VipbDestination -VipbDestinationMap $vipbPplDestinationMap -DestinationFileName 'lv_icon_linux_x64.lvlibp'
+              $destination = Get-DestinationAbsolutePath -RepoRoot $cloneRoot -DestinationRelativePath $destinationRelative
+              $source = Resolve-PplSourceFromArtifact -ArtifactRoot $primaryArtifactRoot -SourceCandidates @('lv_icon_linux_x64.lvlibp', 'lv_icon_x64.lvlibp', 'lv_icon.lvlibp')
+              if ([string]::IsNullOrWhiteSpace($source)) {
+                throw ("Missing linux x64 PPL artifact for setup '{0}'. Expected one of: lv_icon_linux_x64.lvlibp, lv_icon_x64.lvlibp, lv_icon.lvlibp." -f $setupName)
+              }
+              Stage-PplToVipbDestination -DestinationRelativePath $destinationRelative -DestinationAbsolutePath $destination -SourcePath $source -StagedMap $stagedPpl
+            } else {
+              $destinationRelative = Resolve-VipbDestination -VipbDestinationMap $vipbPplDestinationMap -DestinationFileName 'lv_icon_x64.lvlibp'
+              $destination = Get-DestinationAbsolutePath -RepoRoot $cloneRoot -DestinationRelativePath $destinationRelative
+              $source = Resolve-PplSourceFromArtifact -ArtifactRoot $primaryArtifactRoot -SourceCandidates @('lv_icon_x64.lvlibp', 'lv_icon.lvlibp')
+              if ([string]::IsNullOrWhiteSpace($source)) {
+                throw ("Missing windows x64 PPL in certification artifact bundle for setup '{0}'. Expected one of: lv_icon_x64.lvlibp, lv_icon.lvlibp." -f $setupName)
+              }
+              Stage-PplToVipbDestination -DestinationRelativePath $destinationRelative -DestinationAbsolutePath $destination -SourcePath $source -StagedMap $stagedPpl
+            }
+          }
+
+          if ([string]$secondarySummary.runnercli_ppl_status -eq 'succeeded' -and [string]$secondarySummary.execution_lvbitness -eq '32') {
+            $destinationRelative = Resolve-VipbDestination -VipbDestinationMap $vipbPplDestinationMap -DestinationFileName 'lv_icon_x86.lvlibp'
+            $destination = Get-DestinationAbsolutePath -RepoRoot $cloneRoot -DestinationRelativePath $destinationRelative
+            $source = Resolve-PplSourceFromArtifact -ArtifactRoot $secondaryArtifactRoot -SourceCandidates @('lv_icon_x86.lvlibp', 'lv_icon.lvlibp')
+            if ([string]::IsNullOrWhiteSpace($source)) {
+              throw "Missing windows x86 PPL in secondary 32-bit certification artifact bundle. Expected one of: lv_icon_x86.lvlibp, lv_icon.lvlibp."
+            }
+            Stage-PplToVipbDestination -DestinationRelativePath $destinationRelative -DestinationAbsolutePath $destination -SourcePath $source -StagedMap $stagedPpl
+          }
+
+          if (@($stagedPpl.Keys).Count -eq 0) {
+            throw ("No runner-cli PPL outputs were staged for VIP build for setup '{0}'." -f $setupName)
+          }
+
+          $vipbRequiredPplDestinations = New-Object 'System.Collections.Generic.List[string]'
+          foreach ($requiredFileName in @('lv_icon_x86.lvlibp', 'lv_icon_x64.lvlibp', 'lv_icon_linux_x64.lvlibp')) {
+            $fileKey = $requiredFileName.ToLowerInvariant()
+            if ($vipbPplDestinationMap.ContainsKey($fileKey)) {
+              [void]$vipbRequiredPplDestinations.Add([string]$vipbPplDestinationMap[$fileKey])
+            }
+          }
+          $missingVipbRequiredPpl = @(
+            $vipbRequiredPplDestinations |
+              Where-Object { -not $stagedPpl.Contains($_) }
+          )
+          if (@($missingVipbRequiredPpl).Count -gt 0) {
+            throw ("vipb_required_ppl_missing: VIPB requires destination(s) [{0}] but no staged PPL artifact matched those paths." -f ($missingVipbRequiredPpl -join ', '))
+          }
+
+          $expectedLabviewYear = $expectedYearFromMatrix
+          if ($expectedLabviewYear -notmatch '^\d{4}$') {
+            throw "expected_labview_year must be a 4-digit year. Found '$expectedLabviewYear'."
+          }
+          $packageLabviewVersion = "{0}.0" -f ([int]$expectedLabviewYear - 2000)
+          $vipbBeforeHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $vipbContent = Get-Content -LiteralPath $vipbPath -Raw
+          $vipbVersionMatch = [regex]::Match($vipbContent, '<Package_LabVIEW_Version>([^<]+)</Package_LabVIEW_Version>')
+          if (-not $vipbVersionMatch.Success) {
+            throw "VIPB does not contain <Package_LabVIEW_Version> tag: $vipbPath"
+          }
+          $vipbPackageLabviewVersionBefore = [string]$vipbVersionMatch.Groups[1].Value
+          $vipbContent = [regex]::Replace(
+            $vipbContent,
+            '<Package_LabVIEW_Version>[^<]+</Package_LabVIEW_Version>',
+            ("<Package_LabVIEW_Version>{0}</Package_LabVIEW_Version>" -f $packageLabviewVersion),
+            1
+          )
+          $vipbContent | Set-Content -LiteralPath $vipbPath -Encoding utf8
+          $vipbContentAfter = Get-Content -LiteralPath $vipbPath -Raw
+          $vipbVersionAfterMatch = [regex]::Match($vipbContentAfter, '<Package_LabVIEW_Version>([^<]+)</Package_LabVIEW_Version>')
+          if (-not $vipbVersionAfterMatch.Success) {
+            throw "vipb_package_labview_version_missing_after_patch: Package_LabVIEW_Version tag missing after write."
+          }
+          $vipbPackageLabviewVersionAfter = [string]$vipbVersionAfterMatch.Groups[1].Value
+          if (-not [string]::Equals($vipbPackageLabviewVersionAfter, $packageLabviewVersion, [System.StringComparison]::Ordinal)) {
+            throw ("vipb_package_labview_version_not_applied: expected '{0}' but found '{1}' after patch." -f $packageLabviewVersion, $vipbPackageLabviewVersionAfter)
+          }
+          $vipbAfterHash = (Get-FileHash -LiteralPath $vipbPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $vipm = Get-Command -Name 'vipm' -ErrorAction SilentlyContinue
+          if ($null -eq $vipm -or [string]::IsNullOrWhiteSpace([string]$vipm.Source)) {
+            throw ("vipm CLI was not found on PATH for setup '{0}'." -f $setupName)
+          }
+          $vipmExe = [string]$vipm.Source
+          $certifiedExecutionBitness = ([string]$summary.execution_lvbitness).Trim()
+          if ($certifiedExecutionBitness -notin @('32', '64')) {
+            throw "Invalid execution bitness '$certifiedExecutionBitness' in certification summary."
+          }
+          $executionBitness = '64'
+          if (-not [string]::Equals($certifiedExecutionBitness, '64', [System.StringComparison]::Ordinal)) {
+            Write-Host ("Forcing VIP build runtime to LabVIEW 64-bit. Primary certification bitness was '{0}'." -f $certifiedExecutionBitness)
+          }
+
+          $outputRoot = Join-Path $workRoot 'vip-output'
+          New-Item -Path $outputRoot -ItemType Directory -Force | Out-Null
+          $vipLogPath = Join-Path $outputRoot 'vipm-build.log'
+          $vipErrLogPath = Join-Path $outputRoot 'vipm-build.stderr.log'
+          $preVipFiles = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { [string]$_.Extension -ieq '.vip' } |
+              Select-Object -ExpandProperty FullName
+          )
+
+          $env:VIPM_COMMUNITY_EDITION = 'true'
+          $env:CI = 'true'
+          # Quote the build-spec argument so VIPM handles paths with spaces deterministically.
+          $vipBuildSpecArg = ('"{0}"' -f $vipbPath)
+          $vipCmd = @('--color-mode', 'never', '--labview-version', $expectedLabviewYear, '--labview-bitness', $executionBitness, 'build', $vipBuildSpecArg)
+          $expectedLabviewPath = if ($executionBitness -eq '64') {
+            "C:\Program Files\National Instruments\LabVIEW $expectedLabviewYear\LabVIEW.exe"
+          } else {
+            "C:\Program Files (x86)\National Instruments\LabVIEW $expectedLabviewYear\LabVIEW.exe"
+          }
+          if (-not (Test-Path -LiteralPath $expectedLabviewPath -PathType Leaf)) {
+            throw ("vipm_labview_expected_path_missing: expected LabVIEW path for bitness {0} was not found: {1}" -f $executionBitness, $expectedLabviewPath)
+          }
+
+          $bitnessHandoffScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Assert-LabVIEWBitnessHandoff.ps1'
+          if (-not (Test-Path -LiteralPath $bitnessHandoffScript -PathType Leaf)) {
+            throw "Bitness handoff script was not found: $bitnessHandoffScript"
+          }
+          $vipmPreflightHandoffReportPath = Join-Path $outputRoot 'vipm-prebuild-bitness-handoff.json'
+          & $bitnessHandoffScript `
+            -PhaseName 'vipm-build-preflight' `
+            -ArtifactRoot $outputRoot `
+            -TimeoutSeconds 45 `
+            -PollSeconds 2 `
+            -OutputPath $vipmPreflightHandoffReportPath
+          $vipmPreflightHandoffReport = Get-Content -LiteralPath $vipmPreflightHandoffReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$vipmPreflightHandoffReport.status -ne 'succeeded') {
+            throw ("vipm_prebuild_bitness_handoff_failed: unable to reach clean LabVIEW process state before VIP build. report={0}" -f $vipmPreflightHandoffReportPath)
+          }
+
+          $ensurePortScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\Ensure-LabVIEWCliPortContractAndIni.ps1'
+          if (-not (Test-Path -LiteralPath $ensurePortScript -PathType Leaf)) {
+            throw "Port contract script was not found: $ensurePortScript"
+          }
+          $portArtifactRoot = Join-Path $outputRoot 'port-contract'
+          New-Item -Path $portArtifactRoot -ItemType Directory -Force | Out-Null
+          & $ensurePortScript `
+            -RepoPath $cloneRoot `
+            -ExecutionLabviewYear $expectedLabviewYear `
+            -SupportedBitness $executionBitness `
+            -PortContext 'windows-host' `
+            -ArtifactRoot $portArtifactRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw ("vipm_port_contract_remediation_failed: Ensure-LabVIEWCliPortContractAndIni.ps1 exited with code {0}." -f [int]$LASTEXITCODE)
+          }
+          $portContractReportPath = Join-Path $portArtifactRoot 'labview-cli-port-contract-remediation-report.json'
+          if (-not (Test-Path -LiteralPath $portContractReportPath -PathType Leaf)) {
+            throw "vipm_port_contract_report_missing: $portContractReportPath"
+          }
+          $portContractReport = Get-Content -LiteralPath $portContractReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $expectedPort = [int]$portContractReport.expected_port
+          if ($expectedPort -le 0) {
+            throw ("vipm_port_contract_invalid_expected_port: {0}" -f $expectedPort)
+          }
+
+          # Fail-closed: VIPM must launch the expected LabVIEW bitness path.
+          $observedLabviewPaths = New-Object 'System.Collections.Generic.HashSet[string]'
+          if (Test-Path -LiteralPath $vipLogPath -PathType Leaf) { Remove-Item -LiteralPath $vipLogPath -Force }
+          if (Test-Path -LiteralPath $vipErrLogPath -PathType Leaf) { Remove-Item -LiteralPath $vipErrLogPath -Force }
+          function Add-ObservedLabviewProcessPaths {
+            $labviewProcesses = @(Get-CimInstance Win32_Process -Filter "Name='LabVIEW.exe'" -ErrorAction SilentlyContinue)
+            foreach ($lvProc in $labviewProcesses) {
+              $candidatePath = ([string]$lvProc.ExecutablePath).Trim()
+              if (-not [string]::IsNullOrWhiteSpace($candidatePath)) {
+                [void]$observedLabviewPaths.Add($candidatePath)
+              }
+            }
+          }
+
+          $vipProcess = Start-Process -FilePath $vipmExe -ArgumentList $vipCmd -NoNewWindow -PassThru -RedirectStandardOutput $vipLogPath -RedirectStandardError $vipErrLogPath
+          Add-ObservedLabviewProcessPaths
+          while (-not $vipProcess.HasExited) {
+            Add-ObservedLabviewProcessPaths
+            Start-Sleep -Milliseconds 500
+          }
+          Add-ObservedLabviewProcessPaths
+          $vipExit = [int]$vipProcess.ExitCode
+          if (Test-Path -LiteralPath $vipErrLogPath -PathType Leaf) {
+            $stderrRaw = Get-Content -LiteralPath $vipErrLogPath -Raw -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($stderrRaw)) {
+              Add-Content -LiteralPath $vipLogPath -Value $stderrRaw
+            }
+          }
+          $vipLogRaw = ''
+          if (Test-Path -LiteralPath $vipLogPath -PathType Leaf) {
+            $vipLogRaw = Get-Content -LiteralPath $vipLogPath -Raw -ErrorAction SilentlyContinue
+          }
+
+          $observedLabviewPathList = @($observedLabviewPaths | Sort-Object -Unique)
+          $labviewProcessObservationStatus = 'observed'
+          $labviewProcessObservationMessage = ''
+          $labviewBitnessMismatchObserved = $false
+          if (@($observedLabviewPathList).Count -eq 0) {
+            $labviewProcessObservationStatus = 'not-observed'
+            $labviewProcessObservationMessage = ("vipm_labview_process_not_observed: VIPM build completed but no LabVIEW.exe process path sample was captured for requested bitness {0}. Falling back to VIPM command bitness + port-contract evidence." -f $executionBitness)
+            Write-Warning $labviewProcessObservationMessage
+          } elseif ($observedLabviewPathList -notcontains $expectedLabviewPath) {
+            $labviewBitnessMismatchObserved = $true
+            $labviewProcessObservationStatus = 'bitness-mismatch'
+            $labviewProcessObservationMessage = ("vipm_labview_bitness_mismatch_observed: expected LabVIEW path '{0}' for bitness {1} but observed [{2}]. Continuing with VIPM log and artifact validation." -f $expectedLabviewPath, $executionBitness, ($observedLabviewPathList -join ', '))
+            Write-Warning $labviewProcessObservationMessage
+          }
+          if ($vipExit -ne 0) {
+            throw ("vipm build failed with exit code {0} for setup '{1}'." -f $vipExit, $setupName)
+          }
+          if ($vipLogRaw -match '(?im)^\s*error:' -or $vipLogRaw -match '(?im)^\s*Usage:\s*vipm\.exe\b') {
+            throw ("vipm_log_error_detected: VIPM output reported an error despite exit code {0}. log={1}" -f $vipExit, $vipLogPath)
+          }
+
+          $postVipFiles = @(
+            Get-ChildItem -Path $cloneRoot -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { [string]$_.Extension -ieq '.vip' }
+          )
+          $newVip = @(
+            $postVipFiles |
+              Where-Object { $_.FullName -notin $preVipFiles } |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($newVip)) {
+            $newVip = @(
+              $postVipFiles |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 1 -ExpandProperty FullName
+            ) | Select-Object -First 1
+          }
+          if ([string]::IsNullOrWhiteSpace($newVip)) {
+            throw "vipm build reported success but no .vip output was found."
+          }
+          if ([string]([System.IO.Path]::GetExtension($newVip)) -ine '.vip') {
+            throw ("vipm build did not produce a .vip output. Candidate was '{0}'." -f $newVip)
+          }
+
+          $vipOutPath = Join-Path $outputRoot ([System.IO.Path]::GetFileName($newVip))
+          Copy-Item -LiteralPath $newVip -Destination $vipOutPath -Force
+          $vipOutItem = Get-Item -LiteralPath $vipOutPath -ErrorAction Stop
+          if ([int64]$vipOutItem.Length -le 0) {
+            throw ("vip_output_empty: produced VIP file has zero bytes at '{0}'." -f $vipOutPath)
+          }
+
+          $vipExtractRoot = Join-Path $outputRoot 'vip-contents'
+          New-Item -Path $vipExtractRoot -ItemType Directory -Force | Out-Null
+          $vipZipPath = Join-Path $outputRoot (([System.IO.Path]::GetFileNameWithoutExtension($vipOutPath)) + '.zip')
+          Copy-Item -LiteralPath $vipOutPath -Destination $vipZipPath -Force
+          Expand-Archive -Path $vipZipPath -DestinationPath $vipExtractRoot -Force
+          $vipEntries = @(
+            Get-ChildItem -LiteralPath $vipExtractRoot -Recurse -Force |
+              Sort-Object FullName |
+              ForEach-Object {
+                $relative = ([string]$_.FullName).Substring($vipExtractRoot.Length).TrimStart('\', '/').Replace('\', '/')
+                [ordered]@{
+                  relative_path = $relative
+                  item_type = $(if ($_.PSIsContainer) { 'dir' } else { 'file' })
+                  size_bytes = $(if ($_.PSIsContainer) { [int64]0 } else { [int64]$_.Length })
+                }
+              }
+          )
+          $vipContentsManifestPath = Join-Path $outputRoot 'vip-contents-manifest.json'
+          $vipEntries | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $vipContentsManifestPath -Encoding utf8
+          $vipContentsTreePath = Join-Path $outputRoot 'vip-contents-tree.txt'
+          $vipTreeLines = @(
+            $vipEntries |
+              ForEach-Object { "{0} ({1}, {2} bytes)" -f [string]$_.relative_path, [string]$_.item_type, [int64]$_.size_bytes }
+          )
+          $vipTreeLines | Set-Content -LiteralPath $vipContentsTreePath -Encoding utf8
+
+          $reportPath = Join-Path $outputRoot 'vip-package-build-report.json'
+          [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            setup_name = $setupName
+            expected_labview_year = $expectedLabviewYear
+            execution_bitness = $executionBitness
+            certified_execution_bitness = $certifiedExecutionBitness
+            certification_summary_path = $summaryPath
+            secondary_certification_summary_path = $secondarySummaryPath
+            icon_editor_pinned_sha = $pinnedSha
+            clone_root = $cloneRoot
+            vipb_path = $vipbPath
+            package_labview_version = $packageLabviewVersion
+            vipb_package_labview_version_before = $vipbPackageLabviewVersionBefore
+            vipb_package_labview_version_after = $vipbPackageLabviewVersionAfter
+            vipb_sha256_before = $vipbBeforeHash
+            vipb_sha256_after = $vipbAfterHash
+            vipb_ppl_destination_map = $vipbPplDestinationMap
+            vipb_required_ppl_destinations = @($vipbRequiredPplDestinations)
+            staged_ppl = $stagedPpl
+            vipm_cli_path = $vipmExe
+            vipm_command = @($vipCmd)
+            vipm_exit_code = $vipExit
+            vipm_log_path = $vipLogPath
+            vipm_prebuild_bitness_handoff_report_path = $vipmPreflightHandoffReportPath
+            port_contract_report_path = $portContractReportPath
+            expected_port = $expectedPort
+            expected_labview_path = $expectedLabviewPath
+            observed_labview_process_paths = @($observedLabviewPathList)
+            labview_process_observation_status = $labviewProcessObservationStatus
+            labview_process_observation_message = $labviewProcessObservationMessage
+            labview_bitness_mismatch_observed = $labviewBitnessMismatchObserved
+            built_vip_path = $vipOutPath
+            built_vip_size_bytes = [int64]$vipOutItem.Length
+            built_vip_contents_manifest_path = $vipContentsManifestPath
+            built_vip_contents_tree_path = $vipContentsTreePath
+            status = 'succeeded'
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+          @(
+            "## VIP Package Build",
+            "",
+            "- setup: $setupName",
+            "- expected LabVIEW year: $expectedLabviewYear",
+            "- execution bitness: $executionBitness",
+            "- primary certified execution bitness: $certifiedExecutionBitness",
+            "- package LabVIEW version (VIPB): $packageLabviewVersion",
+            "- VIPB Package_LabVIEW_Version before: $vipbPackageLabviewVersionBefore",
+            "- VIPB Package_LabVIEW_Version after: $vipbPackageLabviewVersionAfter",
+            "- labview process observation status: $labviewProcessObservationStatus",
+            "- labview process observation message: $labviewProcessObservationMessage",
+            "- staged PPL destinations: $(@($stagedPpl.Keys) -join ', ')",
+            "- built VIP: $vipOutPath",
+            "- built VIP size bytes: $($vipOutItem.Length)",
+            "- vip contents manifest: $vipContentsManifestPath",
+            "",
+            "### VIP Contents (ZIP View)",
+            ""
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          @($vipTreeLines | ForEach-Object { "- $_" }) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          "vip_output_root=$outputRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vip_output_path=$vipOutPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload VIP package artifacts
+        if: ${{ always() && matrix.setup_name == 'legacy-2020-desktop-windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-hosted-machine-certification-vip-${{ matrix.setup_name }}-${{ github.run_id }}
+          path: |
+            ${{ steps.build-vip.outputs.vip_report_path }}
+            ${{ steps.build-vip.outputs.vip_output_path }}
+            ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
