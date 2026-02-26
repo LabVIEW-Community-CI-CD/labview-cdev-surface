@@ -98,6 +98,7 @@ Add-Check -Scope 'manifest' -Name 'has_installer_contract_provenance' -Passed ($
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_canary' -Passed ($installerContractMembers -contains 'canary') -Detail 'installer_contract.canary'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_cli_bundle' -Passed ($installerContractMembers -contains 'cli_bundle') -Detail 'installer_contract.cli_bundle'
 Add-Check -Scope 'manifest' -Name 'has_installer_contract_harness' -Passed ($installerContractMembers -contains 'harness') -Detail 'installer_contract.harness'
+Add-Check -Scope 'manifest' -Name 'has_installer_contract_release_client' -Passed ($installerContractMembers -contains 'release_client') -Detail 'installer_contract.release_client'
 if ($installerContractMembers -contains 'reproducibility') {
     Add-Check -Scope 'manifest' -Name 'reproducibility_required_true' -Passed ([bool]$manifest.installer_contract.reproducibility.required) -Detail "required=$($manifest.installer_contract.reproducibility.required)"
     Add-Check -Scope 'manifest' -Name 'reproducibility_strict_hash_match_true' -Passed ([bool]$manifest.installer_contract.reproducibility.strict_hash_match) -Detail "strict_hash_match=$($manifest.installer_contract.reproducibility.strict_hash_match)"
@@ -134,6 +135,31 @@ if ($installerContractMembers -contains 'harness') {
     foreach ($requiredPostaction in @('ppl_capability_checks.32', 'ppl_capability_checks.64', 'vip_package_build_check')) {
         Add-Check -Scope 'manifest' -Name "harness_required_postaction:$requiredPostaction" -Passed (@($harness.required_postactions) -contains $requiredPostaction) -Detail ([string]::Join(',', @($harness.required_postactions)))
     }
+}
+if ($installerContractMembers -contains 'release_client') {
+    $releaseClient = $manifest.installer_contract.release_client
+    Add-Check -Scope 'manifest' -Name 'release_client_schema_version' -Passed ([string]$releaseClient.schema_version -eq '1.0') -Detail ([string]$releaseClient.schema_version)
+    Add-Check -Scope 'manifest' -Name 'release_client_default_install_root' -Passed ([string]$releaseClient.default_install_root -eq 'C:\dev') -Detail ([string]$releaseClient.default_install_root)
+    Add-Check -Scope 'manifest' -Name 'release_client_policy_path' -Passed ([string]$releaseClient.policy_path -eq 'C:\dev\workspace-governance\release-policy.json') -Detail ([string]$releaseClient.policy_path)
+    Add-Check -Scope 'manifest' -Name 'release_client_state_path' -Passed ([string]$releaseClient.state_path -eq 'C:\dev\artifacts\workspace-release-state.json') -Detail ([string]$releaseClient.state_path)
+    Add-Check -Scope 'manifest' -Name 'release_client_latest_report_path' -Passed ([string]$releaseClient.latest_report_path -eq 'C:\dev\artifacts\workspace-release-client-latest.json') -Detail ([string]$releaseClient.latest_report_path)
+    Add-Check -Scope 'manifest' -Name 'release_client_provenance_required' -Passed ([bool]$releaseClient.provenance_required) -Detail ([string]$releaseClient.provenance_required)
+    Add-Check -Scope 'manifest' -Name 'release_client_allowed_repo_upstream' -Passed (@($releaseClient.allowed_repositories) -contains 'LabVIEW-Community-CI-CD/labview-cdev-surface') -Detail ([string]::Join(',', @($releaseClient.allowed_repositories)))
+    Add-Check -Scope 'manifest' -Name 'release_client_allowed_repo_fork' -Passed (@($releaseClient.allowed_repositories) -contains 'svelderrainruiz/labview-cdev-surface') -Detail ([string]::Join(',', @($releaseClient.allowed_repositories)))
+    Add-Check -Scope 'manifest' -Name 'release_client_allowed_channel_stable' -Passed (@($releaseClient.channel_rules.allowed_channels) -contains 'stable') -Detail ([string]::Join(',', @($releaseClient.channel_rules.allowed_channels)))
+    Add-Check -Scope 'manifest' -Name 'release_client_allowed_channel_prerelease' -Passed (@($releaseClient.channel_rules.allowed_channels) -contains 'prerelease') -Detail ([string]::Join(',', @($releaseClient.channel_rules.allowed_channels)))
+    Add-Check -Scope 'manifest' -Name 'release_client_allowed_channel_canary' -Passed (@($releaseClient.channel_rules.allowed_channels) -contains 'canary') -Detail ([string]::Join(',', @($releaseClient.channel_rules.allowed_channels)))
+    Add-Check -Scope 'manifest' -Name 'release_client_default_channel' -Passed ([string]$releaseClient.channel_rules.default_channel -eq 'stable') -Detail ([string]$releaseClient.channel_rules.default_channel)
+    Add-Check -Scope 'manifest' -Name 'release_client_signature_provider' -Passed ([string]$releaseClient.signature_policy.provider -eq 'authenticode') -Detail ([string]$releaseClient.signature_policy.provider)
+    Add-Check -Scope 'manifest' -Name 'release_client_signature_mode' -Passed ([string]$releaseClient.signature_policy.mode -eq 'dual-mode-transition') -Detail ([string]$releaseClient.signature_policy.mode)
+    Add-Check -Scope 'manifest' -Name 'release_client_signature_dual_mode_start' -Passed (([DateTime]$releaseClient.signature_policy.dual_mode_start_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') -eq '2026-03-15T00:00:00Z') -Detail ([string]$releaseClient.signature_policy.dual_mode_start_utc)
+    Add-Check -Scope 'manifest' -Name 'release_client_signature_canary_enforce' -Passed (([DateTime]$releaseClient.signature_policy.canary_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') -eq '2026-05-15T00:00:00Z') -Detail ([string]$releaseClient.signature_policy.canary_enforce_utc)
+    Add-Check -Scope 'manifest' -Name 'release_client_signature_grace_end' -Passed (([DateTime]$releaseClient.signature_policy.grace_end_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') -eq '2026-07-01T00:00:00Z') -Detail ([string]$releaseClient.signature_policy.grace_end_utc)
+    Add-Check -Scope 'manifest' -Name 'release_client_upgrade_allow_major' -Passed (-not [bool]$releaseClient.upgrade_policy.allow_major_upgrade) -Detail ([string]$releaseClient.upgrade_policy.allow_major_upgrade)
+    Add-Check -Scope 'manifest' -Name 'release_client_upgrade_allow_downgrade' -Passed (-not [bool]$releaseClient.upgrade_policy.allow_downgrade) -Detail ([string]$releaseClient.upgrade_policy.allow_downgrade)
+    Add-Check -Scope 'manifest' -Name 'release_client_cli_sync_primary' -Passed ([string]$releaseClient.cdev_cli_sync.primary_repo -eq 'svelderrainruiz/labview-cdev-cli') -Detail ([string]$releaseClient.cdev_cli_sync.primary_repo)
+    Add-Check -Scope 'manifest' -Name 'release_client_cli_sync_mirror' -Passed ([string]$releaseClient.cdev_cli_sync.mirror_repo -eq 'LabVIEW-Community-CI-CD/labview-cdev-cli') -Detail ([string]$releaseClient.cdev_cli_sync.mirror_repo)
+    Add-Check -Scope 'manifest' -Name 'release_client_cli_sync_strategy' -Passed ([string]$releaseClient.cdev_cli_sync.strategy -eq 'fork-and-upstream-full-sync') -Detail ([string]$releaseClient.cdev_cli_sync.strategy)
 }
 
 $requiredSchemaFields = @(

@@ -203,6 +203,48 @@
         ],
         "linux_parity_override_image": "nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c"
       }
+    },
+    "release_client": {
+      "schema_version": "1.0",
+      "allowed_repositories": [
+        "LabVIEW-Community-CI-CD/labview-cdev-surface",
+        "svelderrainruiz/labview-cdev-surface"
+      ],
+      "channel_rules": {
+        "default_channel": "stable",
+        "allowed_channels": [
+          "stable",
+          "prerelease",
+          "canary"
+        ],
+        "prerelease_requires_opt_in": true,
+        "canary_requires_opt_in": true,
+        "canary_tag_regex": "(?i)canary"
+      },
+      "signature_policy": {
+        "provider": "authenticode",
+        "mode": "dual-mode-transition",
+        "dual_mode_start_utc": "2026-03-15T00:00:00Z",
+        "canary_enforce_utc": "2026-05-15T00:00:00Z",
+        "grace_end_utc": "2026-07-01T00:00:00Z",
+        "require_timestamp": true,
+        "allow_unsigned_before_dual_mode_start": true
+      },
+      "provenance_required": true,
+      "default_install_root": "C:\\dev",
+      "upgrade_policy": {
+        "allow_downgrade": false,
+        "allow_major_upgrade": false,
+        "allow_prerelease_upgrade_without_opt_in": false
+      },
+      "state_path": "C:\\dev\\artifacts\\workspace-release-state.json",
+      "latest_report_path": "C:\\dev\\artifacts\\workspace-release-client-latest.json",
+      "policy_path": "C:\\dev\\workspace-governance\\release-policy.json",
+      "cdev_cli_sync": {
+        "primary_repo": "svelderrainruiz/labview-cdev-cli",
+        "mirror_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
+        "strategy": "fork-and-upstream-full-sync"
+      }
     }
   },
   "managed_repos": [
@@ -503,3 +545,4 @@
     }
   ]
 }
+

@@ -29,6 +29,9 @@ pwsh -NoProfile -File C:\dev\tools\cdev-cli\win-x64\cdev-cli\scripts\Invoke-Cdev
 Core commands:
 - `repos doctor`
 - `installer exercise`
+- `installer install --mode release`
+- `installer upgrade`
+- `installer rollback`
 - `postactions collect`
 - `linux deploy-ni --docker-context desktop-linux --image nationalinstruments/labview:latest-linux`
 
@@ -219,11 +222,13 @@ Controlled override (exception only):
 
 Release packaging still:
 - Builds `lvie-cdev-workspace-installer.exe`.
+- Signs installer when signing certificate secrets are configured.
 - Computes SHA256.
 - Runs determinism gates and fails on hash drift.
 - Generates `workspace-installer.spdx.json` and `workspace-installer.slsa.json`.
+- Generates `release-manifest.json`.
 - Creates the GitHub release if missing and binds the tag to the exact workflow commit SHA.
-- Uploads installer + SHA + provenance + reproducibility report assets to the release.
+- Uploads installer + SHA + provenance + reproducibility + `release-manifest.json` assets to the release.
 - Writes release notes including SHA256 and the install command:
 
 ```powershell
@@ -233,6 +238,63 @@ lvie-cdev-workspace-installer.exe /S
 Verify downloaded asset integrity by matching the local hash against the SHA256 value published in the release notes.
 Tag immutability policy: existing release tags fail by default to prevent mutable release history.
 Fallback entrypoint: `.github/workflows/release-workspace-installer.yml` (wrapper to `_release-workspace-installer-core.yml`).
+
+## Install from Upstream Release (Release Client)
+
+Use the release client runtime for one-command install/upgrade/rollback from release assets:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Install-WorkspaceInstallerFromRelease.ps1 `
+  -Mode Install `
+  -Channel stable
+```
+
+Install a specific release tag:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Install-WorkspaceInstallerFromRelease.ps1 `
+  -Mode Install `
+  -Tag v0.1.1
+```
+
+Upgrade from the current state file to latest stable:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Install-WorkspaceInstallerFromRelease.ps1 `
+  -Mode Upgrade `
+  -Channel stable
+```
+
+Rollback to previous release state:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Install-WorkspaceInstallerFromRelease.ps1 `
+  -Mode Rollback `
+  -RollbackTo previous
+```
+
+Validate local release policy file:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Install-WorkspaceInstallerFromRelease.ps1 `
+  -Mode ValidatePolicy
+```
+
+Release client contract paths:
+- Policy: `C:\dev\workspace-governance\release-policy.json`
+- State: `C:\dev\artifacts\workspace-release-state.json`
+- Latest report: `C:\dev\artifacts\workspace-release-client-latest.json`
+
+Default allowed installer release repositories:
+- `LabVIEW-Community-CI-CD/labview-cdev-surface`
+- `svelderrainruiz/labview-cdev-surface`
+
+Fork/upstream cdev-cli synchronization policy starts with full sync metadata:
+- Primary CLI repo: `svelderrainruiz/labview-cdev-cli`
+- Mirror repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+- Strategy: `fork-and-upstream-full-sync`
+
+Release channel metadata can be set during publish with workflow input `release_channel` (`stable`, `prerelease`, `canary`).
 
 ## Nightly canary
 

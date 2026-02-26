@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_channel:
+        description: Explicit release channel metadata (stable, prerelease, canary). Leave blank to derive from prerelease.
+        required: false
+        default: ''
+        type: string
       allow_gate_override:
         description: Allow publish even if Windows gate fails (controlled break-glass).
         required: false
@@ -141,6 +146,7 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       allow_existing_tag: ${{ inputs.allow_existing_tag }}
       prerelease: ${{ inputs.prerelease }}
+      release_channel: ${{ inputs.release_channel }}
       override_applied: ${{ fromJSON(needs.gate_policy.outputs.override_applied) }}
       override_reason: ${{ needs.gate_policy.outputs.override_reason }}
       override_incident_url: ${{ needs.gate_policy.outputs.override_incident_url }}

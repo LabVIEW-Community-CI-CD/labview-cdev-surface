@@ -5,10 +5,10 @@
     "help": ["", "<topic>"],
     "repos": ["list", "doctor"],
     "surface": ["sync"],
-    "installer": ["build", "exercise", "install"],
+    "installer": ["build", "exercise", "install", "upgrade", "rollback", "status", "policy-validate"],
     "postactions": ["collect"],
     "linux": ["install", "deploy-ni"],
     "ci": ["integration-gate"],
-    "release": ["package"]
+    "release": ["package", "install", "upgrade", "rollback", "status"]
   }
 }

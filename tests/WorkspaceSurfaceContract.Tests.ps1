@@ -26,7 +26,10 @@ Describe 'Workspace surface contract' {
         $script:runnerCliDeterminismScriptPath = Join-Path $script:repoRoot 'scripts/Test-RunnerCliBundleDeterminism.ps1'
         $script:installerDeterminismScriptPath = Join-Path $script:repoRoot 'scripts/Test-WorkspaceInstallerDeterminism.ps1'
         $script:writeProvenanceScriptPath = Join-Path $script:repoRoot 'scripts/Write-ReleaseProvenance.ps1'
+        $script:writeReleaseManifestScriptPath = Join-Path $script:repoRoot 'scripts/Write-ReleaseManifest.ps1'
         $script:testProvenanceScriptPath = Join-Path $script:repoRoot 'scripts/Test-ProvenanceContracts.ps1'
+        $script:installFromReleaseScriptPath = Join-Path $script:repoRoot 'scripts/Install-WorkspaceInstallerFromRelease.ps1'
+        $script:testReleaseClientContractsScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseClientContracts.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
         $script:nsisInstallerPath = Join-Path $script:repoRoot 'nsis/workspace-bootstrap-installer.nsi'
         $script:ciWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ci.yml'
@@ -75,7 +78,10 @@ Describe 'Workspace surface contract' {
             $script:runnerCliDeterminismScriptPath,
             $script:installerDeterminismScriptPath,
             $script:writeProvenanceScriptPath,
+            $script:writeReleaseManifestScriptPath,
             $script:testProvenanceScriptPath,
+            $script:installFromReleaseScriptPath,
+            $script:testReleaseClientContractsScriptPath,
             $script:dockerLinuxIterationScriptPath,
             $script:nsisInstallerPath,
             $script:ciWorkflowPath,
@@ -206,6 +212,28 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'ppl_capability_checks.32') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'ppl_capability_checks.64') | Should -BeTrue
         (@($script:manifest.installer_contract.harness.required_postactions) -contains 'vip_package_build_check') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.schema_version | Should -Be '1.0'
+        (@($script:manifest.installer_contract.release_client.allowed_repositories) -contains 'LabVIEW-Community-CI-CD/labview-cdev-surface') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.allowed_repositories) -contains 'svelderrainruiz/labview-cdev-surface') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.channel_rules.default_channel | Should -Be 'stable'
+        (@($script:manifest.installer_contract.release_client.channel_rules.allowed_channels) -contains 'stable') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.channel_rules.allowed_channels) -contains 'prerelease') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.channel_rules.allowed_channels) -contains 'canary') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.signature_policy.provider | Should -Be 'authenticode'
+        $script:manifest.installer_contract.release_client.signature_policy.mode | Should -Be 'dual-mode-transition'
+        ([DateTime]$script:manifest.installer_contract.release_client.signature_policy.dual_mode_start_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-03-15T00:00:00Z'
+        ([DateTime]$script:manifest.installer_contract.release_client.signature_policy.canary_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-05-15T00:00:00Z'
+        ([DateTime]$script:manifest.installer_contract.release_client.signature_policy.grace_end_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-07-01T00:00:00Z'
+        $script:manifest.installer_contract.release_client.provenance_required | Should -BeTrue
+        $script:manifest.installer_contract.release_client.default_install_root | Should -Be 'C:\dev'
+        $script:manifest.installer_contract.release_client.upgrade_policy.allow_downgrade | Should -BeFalse
+        $script:manifest.installer_contract.release_client.upgrade_policy.allow_major_upgrade | Should -BeFalse
+        $script:manifest.installer_contract.release_client.policy_path | Should -Be 'C:\dev\workspace-governance\release-policy.json'
+        $script:manifest.installer_contract.release_client.state_path | Should -Be 'C:\dev\artifacts\workspace-release-state.json'
+        $script:manifest.installer_contract.release_client.latest_report_path | Should -Be 'C:\dev\artifacts\workspace-release-client-latest.json'
+        $script:manifest.installer_contract.release_client.cdev_cli_sync.primary_repo | Should -Be 'svelderrainruiz/labview-cdev-cli'
+        $script:manifest.installer_contract.release_client.cdev_cli_sync.mirror_repo | Should -Be 'LabVIEW-Community-CI-CD/labview-cdev-cli'
+        $script:manifest.installer_contract.release_client.cdev_cli_sync.strategy | Should -Be 'fork-and-upstream-full-sync'
         foreach ($repo in @($script:manifest.managed_repos)) {
             $repo.PSObject.Properties.Name | Should -Contain 'required_gh_repo'
             $repo.PSObject.Properties.Name | Should -Contain 'default_branch'
@@ -280,6 +308,12 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'iteration-summary\.json'
         $script:agentsContent | Should -Match 'exercise-report\.json'
         $script:agentsContent | Should -Match 'workspace-install-latest\.json'
+        $script:agentsContent | Should -Match 'release-manifest\.json'
+        $script:agentsContent | Should -Match 'Install-WorkspaceInstallerFromRelease\.ps1'
+        $script:agentsContent | Should -Match 'workspace-release-state\.json'
+        $script:agentsContent | Should -Match 'workspace-release-client-latest\.json'
+        $script:agentsContent | Should -Match 'svelderrainruiz/labview-cdev-cli'
+        $script:agentsContent | Should -Match 'LabVIEW-Community-CI-CD/labview-cdev-cli'
         $script:readmeContent | Should -Match 'Workspace SHA Refresh PR'
         $script:readmeContent | Should -Match 'automation/sha-refresh'
         $script:readmeContent | Should -Match 'Invoke-CdevCli\.ps1'
@@ -296,6 +330,10 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'integration/'
         $script:readmeContent | Should -Match 'self-hosted-windows-lv'
         $script:readmeContent | Should -Match 'installer-harness'
+        $script:readmeContent | Should -Match 'release-manifest\.json'
+        $script:readmeContent | Should -Match 'Install-WorkspaceInstallerFromRelease\.ps1'
+        $script:readmeContent | Should -Match 'workspace-release-state\.json'
+        $script:readmeContent | Should -Match 'workspace-release-client-latest\.json'
     }
 
     It 'documents Windows feature troubleshooting reporting contract for Docker gating' {
@@ -342,9 +380,13 @@ Describe 'Workspace surface contract' {
         $script:releaseCoreWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
         $script:releaseCoreWorkflowContent | Should -Match 'Build-RunnerCliBundleFromManifest\.ps1'
         $script:releaseCoreWorkflowContent | Should -Match 'gh release upload'
+        $script:releaseCoreWorkflowContent | Should -Match 'Write-ReleaseManifest\.ps1'
+        $script:releaseCoreWorkflowContent | Should -Match 'Set-AuthenticodeSignature'
+        $script:releaseCoreWorkflowContent | Should -Match 'release-manifest\.json'
         $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.spdx\.json'
         $script:releaseCoreWorkflowContent | Should -Match 'workspace-installer\.slsa\.json'
         $script:releaseWithGateWorkflowContent | Should -Match 'allow_gate_override:'
+        $script:releaseWithGateWorkflowContent | Should -Match 'release_channel:'
         $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_windows-labview-image-gate-core\.yml'
         $script:releaseWithGateWorkflowContent | Should -Match 'uses:\s*\./\.github/workflows/_linux-labview-image-gate-core\.yml'
     }
