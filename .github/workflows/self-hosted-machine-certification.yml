@@ -277,12 +277,13 @@ jobs:
           jq -c '
             map(
               (.runner_labels_json | fromjson | map(tostring | gsub("^\\s+|\\s+$";""))) as $labels
+              | (.setup_name // "") as $setup_name
               | {
-                  setup_name: .setup_name,
+                  setup_name: $setup_name,
                   expected_labview_year: .expected_labview_year,
-                  required_setup_label: ("cert-setup-" + .setup_name),
+                  required_setup_label: ("cert-setup-" + $setup_name),
                   requires_actor_label: ((.expected_labview_year == "2025") or (.expected_labview_year == "2026")),
-                  has_setup_label: ($labels | index("cert-setup-" + .setup_name) != null),
+                  has_setup_label: ($labels | index("cert-setup-" + $setup_name) != null),
                   actor_labels: ($labels | map(select(startswith("cert-actor-")))),
                   has_actor_label: (($labels | map(select(startswith("cert-actor-"))) | length) > 0),
                   labels: $labels
