@@ -602,25 +602,25 @@ jobs:
             timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
             setup_name = $setupName
             expected_labview_year = $expectedYear
-            labels_parse_mode = $labelsParseMode
-            labels_raw_count = [int]$labelsRawCount
-            labels_flattened_count = [int]$labelsFlattenedCount
             allowed_machine_names_csv = $allowedMachines
             current_machine_name = $currentMachine
             required_setup_label = $requiredSetupLabel
+            requires_actor_label = $requiresActorLabel
+            labels_parse_mode = $labelsParseMode
+            labels_raw_count = [int]$labelsRawCount
+            labels_flattened_count = [int]$labelsFlattenedCount
             setup_labels = @($setupLabels)
             setup_label_count = $setupLabelCount
             has_setup_label = $hasSetupLabel
             has_single_setup_label = $hasSingleSetupLabel
             has_only_required_setup_label = $hasOnlyRequiredSetupLabel
-            requires_actor_label = $requiresActorLabel
             expected_actor_label = $expectedActorLabel
             has_expected_actor_label = $hasExpectedActorLabel
-            actor_labels = @($actorLabels)
-            actor_label_count = $actorLabelCount
             has_actor_label = $hasActorLabel
             has_single_actor_label = $hasSingleActorLabel
             has_actor_label_format = $hasActorLabelFormat
+            actor_labels = @($actorLabels)
+            actor_label_count = $actorLabelCount
             labels = @($labels)
             failures = @($failures)
             pass = (@($failures).Count -eq 0)
@@ -654,10 +654,6 @@ jobs:
               "- actor label exact match: $hasExpectedActorLabel",
               "- pass: $(@($failures).Count -eq 0)"
             ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
-            if (@($failures).Count -gt 0) {
-              @("- failures:") + @($failures | ForEach-Object { "  - $_" }) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-            }
           }
 
           if (@($failures).Count -gt 0) {
@@ -2113,6 +2109,8 @@ jobs:
             ${{ steps.build-vip.outputs.vip_output_path }}
             ${{ steps.build-vip.outputs.vip_output_root }}
           if-no-files-found: error
+
+
 
 
 
