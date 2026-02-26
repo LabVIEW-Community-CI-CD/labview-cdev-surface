@@ -317,7 +317,8 @@ jobs:
                   elif type == "array" then .[]
                   else empty
                   end
-                | select(type == "object" and .setup_name == $setup_name)
+                | select(type == "object")
+                | select(.setup_name == $setup_name)
               ]
           ' matrix.json)"
           if [[ -z "$PACKAGE_SETUPS_JSON" ]]; then
