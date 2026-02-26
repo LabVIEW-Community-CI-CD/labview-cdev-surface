@@ -77,6 +77,14 @@ Describe 'Self-hosted machine certification workflow contract' {
         $script:workflowContent | Should -Match 'routing_label_contract_failed'
         $script:workflowContent | Should -Match 'routing-contract-report\.json'
         $script:workflowContent | Should -Match '2025/2026 routing diagnostics'
+        $script:workflowContent | Should -Match '\$parsedLabels\s*=\s*\$labelsJson\s*\|\s*ConvertFrom-Json'
+        $script:workflowContent | Should -Match 'labels_parse_mode'
+        $script:workflowContent | Should -Match 'labels_raw_count'
+        $script:workflowContent | Should -Match 'labels_flattened_count'
+        $script:workflowContent | Should -Match 'json-string-whitespace-fallback'
+        $script:workflowContent | Should -Match '-split ''\\s\*,\\s\*'''
+        $script:workflowContent | Should -Match '-split ''\\s\+'''
+        $script:workflowContent | Should -Match 'useWhitespaceFallback'
     }
     It 'runs per-bitness MassCompile and VI Analyzer certification with summary fields' {
         $script:workflowContent | Should -Match 'Run MassCompile certification \(64-bit\)'

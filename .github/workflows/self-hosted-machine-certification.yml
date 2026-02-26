@@ -450,18 +450,62 @@ jobs:
           $is2025Or2026 = @('2025', '2026') -contains $expectedYear
 
           try {
-            $labels = @(
-              $labelsJson |
-                ConvertFrom-Json -ErrorAction Stop |
-                ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-                Select-Object -Unique
-            )
+            $parsedLabels = $labelsJson | ConvertFrom-Json -ErrorAction Stop
           } catch {
             throw ("routing_labels_json_invalid: setup '{0}' has invalid runner_labels_json payload." -f $setupName)
           }
 
-          if (@($labels).Count -eq 0) {
+          $rawLabels = New-Object 'System.Collections.Generic.List[string]'
+          $labelsParseMode = 'json-array'
+          if ($null -eq $parsedLabels) {
+            $labelsParseMode = 'json-null'
+          } elseif ($parsedLabels -is [string]) {
+            [void]$rawLabels.Add([string]$parsedLabels)
+            $labelsParseMode = 'json-string'
+          } elseif ($parsedLabels -is [System.Collections.IEnumerable]) {
+            foreach ($labelItem in $parsedLabels) {
+              if ($null -ne $labelItem) {
+                [void]$rawLabels.Add([string]$labelItem)
+              }
+            }
+          } else {
+            [void]$rawLabels.Add([string]$parsedLabels)
+            $labelsParseMode = 'json-scalar'
+          }
+
+          $labels = New-Object 'System.Collections.Generic.List[string]'
+          $useWhitespaceFallback = ($rawLabels.Count -eq 1)
+          foreach ($rawLabel in $rawLabels) {
+            $candidate = ([string]$rawLabel).Trim()
+            if ([string]::IsNullOrWhiteSpace($candidate)) {
+              continue
+            }
+
+            $segments = @()
+            if ($candidate -match ',') {
+              $segments = @($candidate -split '\s*,\s*')
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-csv' }
+            } elseif ($useWhitespaceFallback -and $candidate -match '\s+' -and $candidate -notmatch ',') {
+              $segments = @($candidate -split '\s+')
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-whitespace-fallback' }
+              elseif ($labelsParseMode -eq 'json-scalar') { $labelsParseMode = 'json-scalar-whitespace-fallback' }
+            } else {
+              $segments = @($candidate)
+              if ($labelsParseMode -eq 'json-string') { $labelsParseMode = 'json-string-single' }
+            }
+
+            foreach ($segment in $segments) {
+              $token = ([string]$segment).Trim().ToLowerInvariant()
+              if (-not [string]::IsNullOrWhiteSpace($token)) {
+                [void]$labels.Add($token)
+              }
+            }
+          }
+
+          $labels = @($labels | Select-Object -Unique)
+          $labelsRawCount = $rawLabels.Count
+          $labelsFlattenedCount = @($labels).Count
+          if ($labelsFlattenedCount -eq 0) {
             throw ("routing_labels_empty: setup '{0}' has no resolved runner labels." -f $setupName)
           }
 
@@ -488,6 +532,9 @@ jobs:
             current_machine_name = $currentMachine
             required_setup_label = $requiredSetupLabel
             requires_actor_label = $requiresActorLabel
+            labels_parse_mode = $labelsParseMode
+            labels_raw_count = [int]$labelsRawCount
+            labels_flattened_count = [int]$labelsFlattenedCount
             has_setup_label = $hasSetupLabel
             has_actor_label = $hasActorLabel
             actor_labels = @($actorLabels)
@@ -505,6 +552,9 @@ jobs:
               "- expected year: $expectedYear",
               "- allowed machines: $allowedMachines",
               "- current machine: $currentMachine",
+              "- labels parse mode: $labelsParseMode",
+              "- labels raw count: $labelsRawCount",
+              "- labels flattened count: $labelsFlattenedCount",
               "- required setup label: $requiredSetupLabel",
               "- setup label present: $hasSetupLabel",
               "- actor labels: $(if (@($actorLabels).Count -gt 0) { $actorLabels -join ', ' } else { '(none)' })",
