@@ -1024,6 +1024,13 @@ function Write-StableOverrideAuditReport {
             return $DefaultValue
         }
 
+        if ($Object -is [System.Collections.IDictionary]) {
+            if ($Object.Contains($Name)) {
+                return $Object[$Name]
+            }
+            return $DefaultValue
+        }
+
         $prop = $Object.PSObject.Properties[$Name]
         if ($null -eq $prop) {
             return $DefaultValue
