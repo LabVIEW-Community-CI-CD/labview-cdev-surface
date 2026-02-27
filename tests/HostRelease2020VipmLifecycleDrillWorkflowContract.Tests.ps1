@@ -26,13 +26,15 @@ Describe 'Host release 2020 VIPM lifecycle drill workflow contract' {
         $script:workflowContent | Should -Match 'ref:'
         $script:workflowContent | Should -Match 'selected_ppl_bitness:'
         $script:workflowContent | Should -Match 'keep_smoke_workspace:'
+        $script:workflowContent | Should -Match 'allow_system_account:'
         $script:workflowContent | Should -Match 'nsis_root:'
     }
 
     It 'runs on installer-harness self-hosted windows labels and publishes deterministic artifacts' {
         $script:workflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*installer-harness\]'
         $script:workflowContent | Should -Match 'Assert-InstallerHarnessMachinePreflight\.ps1'
-        $script:workflowContent | Should -Match "ExpectedLabviewYear '2020'"
+        $script:workflowContent | Should -Match 'allow_system_account must be boolean'
+        $script:workflowContent | Should -Match 'ExpectedLabviewYear'
         $script:workflowContent | Should -Match '-RequireNonSystemAccount'
         $script:workflowContent | Should -Match 'Invoke-HostRelease2020VipmLifecycleDrill\.ps1'
         $script:workflowContent | Should -Match "TargetLabviewYear', '2020'"

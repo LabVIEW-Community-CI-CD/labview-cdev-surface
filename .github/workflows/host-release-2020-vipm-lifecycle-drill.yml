@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      allow_system_account:
+        description: Allow running on NT AUTHORITY\\SYSTEM for diagnostic-only execution.
+        required: false
+        default: false
+        type: boolean
       nsis_root:
         description: Optional NSIS root override. Defaults to repository variable NSIS_ROOT or C:\Program Files (x86)\NSIS.
         required: false
@@ -59,12 +64,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-machine-preflight.json'
-          & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessMachinePreflight.ps1 `
-            -ExpectedLabviewYear '2020' `
-            -DockerContext 'desktop-linux' `
-            -DockerCheckSeverity warning `
-            -RequireNonSystemAccount `
-            -OutputPath $reportPath
+          $allowSystemAccountText = [string]'${{ inputs.allow_system_account }}'
+          $allowSystemAccount = $false
+          if (-not [string]::IsNullOrWhiteSpace($allowSystemAccountText)) {
+            try {
+              $allowSystemAccount = [System.Convert]::ToBoolean($allowSystemAccountText)
+            } catch {
+              throw "allow_system_account must be boolean. actual='$allowSystemAccountText'"
+            }
+          }
+
+          $preflightArgs = @(
+            '-NoProfile',
+            '-File', './scripts/Assert-InstallerHarnessMachinePreflight.ps1',
+            '-ExpectedLabviewYear', '2020',
+            '-DockerContext', 'desktop-linux',
+            '-DockerCheckSeverity', 'warning',
+            '-OutputPath', $reportPath
+          )
+          if (-not $allowSystemAccount) {
+            $preflightArgs += '-RequireNonSystemAccount'
+          }
+
+          & pwsh @preflightArgs
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
               Get-Content -LiteralPath $reportPath -Raw | Write-Host
