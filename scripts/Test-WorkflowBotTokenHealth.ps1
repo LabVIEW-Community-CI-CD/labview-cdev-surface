@@ -126,7 +126,7 @@ try {
                 }) | Out-Null
         } else {
             $owner = [string]$repoParts[0]
-            $name = [string]$repoParts[1]
+            $repoName = [string]$repoParts[1]
             $branchProtectionQuery = @'
 query($owner:String!, $name:String!) {
   repository(owner:$owner, name:$name) {
@@ -140,30 +140,30 @@ query($owner:String!, $name:String!) {
 '@
 
             $checkResults = @(
-                Invoke-TokenCheck -Name 'viewer_query' -Action {
-                    Invoke-GhJson -Arguments @(
-                        'api', 'graphql',
-                        '-f', 'query=query { viewer { login } }'
-                    )
-                },
-                Invoke-TokenCheck -Name 'repo_read' -Action {
-                    Invoke-GhJson -Arguments @(
-                        'api', "repos/$Repository"
-                    )
-                },
-                Invoke-TokenCheck -Name 'actions_runners_read' -Action {
-                    Invoke-GhJson -Arguments @(
-                        'api', "repos/$Repository/actions/runners?per_page=1"
-                    )
-                },
-                Invoke-TokenCheck -Name 'branch_protection_graphql_read' -Action {
-                    Invoke-GhJson -Arguments @(
-                        'api', 'graphql',
-                        '-f', ("query={0}" -f $branchProtectionQuery),
-                        '-F', ("owner={0}" -f $owner),
-                        '-F', ("name={0}" -f $name)
-                    )
-                }
+                (Invoke-TokenCheck -Name 'viewer_query' -Action {
+                        Invoke-GhJson -Arguments @(
+                            'api', 'graphql',
+                            '-f', 'query=query { viewer { login } }'
+                        )
+                    })
+                (Invoke-TokenCheck -Name 'repo_read' -Action {
+                        Invoke-GhJson -Arguments @(
+                            'api', "repos/$Repository"
+                        )
+                    })
+                (Invoke-TokenCheck -Name 'actions_runners_read' -Action {
+                        Invoke-GhJson -Arguments @(
+                            'api', "repos/$Repository/actions/runners?per_page=1"
+                        )
+                    })
+                (Invoke-TokenCheck -Name 'branch_protection_graphql_read' -Action {
+                        Invoke-GhJson -Arguments @(
+                            'api', 'graphql',
+                            '-f', ("query={0}" -f $branchProtectionQuery),
+                            '-F', ("owner={0}" -f $owner),
+                            '-F', ("name={0}" -f $repoName)
+                        )
+                    })
             )
 
             foreach ($entry in @($checkResults)) {
