@@ -29,27 +29,7 @@ function Get-WorkflowSloSummary {
         [Parameter(Mandatory = $true)][DateTime]$CutoffUtc
     )
 
-    $runListOutput = & gh run list `
-        -R $Repository `
-        --workflow $WorkflowName `
-        --limit 100 `
-        --json databaseId,status,conclusion,createdAt,url,event 2>&1
-    $runListExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-
-    $runs = @()
-    if ($runListExitCode -eq 0) {
-        $runListText = [string]::Join([Environment]::NewLine, @($runListOutput))
-        if (-not [string]::IsNullOrWhiteSpace($runListText)) {
-            $runs = @($runListText | ConvertFrom-Json -ErrorAction Stop)
-        }
-    } else {
-        $runListErrorText = [string]::Join([Environment]::NewLine, @($runListOutput))
-        if ($runListErrorText -match 'could not find any workflows named') {
-            $runs = @()
-        } else {
-            throw ("workflow_slo_query_failed: repository={0} workflow={1} error={2}" -f $Repository, $WorkflowName, $runListErrorText)
-        }
-    }
+    $runs = @(Get-GhWorkflowRunsPortable -Repository $Repository -Workflow $WorkflowName -Limit 100)
 
     $windowRuns = @(
         $runs |
@@ -110,14 +90,7 @@ try {
         Get-WorkflowSloSummary -Repository $SurfaceRepository -WorkflowName 'release-control-plane' -CutoffUtc $cutoffUtc
     )
 
-    $syncGuardRuns = @(Invoke-GhJson -Arguments @(
-        'run', 'list',
-        '-R', $SyncGuardRepository,
-        '--workflow', 'fork-upstream-sync-guard',
-        '--branch', 'main',
-        '--limit', '100',
-        '--json', 'databaseId,status,conclusion,createdAt,url,event'
-    ))
+    $syncGuardRuns = @(Get-GhWorkflowRunsPortable -Repository $SyncGuardRepository -Workflow 'fork-upstream-sync-guard' -Branch 'main' -Limit 100)
     $syncGuardWindow = @(
         $syncGuardRuns |
             Where-Object {
@@ -148,13 +121,7 @@ try {
         }
     }
 
-    $releases = @(Invoke-GhJson -Arguments @(
-        'release', 'list',
-        '-R', $SurfaceRepository,
-        '--limit', '200',
-        '--exclude-drafts',
-        '--json', 'tagName,isPrerelease,publishedAt'
-    ))
+    $releases = @(Get-GhReleasesPortable -Repository $SurfaceRepository -Limit 100 -ExcludeDrafts)
     $canaryReleases = @(
         $releases |
             Where-Object {

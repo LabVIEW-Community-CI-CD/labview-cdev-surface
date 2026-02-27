@@ -23,6 +23,12 @@
       "id": "opsRunId",
       "type": "promptString",
       "description": "Run ID (optional for watch)"
+    },
+    {
+      "id": "opsControlPlaneMode",
+      "type": "promptString",
+      "description": "Release control plane mode",
+      "default": "Validate"
     }
   ],
   "tasks": [
@@ -114,6 +120,27 @@
         "${input:opsBranch}",
         "-OutputPath",
         "artifacts/dispatch/queue-snapshot.json"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "ops: release control plane local (docker)",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "scripts/Invoke-ReleaseControlPlaneLocalDocker.ps1",
+        "-Repository",
+        "${input:opsRepo}",
+        "-Branch",
+        "${input:opsBranch}",
+        "-Mode",
+        "${input:opsControlPlaneMode}",
+        "-DryRun",
+        "-RunContractTests",
+        "-OutputRoot",
+        "artifacts/release-control-plane-local"
       ],
       "problemMatcher": []
     }

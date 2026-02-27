@@ -19,6 +19,7 @@ Describe 'VS Code tasks contract for portable workflow ops' {
         $script:labels | Should -Contain 'ops: cancel stale runs (portable)'
         $script:labels | Should -Contain 'ops: watch run (portable)'
         $script:labels | Should -Contain 'ops: runner queue snapshot (portable)'
+        $script:labels | Should -Contain 'ops: release control plane local (docker)'
     }
 
     It 'routes tasks through Invoke-PortableOps wrapper' {
@@ -28,5 +29,6 @@ Describe 'VS Code tasks contract for portable workflow ops' {
         $raw | Should -Match 'Cancel-StaleWorkflowRuns\.ps1'
         $raw | Should -Match 'Watch-WorkflowRun\.ps1'
         $raw | Should -Match 'Get-RunnerQueueSnapshot\.ps1'
+        $raw | Should -Match 'Invoke-ReleaseControlPlaneLocalDocker\.ps1'
     }
 }

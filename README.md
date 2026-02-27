@@ -326,6 +326,25 @@ Control-plane behavior:
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
 
+## Local Docker package for control-plane exercise
+
+Run the local Docker harness (safe default, validate + dry-run):
+
+```powershell
+pwsh -NoProfile -File .\scripts\Invoke-ReleaseControlPlaneLocalDocker.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -Branch main `
+  -Mode Validate `
+  -DryRun `
+  -RunContractTests
+```
+
+This executes `scripts/Exercise-ReleaseControlPlaneLocal.ps1` in the portable ops container image and writes artifacts under:
+- `artifacts\release-control-plane-local`
+
+For offline or container runtime fallback on the host:
+- add `-HostFallback`
+
 Runbook for incidents:
 - `docs/runbooks/release-ops-incident-response.md`
 

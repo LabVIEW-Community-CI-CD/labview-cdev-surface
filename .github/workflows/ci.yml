@@ -63,6 +63,7 @@ jobs:
             './tests/WatchWorkflowRunContract.Tests.ps1',
             './tests/PortableOpsRuntimeContract.Tests.ps1',
             './tests/VsCodeTasksContract.Tests.ps1',
+            './tests/ReleaseControlPlaneLocalDockerHarnessContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
             './tests/OpsMonitoringWorkflowContract.Tests.ps1',

@@ -25,15 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib/WorkflowOps.Common.ps1')
 
-$allRuns = @(Invoke-GhJson -Arguments @(
-    'run', 'list',
-    '-R', $Repository,
-    '--workflow', $WorkflowFile,
-    '--branch', $Branch,
-    '--event', 'workflow_dispatch',
-    '--limit', '100',
-    '--json', 'databaseId,status,conclusion,url,createdAt,headSha'
-))
+$allRuns = @(Get-GhWorkflowRunsPortable -Repository $Repository -Workflow $WorkflowFile -Branch $Branch -Event 'workflow_dispatch' -Limit 100)
 
 $orderedRuns = @($allRuns | Sort-Object { Parse-RunTimestamp -Run $_ } -Descending)
 $keepIds = @($orderedRuns | Select-Object -First ([Math]::Max($KeepLatestN, 0)) | ForEach-Object { [string]$_.databaseId })

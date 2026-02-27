@@ -99,12 +99,25 @@ function Get-RunTimestampUtc {
     return [DateTimeOffset]::MinValue
 }
 
+function Get-SyncGuardRuns {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Workflow,
+        [Parameter(Mandatory = $true)][string]$Branch,
+        [Parameter(Mandatory = $true)][int]$Limit
+    )
+
+    return @(Get-GhWorkflowRunsPortable -Repository $Repository -Workflow $Workflow -Branch $Branch -Limit $Limit)
+}
+
 $reasonCodes = [System.Collections.Generic.List[string]]::new()
 $report = [ordered]@{
     schema_version = '1.0'
     timestamp_utc = Get-UtcNowIso
     surface_repository = $SurfaceRepository
     required_runner_labels = @()
+    runner_visibility = 'available'
+    warnings = @()
     runner_summary = [ordered]@{
         total = 0
         online = 0
@@ -133,53 +146,62 @@ try {
     )
     $report.required_runner_labels = $normalizedRequiredLabels
 
-    $runnerPayload = Invoke-GhJson -Arguments @('api', "repos/$SurfaceRepository/actions/runners?per_page=100")
-    $allRunners = @($runnerPayload.runners)
+    $allRunners = @()
     $onlineRunners = @()
     $eligibleRunners = @()
+    $runnerApiOutput = & gh api "repos/$SurfaceRepository/actions/runners?per_page=100" 2>&1
+    $runnerApiExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    if ($runnerApiExitCode -ne 0) {
+        $runnerApiText = [string]::Join([Environment]::NewLine, @($runnerApiOutput))
+        if ($runnerApiText -match 'Resource not accessible by integration' -or $runnerApiText -match 'HTTP 403') {
+            $report.runner_visibility = 'forbidden'
+            $report.warnings = @('runner_visibility_unavailable')
+        } else {
+            throw "runner_api_query_failed: $runnerApiText"
+        }
+    } else {
+        $runnerJsonText = [string]::Join([Environment]::NewLine, @($runnerApiOutput))
+        $runnerPayload = $runnerJsonText | ConvertFrom-Json -ErrorAction Stop
+        $allRunners = @($runnerPayload.runners)
+    }
 
-    foreach ($runner in $allRunners) {
-        $labelMap = @{}
-        foreach ($label in @($runner.labels)) {
-            $name = ([string]$label.name).ToLowerInvariant().Trim()
-            if (-not [string]::IsNullOrWhiteSpace($name)) {
-                $labelMap[$name] = $true
+    if ($report.runner_visibility -eq 'available') {
+        foreach ($runner in $allRunners) {
+            $labelMap = @{}
+            foreach ($label in @($runner.labels)) {
+                $name = ([string]$label.name).ToLowerInvariant().Trim()
+                if (-not [string]::IsNullOrWhiteSpace($name)) {
+                    $labelMap[$name] = $true
+                }
+            }
+
+            $runnerRecord = [ordered]@{
+                name = [string]$runner.name
+                status = [string]$runner.status
+                busy = [bool]$runner.busy
+                labels = @($runner.labels | ForEach-Object { [string]$_.name })
+                missing_required_labels = @($normalizedRequiredLabels | Where-Object { -not $labelMap.ContainsKey($_) })
+            }
+
+            if ([string]$runner.status -eq 'online') {
+                $onlineRunners += $runnerRecord
+                if (@($runnerRecord.missing_required_labels).Count -eq 0) {
+                    $eligibleRunners += $runnerRecord
+                }
             }
         }
 
-        $runnerRecord = [ordered]@{
-            name = [string]$runner.name
-            status = [string]$runner.status
-            busy = [bool]$runner.busy
-            labels = @($runner.labels | ForEach-Object { [string]$_.name })
-            missing_required_labels = @($normalizedRequiredLabels | Where-Object { -not $labelMap.ContainsKey($_) })
-        }
+        $report.runner_summary.total = @($allRunners).Count
+        $report.runner_summary.online = @($onlineRunners).Count
+        $report.runner_summary.eligible = @($eligibleRunners).Count
+        $report.eligible_runners = @($eligibleRunners)
 
-        if ([string]$runner.status -eq 'online') {
-            $onlineRunners += $runnerRecord
-            if (@($runnerRecord.missing_required_labels).Count -eq 0) {
-                $eligibleRunners += $runnerRecord
-            }
+        if (@($eligibleRunners).Count -eq 0) {
+            Add-ReasonCode -Target $reasonCodes -ReasonCode 'runner_unavailable'
         }
     }
 
-    $report.runner_summary.total = @($allRunners).Count
-    $report.runner_summary.online = @($onlineRunners).Count
-    $report.runner_summary.eligible = @($eligibleRunners).Count
-    $report.eligible_runners = @($eligibleRunners)
-
-    if (@($eligibleRunners).Count -eq 0) {
-        Add-ReasonCode -Target $reasonCodes -ReasonCode 'runner_unavailable'
-    }
-
-    $syncRunsRaw = @(Invoke-GhJson -Arguments @(
-        'run', 'list',
-        '-R', $SyncGuardRepository,
-        '--workflow', $SyncGuardWorkflow,
-        '--branch', $SyncGuardBranch,
-        '--limit', '25',
-        '--json', 'databaseId,status,conclusion,url,createdAt,headSha,event'
-    ))
+    $syncRunsRaw = @(Get-SyncGuardRuns -Repository $SyncGuardRepository -Workflow $SyncGuardWorkflow -Branch $SyncGuardBranch -Limit 25)
     $syncRuns = @($syncRunsRaw | Sort-Object { Get-RunTimestampUtc -Run $_ } -Descending)
 
     $latestRun = $null
@@ -221,7 +243,11 @@ try {
     if ($reasonCodes.Count -eq 0) {
         $report.status = 'pass'
         $report.reason_codes = @('ok')
-        $report.message = 'Operations monitoring snapshot passed.'
+        if (@($report.warnings).Count -gt 0) {
+            $report.message = "Operations monitoring snapshot passed with warnings. warnings=$([string]::Join(',', @($report.warnings)))"
+        } else {
+            $report.message = 'Operations monitoring snapshot passed.'
+        }
     } else {
         $report.status = 'fail'
         $report.reason_codes = @($reasonCodes)
