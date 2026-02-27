@@ -26,6 +26,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-workspace-installer-${{ github.repository }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
   release-workspace-installer:
     name: Release Workspace Installer

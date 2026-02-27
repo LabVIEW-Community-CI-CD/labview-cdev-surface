@@ -52,6 +52,10 @@ permissions:
   actions: write
   issues: write
 
+concurrency:
+  group: release-control-plane-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release-control-plane:
     name: Release Control Plane

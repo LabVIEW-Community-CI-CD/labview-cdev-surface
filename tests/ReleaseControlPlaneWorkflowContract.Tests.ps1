@@ -34,6 +34,9 @@ Describe 'Release control plane workflow contract' {
 
     It 'runs autonomous control-plane runtime and uploads report' {
         $script:workflowContent | Should -Match 'runs-on:\s*ubuntu-latest'
+        $script:workflowContent | Should -Match 'concurrency:'
+        $script:workflowContent | Should -Match 'group:\s*release-control-plane-\$\{\{\s*github\.repository\s*\}\}-\$\{\{\s*github\.ref_name\s*\}\}'
+        $script:workflowContent | Should -Match 'cancel-in-progress:\s*false'
         $script:workflowContent | Should -Match 'Enforce hosted-runner lock'
         $script:workflowContent | Should -Match 'RUNNER_ENVIRONMENT'
         $script:workflowContent | Should -Match 'hosted_runner_required'
@@ -53,6 +56,9 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match "ValidateSet\('Validate', 'CanaryCycle', 'PromotePrerelease', 'PromoteStable', 'FullCycle'\)"
         $script:runtimeContent | Should -Match 'Resolve-CanaryTargetSemVer'
         $script:runtimeContent | Should -Match 'Resolve-PromotedTargetSemVer'
+        $script:runtimeContent | Should -Match 'Get-ReleasePlanningState'
+        $script:runtimeContent | Should -Match 'Resolve-TargetPlanForMode'
+        $script:runtimeContent | Should -Match 'Get-ReleaseByTagOrNull'
         $script:runtimeContent | Should -Match 'Resolve-SemVerEnforcementPolicy'
         $script:runtimeContent | Should -Match 'Resolve-StablePromotionWindowPolicy'
         $script:runtimeContent | Should -Match 'Resolve-StablePromotionWindowDecision'
@@ -65,6 +71,9 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'semver_only_enforce_utc'
         $script:runtimeContent | Should -Match 'semver_only_enforcement_violation'
         $script:runtimeContent | Should -Match 'semver_prerelease_sequence_exhausted'
+        $script:runtimeContent | Should -Match 'release_tag_collision_retry_exhausted'
+        $script:runtimeContent | Should -Match 'release_dispatch_attempts_exhausted'
+        $script:runtimeContent | Should -Match '\[release_tag_collision\]'
         $script:runtimeContent | Should -Match 'release_watch_not_success'
         $script:runtimeContent | Should -Match 'release_verification_asset_missing'
         $script:runtimeContent | Should -Match 'release_verification_manifest_channel_mismatch'
