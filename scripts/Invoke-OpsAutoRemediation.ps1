@@ -30,6 +30,9 @@ param(
     ),
 
     [Parameter()]
+    [string]$RequiredRunnerLabelsCsv = '',
+
+    [Parameter()]
     [ValidateRange(5, 180)]
     [int]$WatchTimeoutMinutes = 45,
 
@@ -51,6 +54,22 @@ foreach ($requiredScript in @($opsSnapshotScript, $dispatchWorkflowScript, $watc
         throw "required_script_missing: $requiredScript"
     }
 }
+
+if (-not [string]::IsNullOrWhiteSpace($RequiredRunnerLabelsCsv)) {
+    $RequiredRunnerLabels = @(
+        $RequiredRunnerLabelsCsv.Split(',') |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
+$normalizedRequiredRunnerLabels = @(
+    @($RequiredRunnerLabels | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) |
+        Select-Object -Unique
+)
+if (@($normalizedRequiredRunnerLabels).Count -eq 0) {
+    throw 'required_runner_labels_empty'
+}
+$requiredRunnerLabelsCsv = [string]::Join(',', $normalizedRequiredRunnerLabels)
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ops-auto-remediate-" + [Guid]::NewGuid().ToString('N'))
 New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
@@ -75,7 +94,7 @@ try {
     $preHealthPath = Join-Path $tempRoot 'pre-health.json'
     & pwsh -NoProfile -File $opsSnapshotScript `
         -SurfaceRepository $SurfaceRepository `
-        -RequiredRunnerLabels $RequiredRunnerLabels `
+        -RequiredRunnerLabelsCsv $requiredRunnerLabelsCsv `
         -SyncGuardRepository $SyncGuardRepository `
         -SyncGuardWorkflow $SyncGuardWorkflow `
         -SyncGuardBranch $SyncGuardBranch `
@@ -147,7 +166,7 @@ try {
         try {
             & pwsh -NoProfile -File $opsSnapshotScript `
                 -SurfaceRepository $SurfaceRepository `
-                -RequiredRunnerLabels $RequiredRunnerLabels `
+                -RequiredRunnerLabelsCsv $requiredRunnerLabelsCsv `
                 -SyncGuardRepository $SyncGuardRepository `
                 -SyncGuardWorkflow $SyncGuardWorkflow `
                 -SyncGuardBranch $SyncGuardBranch `
