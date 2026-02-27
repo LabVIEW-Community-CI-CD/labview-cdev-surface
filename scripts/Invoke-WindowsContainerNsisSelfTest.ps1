@@ -264,9 +264,12 @@ try {
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File $cliEntrypointPath `
         -ReportPath $cliRunReportPath `
-        installer install `
-        --installer-path $installerPath `
-        --report-path $installReportPath | Out-Host
+        -CommandArgs @(
+            'installer',
+            'install',
+            '--installer-path', $installerPath,
+            '--report-path', $installReportPath
+        ) | Out-Host
     $installerExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
     if ($installerExitCode -ne 0) {
         $reasonCode = 'installer_exit_nonzero'
