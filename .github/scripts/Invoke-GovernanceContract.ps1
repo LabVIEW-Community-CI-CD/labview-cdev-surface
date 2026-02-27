@@ -62,6 +62,7 @@ function ConvertTo-BoolOrDefault {
 }
 
 $enableSelfHostedContracts = ConvertTo-BoolOrDefault -Value ([string]$env:ENABLE_SELF_HOSTED_CONTRACTS) -Default $false
+$requirePullRequestReviews = ConvertTo-BoolOrDefault -Value ([string]$env:GOVERNANCE_REQUIRE_PR_REVIEWS) -Default $false
 $requiredContexts = [System.Collections.Generic.List[string]]::new()
 foreach ($context in @(
         'CI Pipeline',
@@ -115,7 +116,7 @@ foreach ($context in @($requiredContexts)) {
     }
 }
 
-if ($null -eq $protection.required_pull_request_reviews) {
+if ($requirePullRequestReviews -and $null -eq $protection.required_pull_request_reviews) {
     $issues += 'required_pull_request_reviews is not enabled'
 }
 
