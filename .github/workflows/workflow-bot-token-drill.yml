@@ -1,0 +1,116 @@
+name: workflow-bot-token-drill
+
+on:
+  schedule:
+    - cron: '5 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  workflow-bot-token-drill:
+    name: Workflow Bot Token Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate workflow bot token
+        shell: pwsh
+        env:
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+            throw "workflow_bot_token_missing: Required secret WORKFLOW_BOT_TOKEN is not configured."
+          }
+
+      - name: Execute workflow bot token drill
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'workflow-bot-token-drill-report.json'
+          & pwsh -NoProfile -File ./scripts/Test-WorkflowBotTokenHealth.ps1 `
+            -Repository '${{ github.repository }}' `
+            -OutputPath $reportPath
+
+      - name: Upload workflow bot token drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-bot-token-drill-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/workflow-bot-token-drill-report.json
+          if-no-files-found: error
+
+      - name: Update workflow bot token drill issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Workflow Bot Token Health Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'workflow-bot-token-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "workflow bot token drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Workflow bot token drill failed.
+
+          - Run: $env:RUN_URL
+          - Repository: $($report.repository)
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close workflow bot token drill issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Workflow Bot Token Health Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'workflow-bot-token-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "workflow bot token drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Workflow bot token drill recovered.
+
+          - Run: $env:RUN_URL
+          - Repository: $($report.repository)
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

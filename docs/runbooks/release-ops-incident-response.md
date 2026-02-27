@@ -206,8 +206,17 @@ Run with explicit thresholds:
 gh workflow run ops-slo-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
   -f lookback_days=7 `
   -f min_success_rate_pct=100 `
-  -f sync_guard_max_age_hours=12
+  -f sync_guard_max_age_hours=12 `
+  -f warning_min_success_rate_pct=99.5 `
+  -f critical_min_success_rate_pct=99
 ```
+
+SLO report severity fields:
+- `alert_severity` (`none|warning|critical`)
+- `alert_thresholds.warning_min_success_rate_pct`
+- `alert_thresholds.critical_min_success_rate_pct`
+- `alert_thresholds.warning_reason_codes`
+- `alert_thresholds.critical_reason_codes`
 
 ## Policy Drift Check Dispatch
 Run control-plane policy drift check:
@@ -384,6 +393,22 @@ When `reason_code=no_automatable_action` or `reason_code=remediation_verify_fail
 Guardrails incident title:
 - `Release Guardrails Auto-Remediation Alert`
 
+## Workflow Bot Token Drill
+Dispatch token-health drill:
+
+```powershell
+gh workflow run workflow-bot-token-drill.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+Deterministic token drill reason codes:
+- `token_missing`
+- `token_invalid`
+- `token_scope_insufficient`
+- `token_health_runtime_error`
+
+Token drill incident title:
+- `Workflow Bot Token Health Alert`
+
 ## Evidence to Attach to Incident
 - `ops-monitoring-report.json`
 - `canary-smoke-tag-hygiene-report.json`
@@ -393,5 +418,6 @@ Guardrails incident title:
 - `release-race-hardening-gate-report.json`
 - `branch-protection-drift-report.json`
 - `release-guardrails-autoremediate-report.json`
+- `workflow-bot-token-drill-report.json`
 - sync guard run URL
 - parity SHAs (upstream and fork)

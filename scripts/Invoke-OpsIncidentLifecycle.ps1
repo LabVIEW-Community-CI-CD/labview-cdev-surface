@@ -64,6 +64,50 @@ Ops incident recovered.
 "@
 }
 
+function Normalize-IncidentBody {
+    param(
+        [Parameter()][AllowNull()][string]$Text = ''
+    )
+
+    $normalized = [string]$Text
+    $normalized = $normalized -replace "`r`n", "`n"
+    $normalized = $normalized -replace "`r", "`n"
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($normalized -split "`n", -1, [System.StringSplitOptions]::None)) {
+        [void]$lines.Add(([string]$line).TrimEnd())
+    }
+
+    $compacted = [System.Collections.Generic.List[string]]::new()
+    $blankStreak = 0
+    foreach ($line in @($lines)) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) {
+            $blankStreak++
+            if ($blankStreak -gt 1) {
+                continue
+            }
+            [void]$compacted.Add('')
+            continue
+        }
+
+        $blankStreak = 0
+        [void]$compacted.Add([string]$line)
+    }
+
+    while (@($compacted).Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$compacted[0])) {
+        $compacted.RemoveAt(0)
+    }
+    while (@($compacted).Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$compacted[@($compacted).Count - 1])) {
+        $compacted.RemoveAt(@($compacted).Count - 1)
+    }
+
+    if (@($compacted).Count -eq 0) {
+        return ''
+    }
+
+    return ([string]::Join("`n", @($compacted)) + "`n")
+}
+
 $report = [ordered]@{
     schema_version = '1.0'
     timestamp_utc = Get-UtcNowIso
@@ -73,12 +117,24 @@ $report = [ordered]@{
     run_url = $RunUrl
     status = 'fail'
     action = ''
+    body_line_count = 0
+    body_sha256 = ''
     issue = $null
     message = ''
 }
 
 try {
     $resolvedBody = Resolve-Body -LifecycleMode $Mode -Text $Body -Url $RunUrl
+    $normalizedBody = Normalize-IncidentBody -Text $resolvedBody
+    $bodyLines = @(
+        $normalizedBody -split "`n", -1, [System.StringSplitOptions]::None |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    )
+    $report.body_line_count = @($bodyLines).Count
+    $report.body_sha256 = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedBody))
+    ).Replace('-', '').ToLowerInvariant()
+
     $issues = @(Invoke-GhJson -Arguments @(
             'issue', 'list',
             '-R', $Repository,
@@ -96,7 +152,7 @@ try {
                     'issue', 'create',
                     '-R', $Repository,
                     '--title', $IssueTitle,
-                    '--body', $resolvedBody
+                    '--body', $normalizedBody
                 )).Trim()
             $report.action = 'created'
             $report.issue = [ordered]@{
@@ -113,7 +169,7 @@ try {
 
             if ($issueState -eq 'CLOSED') {
                 Invoke-Gh -Arguments @('issue', 'reopen', $issueNumber, '-R', $Repository)
-                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $resolvedBody)
+                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $normalizedBody)
                 $report.action = 'reopened_and_commented'
                 $report.issue = [ordered]@{
                     number = $issueNumber
@@ -123,7 +179,7 @@ try {
                 }
                 $report.message = "Closed incident issue reopened and updated (#$issueNumber)."
             } else {
-                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $resolvedBody)
+                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $normalizedBody)
                 $report.action = 'commented'
                 $report.issue = [ordered]@{
                     number = $issueNumber
@@ -150,7 +206,7 @@ try {
             $issueUrl = [string]$target[0].url
 
             if ($issueState -eq 'OPEN') {
-                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $resolvedBody)
+                Invoke-Gh -Arguments @('issue', 'comment', $issueNumber, '-R', $Repository, '--body', $normalizedBody)
                 Invoke-Gh -Arguments @('issue', 'close', $issueNumber, '-R', $Repository)
                 $report.action = 'commented_and_closed'
                 $report.issue = [ordered]@{

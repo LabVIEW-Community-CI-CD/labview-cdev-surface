@@ -55,6 +55,14 @@ Describe 'Release client policy contract' {
         $releaseClient.ops_control_plane_policy.slo_gate.lookback_days | Should -Be 7
         $releaseClient.ops_control_plane_policy.slo_gate.min_success_rate_pct | Should -Be 100
         $releaseClient.ops_control_plane_policy.slo_gate.max_sync_guard_age_hours | Should -Be 12
+        $releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.warning_min_success_rate_pct | Should -Be 99.5
+        $releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_min_success_rate_pct | Should -Be 99
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.warning_reason_codes) | Should -Contain 'workflow_missing_runs'
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.warning_reason_codes) | Should -Contain 'workflow_success_rate_below_threshold'
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'workflow_failure_detected'
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'sync_guard_missing'
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'sync_guard_stale'
+        @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'slo_gate_runtime_error'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-monitoring'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-autoremediate'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'release-control-plane'
@@ -75,6 +83,7 @@ Describe 'Release client policy contract' {
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Guardrails Auto-Remediation Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
+        @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Workflow Bot Token Health Alert'
         $releaseClient.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
         $releaseClient.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
         $releaseClient.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'
@@ -110,6 +119,8 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
         $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
+        $script:policyScriptContent | Should -Match 'ops_policy_slo_alert_thresholds_warning_min_success_rate_pct'
+        $script:policyScriptContent | Should -Match 'ops_policy_slo_alert_thresholds_critical_reason_slo_gate_runtime_error'
         $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_full_cycle_weekday_monday'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_pattern_exists'

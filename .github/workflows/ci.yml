@@ -82,6 +82,7 @@ jobs:
             './tests/OpsIncidentLifecycleContract.Tests.ps1',
             './tests/OpsAutoRemediationWorkflowContract.Tests.ps1',
             './tests/OpsSloGateWorkflowContract.Tests.ps1',
+            './tests/WorkflowBotTokenDrillWorkflowContract.Tests.ps1',
             './tests/OpsPolicyDriftWorkflowContract.Tests.ps1',
             './tests/ReleaseGuardrailsAutoRemediationWorkflowContract.Tests.ps1',
             './tests/BranchProtectionDriftWorkflowContract.Tests.ps1',

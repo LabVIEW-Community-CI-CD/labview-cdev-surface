@@ -35,6 +35,16 @@ on:
         required: false
         default: '45'
         type: string
+      warning_min_success_rate_pct:
+        description: Warning severity threshold for lowest workflow success rate.
+        required: false
+        default: '99.5'
+        type: string
+      critical_min_success_rate_pct:
+        description: Critical severity threshold for lowest workflow success rate.
+        required: false
+        default: '99'
+        type: string
 
 permissions:
   contents: read
@@ -113,6 +123,26 @@ jobs:
             $selfHealWatchTimeout = $parsedWatchTimeout
           }
 
+          $warningMinSuccessRatePctText = [string]'${{ inputs.warning_min_success_rate_pct }}'
+          $warningMinSuccessRatePct = 99.5
+          if (-not [string]::IsNullOrWhiteSpace($warningMinSuccessRatePctText)) {
+            $parsedWarningSuccessRate = 0.0
+            if (-not [double]::TryParse($warningMinSuccessRatePctText, [ref]$parsedWarningSuccessRate)) {
+              throw "warning_min_success_rate_pct must be a number. actual='$warningMinSuccessRatePctText'"
+            }
+            $warningMinSuccessRatePct = $parsedWarningSuccessRate
+          }
+
+          $criticalMinSuccessRatePctText = [string]'${{ inputs.critical_min_success_rate_pct }}'
+          $criticalMinSuccessRatePct = 99.0
+          if (-not [string]::IsNullOrWhiteSpace($criticalMinSuccessRatePctText)) {
+            $parsedCriticalSuccessRate = 0.0
+            if (-not [double]::TryParse($criticalMinSuccessRatePctText, [ref]$parsedCriticalSuccessRate)) {
+              throw "critical_min_success_rate_pct must be a number. actual='$criticalMinSuccessRatePctText'"
+            }
+            $criticalMinSuccessRatePct = $parsedCriticalSuccessRate
+          }
+
           & pwsh -NoProfile -File ./scripts/Invoke-OpsSloSelfHealing.ps1 `
             -SurfaceRepository '${{ github.repository }}' `
             -LookbackDays $lookbackDays `
@@ -121,6 +151,8 @@ jobs:
             -AutoRemediate:$autoSelfHeal `
             -MaxAttempts $selfHealMaxAttempts `
             -WatchTimeoutMinutes $selfHealWatchTimeout `
+            -WarningMinSuccessRatePct $warningMinSuccessRatePct `
+            -CriticalMinSuccessRatePct $criticalMinSuccessRatePct `
             -OutputPath $reportPath
 
       - name: Upload ops SLO gate report
@@ -150,15 +182,21 @@ jobs:
           $finalReasonCodes = @($report.final_report.reason_codes | ForEach-Object { [string]$_ })
           $finalReasonCodeText = if ($finalReasonCodes.Count -gt 0) { [string]::Join(',', $finalReasonCodes) } else { 'unknown' }
           $attemptCount = @($report.remediation_attempts).Count
+          $severity = [string]$report.alert_severity
+          $warningThreshold = [string]$report.alert_thresholds.warning_min_success_rate_pct
+          $criticalThreshold = [string]$report.alert_thresholds.critical_min_success_rate_pct
           $body = @"
           Ops SLO gate failed.
 
           - Run: $env:RUN_URL
+          - Alert severity: $severity
           - Reason code: $($report.reason_code)
           - Final reason codes: $finalReasonCodeText
           - Message: $($report.message)
           - Lookback days: $($report.lookback_days)
           - Min success rate pct: $($report.min_success_rate_pct)
+          - Warning min success rate pct: $warningThreshold
+          - Critical min success rate pct: $criticalThreshold
           - Auto remediate: $($report.auto_remediate)
           - Remediation attempts: $attemptCount
           "@
@@ -187,10 +225,12 @@ jobs:
 
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $attemptCount = @($report.remediation_attempts).Count
+          $severity = [string]$report.alert_severity
           $body = @"
           Ops SLO gate recovered.
 
           - Run: $env:RUN_URL
+          - Alert severity: $severity
           - Reason code: $($report.reason_code)
           - Message: $($report.message)
           - Lookback days: $($report.lookback_days)

@@ -431,6 +431,11 @@ Top-level release-control-plane deterministic failure reason codes include:
 - 7-day lookback by default
 - 100% success-rate target for `ops-monitoring`, `ops-autoremediate`, and `release-control-plane`
 - max sync-guard success age of 12 hours
+- alert thresholds for severity classification:
+  - warning minimum workflow success rate: `99.5`
+  - critical minimum workflow success rate: `99`
+  - warning reason codes: `workflow_missing_runs`, `workflow_success_rate_below_threshold`
+  - critical reason codes: `workflow_failure_detected`, `sync_guard_missing`, `sync_guard_stale`, `slo_gate_runtime_error`
 - bounded self-healing by dispatching `ops-autoremediate.yml` and re-verifying SLO status
 - deterministic reason codes on failure:
   - `auto_remediation_disabled`
@@ -452,6 +457,7 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `release_client_drift`
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
+  - `ops_control_plane_slo_alert_thresholds_missing`
   - `ops_control_plane_self_healing_missing`
   - `ops_control_plane_guardrails_missing`
   - `ops_control_plane_stable_window_missing`
@@ -535,6 +541,14 @@ Guardrails policy is codified in `installer_contract.release_client.ops_control_
 - `race_gate_max_age_hours`
 
 Incident lifecycle title for this lane is `Release Guardrails Auto-Remediation Alert`.
+
+`workflow-bot-token-drill.yml` is scheduled weekly and supports manual dispatch. It runs `scripts/Test-WorkflowBotTokenHealth.ps1` to verify that `WORKFLOW_BOT_TOKEN` can execute required control-plane API operations (`repo read`, `actions runners read`, and branch-protection GraphQL read).
+- deterministic reason codes:
+  - `token_missing`
+  - `token_invalid`
+  - `token_scope_insufficient`
+  - `token_health_runtime_error`
+- incident lifecycle title for this lane: `Workflow Bot Token Health Alert`
 
 ## Local Docker package for control-plane exercise
 
