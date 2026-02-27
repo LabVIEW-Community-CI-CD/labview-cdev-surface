@@ -262,14 +262,13 @@ try {
         throw "cdev-cli entrypoint not found after bundle extraction: $cliEntrypointPath"
     }
 
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $cliEntrypointPath `
-        -ReportPath $cliRunReportPath `
-        -CommandArgs @(
-            'installer',
-            'install',
-            '--installer-path', $installerPath,
-            '--report-path', $installReportPath
-        ) | Out-Host
+    $cliCommandArgs = @(
+        'installer',
+        'install',
+        '--installer-path', $installerPath,
+        '--report-path', $installReportPath
+    )
+    & $cliEntrypointPath -ReportPath $cliRunReportPath -CommandArgs $cliCommandArgs | Out-Host
     $installerExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
     if ($installerExitCode -ne 0) {
         $reasonCode = 'installer_exit_nonzero'
