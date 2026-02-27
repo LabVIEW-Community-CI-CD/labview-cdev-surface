@@ -79,10 +79,12 @@ jobs:
           }
 
           $localImage = "labview-cdev-surface-nsis-windows-parity:selftest-$shortSha"
+          $tagsCsv = [string]::Join('|', $tags)
 
           "date_utc=$dateUtc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "short_sha=$shortSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "local_image=$localImage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tags_csv=$tagsCsv" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "tags<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $tags | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -157,10 +159,8 @@ jobs:
             throw "Local image missing after self-test build: $localImage"
           }
 
-          $tagsText = @'
-${{ steps.resolve.outputs.tags }}
-'@
-          $tags = @($tagsText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          $tagsRaw = '${{ steps.resolve.outputs.tags_csv }}'
+          $tags = @($tagsRaw.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
           if ($tags.Count -eq 0) {
             throw 'No publish tags resolved.'
           }
@@ -200,10 +200,8 @@ ${{ steps.resolve.outputs.tags }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $tagsText = @'
-${{ steps.resolve.outputs.tags }}
-'@
-          $tags = @($tagsText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          $tagsRaw = '${{ steps.resolve.outputs.tags_csv }}'
+          $tags = @($tagsRaw.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## Windows NSIS Parity Image Published'
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ''
