@@ -453,6 +453,7 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
+  - `ops_control_plane_guardrails_missing`
   - `ops_control_plane_stable_window_missing`
   - `ops_control_plane_stable_window_reason_pattern_missing`
   - `ops_control_plane_stable_window_reason_example_missing`
@@ -506,6 +507,28 @@ It runs `scripts/Test-ReleaseRaceHardeningGate.ps1` and fails when:
 - `integration/*`
 
 Use `scripts/Set-ReleaseBranchProtectionPolicy.ps1` to deterministically apply/repair required check contracts.
+
+`release-guardrails-autoremediate.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` to:
+- evaluate branch-protection drift and release race-hardening freshness in one pass
+- auto-apply branch-protection policy via `Set-ReleaseBranchProtectionPolicy.ps1` when mismatch/missing rules are detected
+- auto-dispatch `release-race-hardening-drill.yml` when drill freshness is missing or stale, then re-verify gate health
+- fail with deterministic reason codes:
+  - `already_healthy`
+  - `remediated`
+  - `auto_remediation_disabled`
+  - `no_automatable_action`
+  - `remediation_execution_failed`
+  - `remediation_verify_failed`
+  - `guardrails_self_heal_runtime_error`
+
+Guardrails policy is codified in `installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails`:
+- `remediation_workflow`
+- `race_drill_workflow`
+- `watch_timeout_minutes`
+- `verify_after_remediation`
+- `race_gate_max_age_hours`
+
+Incident lifecycle title for this lane is `Release Guardrails Auto-Remediation Alert`.
 
 ## Local Docker package for control-plane exercise
 

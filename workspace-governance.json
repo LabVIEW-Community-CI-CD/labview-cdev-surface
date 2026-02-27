@@ -273,6 +273,7 @@
             "Release Control Plane Alert",
             "Ops SLO Gate Alert",
             "Ops Policy Drift Alert",
+            "Release Guardrails Auto-Remediation Alert",
             "Release Rollback Drill Alert"
           ]
         },
@@ -298,6 +299,13 @@
             "remediation_workflow": "ops-autoremediate.yml",
             "watch_timeout_minutes": 45,
             "verify_after_remediation": true
+          },
+          "guardrails": {
+            "remediation_workflow": "release-guardrails-autoremediate.yml",
+            "race_drill_workflow": "release-race-hardening-drill.yml",
+            "watch_timeout_minutes": 120,
+            "verify_after_remediation": true,
+            "race_gate_max_age_hours": 168
           },
           "rollback_drill": {
             "release_workflow": "release-workspace-installer.yml",

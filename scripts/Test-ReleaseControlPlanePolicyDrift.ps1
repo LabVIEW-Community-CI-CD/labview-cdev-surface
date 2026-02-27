@@ -99,6 +99,15 @@ try {
                     }) | Out-Null
                 if (-not $selfHealingPresent) {
                     Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_self_healing_missing'
+                } else {
+                    $guardrailsPolicyPresent = ($null -ne $releaseClient.ops_control_plane_policy.self_healing.guardrails)
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_self_healing_guardrails_present'
+                            passed = $guardrailsPolicyPresent
+                        }) | Out-Null
+                    if (-not $guardrailsPolicyPresent) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_guardrails_missing'
+                    }
                 }
 
                 $stableWindowPresent = ($null -ne $releaseClient.ops_control_plane_policy.stable_promotion_window)

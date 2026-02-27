@@ -284,6 +284,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
+  - `ops_control_plane_guardrails_missing`
   - `ops_control_plane_stable_window_missing`
   - `ops_control_plane_stable_window_reason_pattern_missing`
   - `ops_control_plane_stable_window_reason_example_missing`
@@ -311,7 +312,22 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - `.github/workflows/release-race-hardening-gate.yml` must run `scripts/Test-ReleaseRaceHardeningGate.ps1` and provide required check context `Release Race Hardening Drill` for `main` + `integration/*` PR/push lanes.
 - Race-hardening gate must fail when latest successful drill evidence is missing/stale, `reason_code != drill_passed`, or collision evidence is absent.
 - `.github/workflows/branch-protection-drift-check.yml` must run `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and maintain incident lifecycle title `Branch Protection Drift Alert`.
+- `.github/workflows/release-guardrails-autoremediate.yml` must run `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` and maintain incident lifecycle title `Release Guardrails Auto-Remediation Alert`.
 - `scripts/Set-ReleaseBranchProtectionPolicy.ps1` is the deterministic apply path for required-check drift repair.
+- Guardrails self-healing policy must remain explicit under `ops_control_plane_policy.self_healing.guardrails`:
+  - `remediation_workflow`
+  - `race_drill_workflow`
+  - `watch_timeout_minutes`
+  - `verify_after_remediation`
+  - `race_gate_max_age_hours`
+- Guardrails self-healing reason codes must remain explicit:
+  - `already_healthy`
+  - `remediated`
+  - `auto_remediation_disabled`
+  - `no_automatable_action`
+  - `remediation_execution_failed`
+  - `remediation_verify_failed`
+  - `guardrails_self_heal_runtime_error`
 - Race-hardening drill reason codes must remain explicit:
   - `drill_passed`
   - `control_plane_collision_not_observed`

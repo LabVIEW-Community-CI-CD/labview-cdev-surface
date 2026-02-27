@@ -336,6 +336,42 @@ pwsh -File .\scripts\Set-ReleaseBranchProtectionPolicy.ps1 `
 Branch-protection drift incident title:
 - `Branch Protection Drift Alert`
 
+## Release Guardrails Auto-Remediation
+Dispatch autonomous guardrails remediation:
+
+```powershell
+gh workflow run release-guardrails-autoremediate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f race_gate_max_age_hours=168 `
+  -f auto_self_heal=true `
+  -f max_attempts=1 `
+  -f drill_watch_timeout_minutes=120
+```
+
+Run the same remediation path locally:
+
+```powershell
+Set-Location D:\dev\labview-cdev-surface-fork
+pwsh -File .\scripts\Invoke-ReleaseGuardrailsSelfHealing.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -Branch main `
+  -RaceGateMaxAgeHours 168 `
+  -AutoSelfHeal:$true `
+  -MaxAttempts 1 `
+  -DrillWatchTimeoutMinutes 120
+```
+
+Deterministic guardrails reason codes:
+- `already_healthy`
+- `remediated`
+- `auto_remediation_disabled`
+- `no_automatable_action`
+- `remediation_execution_failed`
+- `remediation_verify_failed`
+- `guardrails_self_heal_runtime_error`
+
+Guardrails incident title:
+- `Release Guardrails Auto-Remediation Alert`
+
 ## Evidence to Attach to Incident
 - `ops-monitoring-report.json`
 - `canary-smoke-tag-hygiene-report.json`
@@ -344,5 +380,6 @@ Branch-protection drift incident title:
 - `release-race-hardening-weekly-summary.json`
 - `release-race-hardening-gate-report.json`
 - `branch-protection-drift-report.json`
+- `release-guardrails-autoremediate-report.json`
 - sync guard run URL
 - parity SHAs (upstream and fork)
