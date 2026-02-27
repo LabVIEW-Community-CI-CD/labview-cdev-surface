@@ -1,0 +1,139 @@
+name: host-release-2020-vipm-lifecycle-drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional branch or SHA to evaluate. Defaults to current workflow ref.
+        required: false
+        type: string
+      selected_ppl_bitness:
+        description: PPL gate bitness to enforce before VIPM lifecycle check (32 or 64).
+        required: false
+        default: '64'
+        type: string
+      keep_smoke_workspace:
+        description: Keep smoke workspace on runner for post-mortem troubleshooting.
+        required: false
+        default: false
+        type: boolean
+      nsis_root:
+        description: Optional NSIS root override. Defaults to repository variable NSIS_ROOT or C:\Program Files (x86)\NSIS.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: host-release-2020-vipm-lifecycle-drill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  host-release-2020-vipm-lifecycle-drill:
+    name: Host Release 2020 VIPM Lifecycle Drill
+    runs-on: [self-hosted, windows, self-hosted-windows-lv, installer-harness]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow_dispatch ref override
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ref != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & git fetch --prune origin "${{ inputs.ref }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch requested ref '${{ inputs.ref }}'."
+          }
+
+          & git checkout --force FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to checkout requested ref '${{ inputs.ref }}'."
+          }
+
+      - name: Assert machine preflight pack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-machine-preflight.json'
+          & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessMachinePreflight.ps1 `
+            -ExpectedLabviewYear '2020' `
+            -DockerContext 'desktop-linux' `
+            -DockerCheckSeverity warning `
+            -OutputPath $reportPath
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw "Machine preflight checks failed."
+          }
+
+      - name: Execute host-release 2020 VIPM lifecycle drill
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-lifecycle-drill-report.json'
+          $iterationRoot = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-lifecycle'
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'dev-smoke-lvie-2020'
+
+          $selectedPplBitnessText = [string]'${{ inputs.selected_ppl_bitness }}'
+          if ([string]::IsNullOrWhiteSpace($selectedPplBitnessText)) {
+            $selectedPplBitnessText = '64'
+          }
+          if ($selectedPplBitnessText -notin @('32', '64')) {
+            throw "selected_ppl_bitness must be 32 or 64. actual='$selectedPplBitnessText'"
+          }
+
+          $keepSmokeWorkspace = $false
+          $keepSmokeWorkspaceText = [string]'${{ inputs.keep_smoke_workspace }}'
+          if (-not [string]::IsNullOrWhiteSpace($keepSmokeWorkspaceText)) {
+            try {
+              $keepSmokeWorkspace = [System.Convert]::ToBoolean($keepSmokeWorkspaceText)
+            } catch {
+              throw "keep_smoke_workspace must be boolean. actual='$keepSmokeWorkspaceText'"
+            }
+          }
+
+          $nsisRootInput = [string]'${{ inputs.nsis_root }}'
+          $nsisRootValue = if (-not [string]::IsNullOrWhiteSpace($nsisRootInput)) { $nsisRootInput } elseif (-not [string]::IsNullOrWhiteSpace([string]::Concat('${{ vars.NSIS_ROOT }}'))) { '${{ vars.NSIS_ROOT }}' } else { 'C:\Program Files (x86)\NSIS' }
+
+          $invokeArgs = @(
+            '-NoProfile',
+            '-File', './scripts/Invoke-HostRelease2020VipmLifecycleDrill.ps1',
+            '-OutputPath', $reportPath,
+            '-IterationOutputRoot', $iterationRoot,
+            '-SmokeWorkspaceRoot', $smokeRoot,
+            '-SelectedPplBitness', $selectedPplBitnessText,
+            '-TargetLabviewYear', '2020',
+            '-TargetVipmBitness', '64',
+            '-NsisRoot', $nsisRootValue
+          )
+          if ($keepSmokeWorkspace) {
+            $invokeArgs += '-KeepSmokeWorkspace'
+          }
+
+          & pwsh @invokeArgs
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
+              Get-Content -LiteralPath $reportPath -Raw | Write-Host
+            }
+            throw "Host-release 2020 VIPM lifecycle drill failed."
+          }
+
+      - name: Upload host-release 2020 VIPM lifecycle artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-release-2020-vipm-lifecycle-drill-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/host-release-2020-vipm-lifecycle-drill-report.json
+            ${{ runner.temp }}/host-release-2020-vipm-machine-preflight.json
+            ${{ runner.temp }}/host-release-2020-vipm-lifecycle/**
+            ${{ runner.temp }}/dev-smoke-lvie-2020/artifacts/workspace-install-latest.json
+            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/status/workspace-installer-vip-build.json
+            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm-build.log
+            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm/**
+          if-no-files-found: error
