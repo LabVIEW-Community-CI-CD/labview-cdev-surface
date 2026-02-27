@@ -1,0 +1,294 @@
+name: ops-slo-gate
+
+on:
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: SLO gate lookback window in days.
+        required: false
+        default: '7'
+        type: string
+      min_success_rate_pct:
+        description: Minimum success rate threshold (0-100).
+        required: false
+        default: '100'
+        type: string
+      sync_guard_max_age_hours:
+        description: Maximum sync-guard success age in hours.
+        required: false
+        default: '12'
+        type: string
+      error_budget_window_days:
+        description: Error-budget window in days.
+        required: false
+        default: '7'
+        type: string
+      error_budget_max_failed_runs:
+        description: Maximum failed runs allowed in the error-budget window.
+        required: false
+        default: '0'
+        type: string
+      error_budget_max_failure_rate_pct:
+        description: Maximum failure-rate percentage allowed in the error-budget window.
+        required: false
+        default: '0'
+        type: string
+      auto_self_heal:
+        description: Enable bounded self-healing when SLO gate fails.
+        required: false
+        default: true
+        type: boolean
+      self_heal_max_attempts:
+        description: Maximum bounded self-healing attempts.
+        required: false
+        default: '1'
+        type: string
+      self_heal_watch_timeout_minutes:
+        description: Timeout minutes for each remediation workflow watch.
+        required: false
+        default: '45'
+        type: string
+      warning_min_success_rate_pct:
+        description: Warning severity threshold for lowest workflow success rate.
+        required: false
+        default: '99.5'
+        type: string
+      critical_min_success_rate_pct:
+        description: Critical severity threshold for lowest workflow success rate.
+        required: false
+        default: '99'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  ops-slo-gate:
+    name: Ops SLO Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Evaluate ops SLO gate with bounded self-healing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+
+          $lookbackDaysText = [string]'${{ inputs.lookback_days }}'
+          $lookbackDays = 7
+          if (-not [string]::IsNullOrWhiteSpace($lookbackDaysText)) {
+            $parsedLookback = 0
+            if (-not [int]::TryParse($lookbackDaysText, [ref]$parsedLookback)) {
+              throw "lookback_days must be an integer. actual='$lookbackDaysText'"
+            }
+            $lookbackDays = $parsedLookback
+          }
+
+          $minSuccessRatePctText = [string]'${{ inputs.min_success_rate_pct }}'
+          $minSuccessRatePct = 100.0
+          if (-not [string]::IsNullOrWhiteSpace($minSuccessRatePctText)) {
+            $parsedSuccessRate = 0.0
+            if (-not [double]::TryParse($minSuccessRatePctText, [ref]$parsedSuccessRate)) {
+              throw "min_success_rate_pct must be a number. actual='$minSuccessRatePctText'"
+            }
+            $minSuccessRatePct = $parsedSuccessRate
+          }
+
+          $syncGuardMaxAgeHoursText = [string]'${{ inputs.sync_guard_max_age_hours }}'
+          $syncGuardMaxAgeHours = 12
+          if (-not [string]::IsNullOrWhiteSpace($syncGuardMaxAgeHoursText)) {
+            $parsedMaxAge = 0
+            if (-not [int]::TryParse($syncGuardMaxAgeHoursText, [ref]$parsedMaxAge)) {
+              throw "sync_guard_max_age_hours must be an integer. actual='$syncGuardMaxAgeHoursText'"
+            }
+            $syncGuardMaxAgeHours = $parsedMaxAge
+          }
+
+          $errorBudgetWindowDaysText = [string]'${{ inputs.error_budget_window_days }}'
+          $errorBudgetWindowDays = 7
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetWindowDaysText)) {
+            $parsedErrorBudgetWindowDays = 0
+            if (-not [int]::TryParse($errorBudgetWindowDaysText, [ref]$parsedErrorBudgetWindowDays)) {
+              throw "error_budget_window_days must be an integer. actual='$errorBudgetWindowDaysText'"
+            }
+            $errorBudgetWindowDays = $parsedErrorBudgetWindowDays
+          }
+
+          $errorBudgetMaxFailedRunsText = [string]'${{ inputs.error_budget_max_failed_runs }}'
+          $errorBudgetMaxFailedRuns = 0
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetMaxFailedRunsText)) {
+            $parsedErrorBudgetMaxFailedRuns = 0
+            if (-not [int]::TryParse($errorBudgetMaxFailedRunsText, [ref]$parsedErrorBudgetMaxFailedRuns)) {
+              throw "error_budget_max_failed_runs must be an integer. actual='$errorBudgetMaxFailedRunsText'"
+            }
+            $errorBudgetMaxFailedRuns = $parsedErrorBudgetMaxFailedRuns
+          }
+
+          $errorBudgetMaxFailureRatePctText = [string]'${{ inputs.error_budget_max_failure_rate_pct }}'
+          $errorBudgetMaxFailureRatePct = 0.0
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetMaxFailureRatePctText)) {
+            $parsedErrorBudgetMaxFailureRatePct = 0.0
+            if (-not [double]::TryParse($errorBudgetMaxFailureRatePctText, [ref]$parsedErrorBudgetMaxFailureRatePct)) {
+              throw "error_budget_max_failure_rate_pct must be a number. actual='$errorBudgetMaxFailureRatePctText'"
+            }
+            $errorBudgetMaxFailureRatePct = $parsedErrorBudgetMaxFailureRatePct
+          }
+
+          $autoSelfHealText = [string]'${{ inputs.auto_self_heal }}'
+          $autoSelfHeal = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
+            $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
+          }
+
+          $selfHealMaxAttemptsText = [string]'${{ inputs.self_heal_max_attempts }}'
+          $selfHealMaxAttempts = 1
+          if (-not [string]::IsNullOrWhiteSpace($selfHealMaxAttemptsText)) {
+            $parsedMaxAttempts = 0
+            if (-not [int]::TryParse($selfHealMaxAttemptsText, [ref]$parsedMaxAttempts)) {
+              throw "self_heal_max_attempts must be an integer. actual='$selfHealMaxAttemptsText'"
+            }
+            $selfHealMaxAttempts = $parsedMaxAttempts
+          }
+
+          $selfHealWatchTimeoutText = [string]'${{ inputs.self_heal_watch_timeout_minutes }}'
+          $selfHealWatchTimeout = 45
+          if (-not [string]::IsNullOrWhiteSpace($selfHealWatchTimeoutText)) {
+            $parsedWatchTimeout = 0
+            if (-not [int]::TryParse($selfHealWatchTimeoutText, [ref]$parsedWatchTimeout)) {
+              throw "self_heal_watch_timeout_minutes must be an integer. actual='$selfHealWatchTimeoutText'"
+            }
+            $selfHealWatchTimeout = $parsedWatchTimeout
+          }
+
+          $warningMinSuccessRatePctText = [string]'${{ inputs.warning_min_success_rate_pct }}'
+          $warningMinSuccessRatePct = 99.5
+          if (-not [string]::IsNullOrWhiteSpace($warningMinSuccessRatePctText)) {
+            $parsedWarningSuccessRate = 0.0
+            if (-not [double]::TryParse($warningMinSuccessRatePctText, [ref]$parsedWarningSuccessRate)) {
+              throw "warning_min_success_rate_pct must be a number. actual='$warningMinSuccessRatePctText'"
+            }
+            $warningMinSuccessRatePct = $parsedWarningSuccessRate
+          }
+
+          $criticalMinSuccessRatePctText = [string]'${{ inputs.critical_min_success_rate_pct }}'
+          $criticalMinSuccessRatePct = 99.0
+          if (-not [string]::IsNullOrWhiteSpace($criticalMinSuccessRatePctText)) {
+            $parsedCriticalSuccessRate = 0.0
+            if (-not [double]::TryParse($criticalMinSuccessRatePctText, [ref]$parsedCriticalSuccessRate)) {
+              throw "critical_min_success_rate_pct must be a number. actual='$criticalMinSuccessRatePctText'"
+            }
+            $criticalMinSuccessRatePct = $parsedCriticalSuccessRate
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsSloSelfHealing.ps1 `
+            -SurfaceRepository '${{ github.repository }}' `
+            -LookbackDays $lookbackDays `
+            -MinSuccessRatePct $minSuccessRatePct `
+            -SyncGuardMaxAgeHours $syncGuardMaxAgeHours `
+            -ErrorBudgetWindowDays $errorBudgetWindowDays `
+            -ErrorBudgetMaxFailedRuns $errorBudgetMaxFailedRuns `
+            -ErrorBudgetMaxFailureRatePct $errorBudgetMaxFailureRatePct `
+            -AutoRemediate:$autoSelfHeal `
+            -MaxAttempts $selfHealMaxAttempts `
+            -WatchTimeoutMinutes $selfHealWatchTimeout `
+            -WarningMinSuccessRatePct $warningMinSuccessRatePct `
+            -CriticalMinSuccessRatePct $criticalMinSuccessRatePct `
+            -OutputPath $reportPath
+
+      - name: Upload ops SLO gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-slo-gate-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/ops-slo-gate-report.json
+          if-no-files-found: error
+
+      - name: Update ops SLO gate issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Ops SLO Gate Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "ops SLO gate report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $finalReasonCodes = @($report.final_report.reason_codes | ForEach-Object { [string]$_ })
+          $finalReasonCodeText = if ($finalReasonCodes.Count -gt 0) { [string]::Join(',', $finalReasonCodes) } else { 'unknown' }
+          $attemptCount = @($report.remediation_attempts).Count
+          $severity = [string]$report.alert_severity
+          $warningThreshold = [string]$report.alert_thresholds.warning_min_success_rate_pct
+          $criticalThreshold = [string]$report.alert_thresholds.critical_min_success_rate_pct
+          $body = @"
+          Ops SLO gate failed.
+
+          - Run: $env:RUN_URL
+          - Alert severity: $severity
+          - Reason code: $($report.reason_code)
+          - Final reason codes: $finalReasonCodeText
+          - Message: $($report.message)
+          - Lookback days: $($report.lookback_days)
+          - Min success rate pct: $($report.min_success_rate_pct)
+          - Warning min success rate pct: $warningThreshold
+          - Critical min success rate pct: $criticalThreshold
+          - Auto remediate: $($report.auto_remediate)
+          - Remediation attempts: $attemptCount
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close ops SLO gate issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Ops SLO Gate Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "ops SLO gate report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $attemptCount = @($report.remediation_attempts).Count
+          $severity = [string]$report.alert_severity
+          $body = @"
+          Ops SLO gate recovered.
+
+          - Run: $env:RUN_URL
+          - Alert severity: $severity
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Lookback days: $($report.lookback_days)
+          - Auto remediated: $($report.reason_code -eq 'remediated')
+          - Remediation attempts: $attemptCount
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

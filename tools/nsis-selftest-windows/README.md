@@ -1,0 +1,38 @@
+# Windows NSIS Self-Test Runtime
+
+This image is the local runtime for `scripts/Invoke-WindowsContainerNsisSelfTest.ps1`.
+
+## Purpose
+
+- Build the workspace NSIS installer inside a Windows container.
+- Run the installer in the same container for silent smoke validation (`/S`).
+- Validate install report output before the container exits.
+- Stage manifest-pinned `cdev-cli` payload assets before container execution.
+
+## Included tooling
+
+- Base image: `nationalinstruments/labview:2026q1-windows`
+- Windows PowerShell (from base image)
+- Host-mounted NSIS toolchain (`makensis.exe`)
+- Host-prestaged payload containing bundled `runner-cli`
+
+## Host prerequisites
+
+- `C:\Program Files (x86)\NSIS\makensis.exe` available on host (override via wrapper parameters).
+- Host `git` and `dotnet` available for payload staging (`Build-RunnerCliBundleFromManifest.ps1` runs on host before container launch).
+
+## Build manually
+
+```powershell
+docker build `
+  -f .\tools\nsis-selftest-windows\Dockerfile `
+  -t labview-cdev-surface-nsis-selftest:local `
+  .\tools\nsis-selftest-windows
+```
+
+## Publish from GitHub
+
+- Workflow: `.github/workflows/publish-windows-nsis-parity-image.yml`
+- Trigger: manual `workflow_dispatch` (workflow shape is enforced by hosted-runner CI contract tests)
+- Image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-nsis-windows-parity`
+- Publish is gated by `scripts/Invoke-WindowsContainerNsisSelfTest.ps1` and fails before push if silent install checks fail.

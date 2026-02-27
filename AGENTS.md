@@ -17,6 +17,10 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Required CLI command surface (stable tokens):
   - `repos doctor`
   - `installer exercise`
+  - `installer install --mode release`
+  - `installer upgrade`
+  - `installer rollback`
+  - `installer status`
   - `postactions collect`
   - `linux deploy-ni`
 - Linux deploy defaults must stay documented as:
@@ -73,14 +77,29 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Override path must emit explicit warning summary and append override disclosure to release notes.
 - `.github/workflows/release-workspace-installer.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_release-workspace-installer-core.yml`.
 - `.github/workflows/windows-labview-image-gate.yml` is retained as a dispatch wrapper for diagnostics/fallback and must call `./.github/workflows/_windows-labview-image-gate-core.yml`.
-- Publishing mode is manual dispatch only with explicit semantic tag input (`v<major>.<minor>.<patch>`).
+- Publishing mode is manual dispatch only with dual-mode tag support:
+  - preferred SemVer tags (`v<major>.<minor>.<patch>`, `v<major>.<minor>.<patch>-rc.<n>`, `v<major>.<minor>.<patch>-canary.<n>`)
+  - legacy migration tags (`v0.YYYYMMDD.N`)
+- Release channel metadata is supported via `release_channel` input (`stable`, `prerelease`, `canary`); default is derived from `prerelease`.
+- Release workflow must enforce deterministic channel/tag consistency and fail with `[channel_tag_mismatch]` when `release_tag`, `prerelease`, and `release_channel` disagree.
+- Release workflow must emit deterministic `[tag_migration_warning]` when legacy date-window tags are used.
 - Release tags are immutable by default: existing tags must fail publication unless `allow_existing_tag=true` is explicitly set for break-glass recovery.
 - Release creation must bind tag creation to the exact workflow commit SHA (`github.sha`), not a moving branch target.
 - Keep fork-first mutation rules when preparing release changes:
   - mutate `origin` (`svelderrainruiz/labview-cdev-surface`) only
   - open PRs to `LabVIEW-Community-CI-CD/labview-cdev-surface:main`
 - Do not add push-triggered or scheduled release publishing in this repository.
-- Phase-1 release policy is unsigned installer with mandatory SHA256 provenance in release notes.
+- Release packaging must publish:
+  - `lvie-cdev-workspace-installer.exe`
+  - `lvie-cdev-workspace-installer.exe.sha256`
+  - `reproducibility-report.json`
+  - `workspace-installer.spdx.json`
+  - `workspace-installer.slsa.json`
+  - `release-manifest.json`
+- Installer signing policy is Authenticode dual-mode transition:
+  - dual-mode start: `2026-03-15T00:00:00Z`
+  - canary enforce date: `2026-05-15T00:00:00Z`
+  - stable/prerelease enforce date (`grace_end_utc`): `2026-07-01T00:00:00Z`
 
 ## Installer Build Contract
 - `CI Pipeline` (GitHub-hosted) is the required merge check.
@@ -95,6 +114,44 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `Reproducibility Contract` (bit-for-bit hash checks for runner-cli and installer).
   - `Provenance Contract` (SPDX/SLSA generation + hash-link validation).
 - Keep default-branch required checks unchanged until branch-protection contract is intentionally updated.
+
+## Release Client Runtime Contract
+- `scripts/Install-WorkspaceInstallerFromRelease.ps1` is the canonical release-client runtime fallback for install/upgrade/rollback operations.
+- Runtime modes must remain:
+  - `Install`
+  - `Upgrade`
+  - `Rollback`
+  - `Status`
+  - `ValidatePolicy`
+- Runtime must enforce policy allowlist on release source repositories before download.
+- Runtime failure model must preserve deterministic reason codes:
+  - `source_blocked`
+  - `asset_missing`
+  - `hash_mismatch`
+  - `signature_missing`
+  - `signature_invalid`
+  - `provenance_invalid`
+  - `installer_exit_nonzero`
+  - `install_report_missing`
+- Runtime must verify `release-manifest.json`, installer SHA256, Authenticode status (with channel-aware enforcement), SPDX/SLSA linkage, and installer smoke report presence.
+- Release-client state/report policy files:
+  - `C:\dev\workspace-governance\release-policy.json`
+  - `C:\dev\artifacts\workspace-release-state.json`
+  - `C:\dev\artifacts\workspace-release-client-latest.json`
+- Allowed installer release repositories default to:
+  - `LabVIEW-Community-CI-CD/labview-cdev-surface`
+  - `svelderrainruiz/labview-cdev-surface`
+- cdev-cli fork/upstream full-sync alignment metadata is required in `installer_contract.release_client.cdev_cli_sync`:
+  - primary repo: `svelderrainruiz/labview-cdev-cli`
+  - mirror repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+  - strategy: `fork-and-upstream-full-sync`
+- Runtime image metadata is required in `installer_contract.release_client.runtime_images`:
+  - cdev-cli runtime canonical repository: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime`
+  - cdev-cli runtime source repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+  - cdev-cli runtime source commit: `8fef6f9192d81a14add28636c1100c109ae5e977`
+  - cdev-cli runtime digest: `sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+  - ops runtime repository: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
+  - ops runtime base repository/digest: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
 
 ## Installer Runtime Gate Contract
 - Installer runtime (`scripts/Install-WorkspaceFromManifest.ps1`) must fail fast if bundled `runner-cli` integrity checks fail.
@@ -125,9 +182,203 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - `nightly-supplychain-canary.yml` is the scheduled drift and reproducibility signal.
 - Canary failures must update a single tracking issue; do not disable canary to bypass failures.
 
+## Ops Monitoring Policy
+- `.github/workflows/ops-monitoring.yml` is the authoritative hourly ops snapshot workflow.
+- It must run `scripts/Invoke-OpsMonitoringSnapshot.ps1` and fail with deterministic reason codes when runner or sync-guard health drifts.
+- Incident lifecycle automation for ops workflows must run through `scripts/Invoke-OpsIncidentLifecycle.ps1`.
+- Failure-path issue behavior: create if missing, reopen if closed, or comment if already open.
+- Recovery-path issue behavior: comment and close when the latest matching issue is open.
+- Ops snapshot reason codes must remain explicit:
+  - `runner_unavailable`
+  - `sync_guard_failed`
+  - `sync_guard_stale`
+  - `sync_guard_missing`
+  - `sync_guard_incomplete`
+- Failure path must upload `ops-monitoring-report.json` and update a single issue titled `Ops Monitoring Alert`.
+- Release-control-plane health checks must use release-runner labels only (`self-hosted`, `windows`, `self-hosted-windows-lv`) when invoking `Invoke-OpsMonitoringSnapshot.ps1` from:
+  - `scripts/Invoke-ReleaseControlPlane.ps1`
+  - `scripts/Invoke-OpsAutoRemediation.ps1`
+  - `scripts/Exercise-ReleaseControlPlaneLocal.ps1`
+- `.github/workflows/ops-monitoring.yml` remains strict-default and must keep Docker Desktop parity visibility labels in its default snapshot path (`windows-containers`, `user-session`, `cdev-surface-windows-gate`).
+- `.github/workflows/canary-smoke-tag-hygiene.yml` is the canary smoke tag retention workflow.
+- It must run `scripts/Invoke-CanarySmokeTagHygiene.ps1` and enforce deterministic keep-latest behavior for dual-mode canary tags:
+  - legacy date-window tags (`v0.YYYYMMDD.N`)
+  - SemVer canary tags (`vX.Y.Z-canary.N`)
+- Hygiene workflow default mode must be `auto` so both tag families are processed during migration.
+- `.github/workflows/ops-autoremediate.yml` is the deterministic remediation workflow and must run `scripts/Invoke-OpsAutoRemediation.ps1`.
+- Auto-remediation reason codes must remain explicit:
+  - `already_healthy`
+  - `remediated`
+  - `manual_intervention_required`
+  - `no_automatable_action`
+  - `remediation_failed`
+- `.github/workflows/release-control-plane.yml` is the autonomous release orchestrator and must run `scripts/Invoke-ReleaseControlPlane.ps1`.
+- `ops_control_plane_policy.schema_version` is required and currently pinned to `2.0`.
+- `ops_control_plane_policy.state_machine` is required and must emit runtime transition evidence in `release-control-plane-report.json`.
+- `ops_control_plane_policy.rollback_orchestration` is required and controls deterministic rollback self-healing trigger behavior.
+- `ops_control_plane_policy.decision_trail` is required and controls deterministic decision-trail evidence emission (`release-control-plane-decision-trail.json`).
+- Control-plane mode contract:
+  - `Validate`
+  - `CanaryCycle`
+  - `PromotePrerelease`
+  - `PromoteStable`
+  - `FullCycle`
+- Release-control-plane dispatch tags must follow SemVer channel strategy:
+  - canary: `vX.Y.Z-canary.N`
+  - prerelease: `vX.Y.Z-rc.N` (promoted from semver canary)
+  - stable: `vX.Y.Z` (promoted from semver prerelease)
+- Stable promotion window policy must be explicit under `ops_control_plane_policy.stable_promotion_window`:
+  - `full_cycle_allowed_utc_weekdays`
+  - `allow_outside_window_with_override`
+  - `override_reason_required`
+  - `override_reason_min_length`
+  - `override_reason_pattern`
+  - `override_reason_example`
+- Full-cycle stable promotion must evaluate stable window policy and record deterministic decision codes (`stable_window_open`, `stable_window_closed`, `stable_window_override_applied`) in execution report metadata.
+- Emergency stable override is workflow-dispatch only and audited:
+  - `force_stable_promotion_outside_window`
+  - `force_stable_promotion_reason`
+- Out-of-window stable override reason must satisfy policy regex and include structured reference (`?<reference>`) plus summary (`?<summary>`).
+- Release-control-plane workflow must always publish `release-control-plane-override-audit.json`.
+- Release-control-plane workflow must auto-open incident title `Release Control Plane Stable Override Alert` when out-of-window stable override is applied.
+- Release-control-plane canary hygiene invocation must enforce `TagFamily=semver`.
+- Legacy date-window tags (`v0.YYYYMMDD.N`) may still exist during migration but are non-canonical for control-plane dispatch.
+- Control-plane tag strategy policy must define `ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`) and keep it aligned with signature grace-end during dual-mode transition.
+- When legacy tags are observed, control-plane execution must emit deterministic migration warnings.
+- After `semver_only_enforce_utc`, legacy tag presence must fail control-plane execution with `semver_only_enforcement_violation`.
+- Promotion must gate on source release integrity (required assets + source commit equals branch head).
+- Control-plane must verify every dispatched release before completion: required release assets and `release-manifest.json` (`release_tag`, `channel`, provenance asset names).
+- Control-plane must verify promotion lineage for `PromotePrerelease` and `PromoteStable`: source/target channel, SemVer core equality, and source/target commit SHA equality.
+- Release-control-plane top-level reason codes must remain explicit:
+  - `ops_health_gate_failed`
+  - `ops_unhealthy`
+  - `promotion_source_missing`
+  - `promotion_source_not_prerelease`
+  - `promotion_source_asset_missing`
+  - `promotion_source_not_at_head`
+  - `promotion_lineage_invalid`
+  - `stable_window_override_invalid`
+  - `release_dispatch_report_invalid`
+  - `release_dispatch_watch_timeout`
+  - `release_dispatch_watch_failed`
+  - `release_verification_failed`
+  - `canary_hygiene_failed`
+  - `semver_only_enforcement_violation`
+  - `control_plane_runtime_error`
+- `.github/workflows/weekly-ops-slo-report.yml` must publish machine-readable SLO evidence generated by `scripts/Write-OpsSloReport.ps1`.
+- `.github/workflows/ops-slo-gate.yml` must enforce deterministic SLO gate policy using `scripts/Invoke-OpsSloSelfHealing.ps1`.
+- SLO gate alert thresholds must remain explicit under `ops_control_plane_policy.slo_gate.alert_thresholds`:
+  - `warning_min_success_rate_pct`
+  - `critical_min_success_rate_pct`
+  - `warning_reason_codes`
+  - `critical_reason_codes`
+- SLO gate error budget must remain explicit under `ops_control_plane_policy.error_budget`:
+  - `window_days`
+  - `max_failed_runs`
+  - `max_failure_rate_pct`
+  - `critical_burn_rate_pct`
+- SLO self-healing reason codes must remain explicit:
+  - `already_healthy`
+  - `remediated`
+  - `auto_remediation_disabled`
+  - `remediation_execution_failed`
+  - `remediation_verify_failed`
+  - `slo_self_heal_runtime_error`
+- Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` reason codes must remain explicit:
+  - `workflow_missing_runs`
+  - `workflow_failure_detected`
+  - `workflow_success_rate_below_threshold`
+  - `sync_guard_missing`
+  - `sync_guard_stale`
+  - `error_budget_exhausted`
+  - `error_budget_failure_rate_exceeded`
+  - `slo_gate_runtime_error`
+- `.github/workflows/ops-policy-drift-check.yml` must run `scripts/Test-ReleaseControlPlanePolicyDrift.ps1`.
+- Policy drift reason codes must remain explicit:
+  - `manifest_missing`
+  - `payload_manifest_missing`
+  - `release_client_missing`
+  - `release_client_drift`
+  - `runtime_images_missing`
+  - `ops_control_plane_policy_missing`
+  - `ops_control_plane_schema_version_invalid`
+  - `ops_control_plane_state_machine_missing`
+  - `ops_control_plane_state_machine_version_missing`
+  - `ops_control_plane_rollback_orchestration_missing`
+  - `ops_control_plane_decision_trail_missing`
+  - `ops_control_plane_decision_trail_schema_version_missing`
+  - `ops_control_plane_error_budget_missing`
+  - `ops_control_plane_error_budget_window_days_invalid`
+  - `ops_control_plane_slo_alert_thresholds_missing`
+  - `ops_control_plane_self_healing_missing`
+  - `ops_control_plane_guardrails_missing`
+  - `ops_control_plane_stable_window_missing`
+  - `ops_control_plane_stable_window_reason_pattern_missing`
+  - `ops_control_plane_stable_window_reason_example_missing`
+  - `policy_drift_runtime_error`
+- `.github/workflows/release-rollback-drill.yml` must run `scripts/Invoke-RollbackDrillSelfHealing.ps1`.
+- Rollback self-healing reason codes must remain explicit:
+  - `already_ready`
+  - `remediated`
+  - `auto_remediation_disabled`
+  - `no_automatable_action`
+  - `remediation_execution_failed`
+  - `remediation_verify_failed`
+  - `rollback_self_heal_runtime_error`
+- Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` reason codes must remain explicit:
+  - `rollback_candidate_missing`
+  - `rollback_assets_missing`
+  - `rollback_drill_runtime_error`
+- `.github/workflows/release-race-hardening-drill.yml` must run `scripts/Invoke-ReleaseRaceHardeningDrill.ps1`.
+- Race-hardening drill workflow is release-lane evidence generation and must run on weekly schedule + manual dispatch only.
+- Race-hardening drill must dispatch both `release-workspace-installer.yml` (contender) and `release-control-plane.yml` (`mode=CanaryCycle`, `dry_run=false`) and validate collision handling using control-plane artifact evidence.
+- Race-hardening drill workflow must publish both:
+  - `release-race-hardening-drill-report.json`
+  - `release-race-hardening-weekly-summary.json`
+- Race-hardening drill workflow must manage incident lifecycle through `scripts/Invoke-OpsIncidentLifecycle.ps1` with title `Release Race Hardening Drill Alert`.
+- `.github/workflows/release-race-hardening-gate.yml` must run `scripts/Test-ReleaseRaceHardeningGate.ps1` and provide required check context `Release Race Hardening Drill` for `main` + `integration/*` PR/push lanes.
+- Race-hardening gate must fail when latest successful drill evidence is missing/stale, `reason_code != drill_passed`, or collision evidence is absent.
+- `.github/workflows/branch-protection-drift-check.yml` must run `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and maintain incident lifecycle title `Branch Protection Drift Alert`.
+- `.github/workflows/release-guardrails-autoremediate.yml` must run `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` and maintain incident lifecycle title `Release Guardrails Auto-Remediation Alert`.
+- `.github/workflows/workflow-bot-token-drill.yml` must run `scripts/Test-WorkflowBotTokenHealth.ps1` and maintain incident lifecycle title `Workflow Bot Token Health Alert`.
+- Branch-protection query/apply workflows must require repository secret `WORKFLOW_BOT_TOKEN` and fail fast with deterministic `workflow_bot_token_missing` when the secret is not configured.
+- `scripts/Set-ReleaseBranchProtectionPolicy.ps1` is the deterministic apply path for required-check drift repair.
+- Branch-protection query classifier reason codes must remain explicit:
+  - `branch_protection_query_failed`
+  - `branch_protection_authentication_missing`
+  - `branch_protection_authz_denied`
+- Guardrails self-healing policy must remain explicit under `ops_control_plane_policy.self_healing.guardrails`:
+  - `remediation_workflow`
+  - `race_drill_workflow`
+  - `watch_timeout_minutes`
+  - `verify_after_remediation`
+  - `race_gate_max_age_hours`
+- Guardrails self-healing reason codes must remain explicit:
+  - `already_healthy`
+  - `remediated`
+  - `auto_remediation_disabled`
+  - `no_automatable_action`
+  - `remediation_execution_failed`
+  - `remediation_verify_failed`
+  - `guardrails_self_heal_runtime_error`
+- Guardrails report must include `remediation_hints` when status is fail and auto-remediation cannot fully recover.
+- Race-hardening drill reason codes must remain explicit:
+  - `drill_passed`
+  - `contender_dispatch_report_invalid`
+  - `control_plane_dispatch_report_invalid`
+  - `control_plane_watch_timeout`
+  - `control_plane_collision_not_observed`
+  - `control_plane_report_download_failed`
+  - `control_plane_report_missing`
+  - `control_plane_run_failed`
+  - `race_hardening_drill_runtime_error`
+- Operational incident handling runbook is `docs/runbooks/release-ops-incident-response.md`.
+
 ## Integration Gate Policy
 - `.github/workflows/integration-gate.yml` is the integration-branch aggregator workflow.
-- It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`.
+- It must run on `push` + `pull_request` for `main` and `integration/*` (plus dispatch).
+- It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`, `Release Race Hardening Drill`.
+- It must evaluate commit check-runs (not legacy commit status contexts) and treat `success`, `neutral`, and `skipped` as pass states.
 - Keep this as a distinct check context (`Integration Gate`) for branch-protection phase-in after promotion criteria are met.
 
 ## Installer Harness Execution Contract
@@ -161,6 +412,12 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `-Mode full` for isolated smoke install validation.
   - `-Watch` to auto-rerun on contract file changes without manual restarts.
 - Use `scripts/Invoke-DockerDesktopLinuxIteration.ps1 -DockerContext desktop-linux` for Docker Desktop Linux command-surface checks (`runner-cli --help`, `runner-cli ppl --help`) before full Windows LabVIEW image runs.
+- Use `scripts/Invoke-WindowsContainerNsisSelfTest.ps1` to build the workspace NSIS installer and run silent install (`/S`) inside the same Windows container with `ContainerSmoke` execution context; this image is aligned to `nationalinstruments/labview:2026q1-windows` and fails fast with `windows_container_mode_required` if Docker is not in Windows container mode.
+- Use `scripts/Invoke-LinuxContainerNsisParity.ps1 -DockerContext desktop-linux` for parity checks aligned to `nationalinstruments/labview:2026q1-linux`; this lane compiles NSIS smoke output but does not execute Windows installers on Linux.
+- Use `scripts/Invoke-ReleaseControlPlaneLocalDocker.ps1` for local containerized release-control-plane exercise (`Validate` + `DryRun` default).
+- Portable ops runtime image hierarchy is required:
+  - base image: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+  - derived image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
 - If Docker Desktop Linux context is unavailable, confirm `Microsoft-Hyper-V-All`, `VirtualMachinePlatform`, and `Microsoft-Windows-Subsystem-Linux` are enabled, then reboot before retrying.
 - Use `scripts/Test-RunnerCliBundleDeterminism.ps1` and `scripts/Test-WorkspaceInstallerDeterminism.ps1` locally before proposing release-tag publication.
 - Keep local iteration artifacts under `artifacts\release\iteration`.

@@ -1,0 +1,54 @@
+name: weekly-ops-slo-report
+
+on:
+  schedule:
+    - cron: '10 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: Lookback window in days for SLO calculation.
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  weekly-ops-slo-report:
+    name: Weekly Ops SLO Report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build weekly SLO report
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'weekly-ops-slo-report.json'
+          $lookbackDaysText = [string]'${{ inputs.lookback_days }}'
+          $lookbackDays = 7
+          if (-not [string]::IsNullOrWhiteSpace($lookbackDaysText)) {
+            $parsed = 0
+            if (-not [int]::TryParse($lookbackDaysText, [ref]$parsed)) {
+              throw "lookback_days must be an integer. actual='$lookbackDaysText'"
+            }
+            $lookbackDays = $parsed
+          }
+
+          & pwsh -NoProfile -File ./scripts/Write-OpsSloReport.ps1 `
+            -SurfaceRepository '${{ github.repository }}' `
+            -LookbackDays $lookbackDays `
+            -OutputPath $reportPath
+
+      - name: Upload weekly SLO report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-ops-slo-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/weekly-ops-slo-report.json
+          if-no-files-found: error

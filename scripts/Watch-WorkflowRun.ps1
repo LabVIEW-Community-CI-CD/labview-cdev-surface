@@ -33,14 +33,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
         throw 'run_id_or_workflow_required: provide -RunId or both -WorkflowFile and -Branch.'
     }
 
-    $latest = @(Invoke-GhJson -Arguments @(
-        'run', 'list',
-        '-R', $Repository,
-        '--workflow', $WorkflowFile,
-        '--branch', $Branch,
-        '--limit', '1',
-        '--json', 'databaseId,url,status,conclusion,createdAt'
-    )) | Select-Object -First 1
+    $latest = @(Get-GhWorkflowRunsPortable -Repository $Repository -Workflow $WorkflowFile -Branch $Branch -Limit 1) | Select-Object -First 1
 
     if ($null -eq $latest) {
         throw 'run_not_found: no workflow runs available to watch.'

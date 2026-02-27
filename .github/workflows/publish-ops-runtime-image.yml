@@ -1,0 +1,113 @@
+name: publish-ops-runtime-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote_v1:
+        description: Also refresh the v1 tag.
+        required: false
+        default: true
+        type: boolean
+      additional_tag:
+        description: Optional extra tag (for example canary or rc1).
+        required: false
+        default: ''
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - tools/ops-runtime/Dockerfile
+      - scripts/Invoke-PortableOps.ps1
+      - scripts/Invoke-ReleaseControlPlaneLocalDocker.ps1
+      - tools/ops-runtime/README.md
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-ops-runtime-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Ops Runtime Image
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve deterministic tags
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          date_utc="$(date -u +%Y%m%d)"
+          short_sha="${GITHUB_SHA:0:12}"
+          promote_v1="${{ github.event.inputs.promote_v1 }}"
+          additional_tag="${{ github.event.inputs.additional_tag }}"
+
+          if [[ -z "$promote_v1" ]]; then
+            promote_v1="true"
+          fi
+
+          if [[ -n "$additional_tag" ]] && [[ ! "$additional_tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "additional_tag must match ^[A-Za-z0-9._-]+$" >&2
+            exit 1
+          fi
+
+          tags=()
+          tags+=("${IMAGE_REPO}:sha-${short_sha}")
+          tags+=("${IMAGE_REPO}:v1-${date_utc}")
+          if [[ "$promote_v1" == "true" ]]; then
+            tags+=("${IMAGE_REPO}:v1")
+          fi
+          if [[ -n "$additional_tag" ]]; then
+            tags+=("${IMAGE_REPO}:${additional_tag}")
+          fi
+
+          {
+            echo "date_utc=$date_utc"
+            echo "short_sha=$short_sha"
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/ops-runtime
+          file: ./tools/ops-runtime/Dockerfile
+          push: true
+          tags: ${{ steps.resolve.outputs.tags }}
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "## Ops Runtime Image Published"
+            echo ""
+            echo "- Image: \`${IMAGE_REPO}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              echo "  - \`$tag\`"
+            done <<< "${{ steps.resolve.outputs.tags }}"
+          } >> "$GITHUB_STEP_SUMMARY"

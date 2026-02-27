@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to publish (for example, v0.1.0).
+        description: "Release tag to publish (SemVer preferred: vX.Y.Z / vX.Y.Z-rc.N / vX.Y.Z-canary.N; legacy migration: v0.YYYYMMDD.N)."
         required: true
         type: string
       allow_existing_tag:
@@ -17,9 +17,18 @@ on:
         required: false
         default: false
         type: boolean
+      release_channel:
+        description: Explicit release channel metadata (stable, prerelease, canary). Leave blank to derive from prerelease.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-workspace-installer-${{ github.repository }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
 
 jobs:
   release-workspace-installer:
@@ -29,4 +38,5 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       allow_existing_tag: ${{ inputs.allow_existing_tag }}
       prerelease: ${{ inputs.prerelease }}
+      release_channel: ${{ inputs.release_channel }}
     secrets: inherit

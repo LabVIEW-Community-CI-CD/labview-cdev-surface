@@ -1,0 +1,270 @@
+name: publish-windows-nsis-parity-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote_latest:
+        description: Also refresh the latest tag.
+        required: false
+        default: false
+        type: boolean
+      additional_tag:
+        description: Optional extra tag (for example canary or rc1).
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-windows-nsis-parity-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Windows NSIS Parity Image
+    runs-on: [self-hosted, windows, windows-containers, cdev-surface-windows-gate]
+    env:
+      IMAGE_REPO: ghcr.io/labview-community-ci-cd/labview-cdev-surface-nsis-windows-parity
+      BASE_TAG: 2026q1-windows
+      WINDOWS_DOCKER_CONTEXT: ${{ vars.WINDOWS_DOCKER_CONTEXT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve deterministic tags
+        id: resolve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $dateUtc = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12).ToLowerInvariant()
+          $promoteLatest = '${{ github.event.inputs.promote_latest }}'
+          $additionalTag = '${{ github.event.inputs.additional_tag }}'
+
+          if ([string]::IsNullOrWhiteSpace($promoteLatest)) {
+            $promoteLatest = 'false'
+          }
+          if ($promoteLatest -notin @('true', 'false')) {
+            throw "promote_latest must be true or false (got '$promoteLatest')."
+          }
+          if (-not [string]::IsNullOrWhiteSpace($additionalTag) -and $additionalTag -notmatch '^[A-Za-z0-9._-]+$') {
+            throw "additional_tag must match ^[A-Za-z0-9._-]+$."
+          }
+
+          $tags = @(
+            "$env:IMAGE_REPO`:sha-$shortSha",
+            "$env:IMAGE_REPO`:$env:BASE_TAG-$dateUtc"
+          )
+          if ($promoteLatest -eq 'true') {
+            $tags += "$env:IMAGE_REPO`:latest"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($additionalTag)) {
+            $tags += "$env:IMAGE_REPO`:$additionalTag"
+          }
+
+          $localImage = "labview-cdev-surface-nsis-windows-parity:selftest-$shortSha"
+          $tagsCsv = [string]::Join('|', $tags)
+
+          "date_utc=$dateUtc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "short_sha=$shortSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "local_image=$localImage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tags_csv=$tagsCsv" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tags<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $tags | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Resolve Windows Docker context
+        id: resolve_context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $candidateContexts = New-Object System.Collections.Generic.List[string]
+          $requestedContext = $env:WINDOWS_DOCKER_CONTEXT
+          if (-not [string]::IsNullOrWhiteSpace($requestedContext)) {
+            $candidateContexts.Add($requestedContext)
+          }
+          $candidateContexts.Add('')
+          $candidateContexts.Add('desktop-windows')
+
+          $seen = @{}
+          $resolvedContext = $null
+          foreach ($candidate in $candidateContexts) {
+            if ($seen.ContainsKey($candidate)) {
+              continue
+            }
+            $seen[$candidate] = $true
+
+            $dockerArgs = @()
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+              $dockerArgs += @('--context', $candidate)
+            }
+
+            $osType = $null
+            try {
+              $osType = & docker @($dockerArgs + @('info', '--format', '{{.OSType}}')) 2>$null
+            } catch {
+              continue
+            }
+            if ($LASTEXITCODE -ne 0 -or $null -eq $osType) {
+              continue
+            }
+            $osTypeNormalized = ([string]$osType).Trim().ToLowerInvariant()
+            if ($osTypeNormalized -eq 'windows') {
+              $resolvedContext = $candidate
+              break
+            }
+          }
+
+          if ($null -eq $resolvedContext) {
+            $dockerCliExe = Join-Path $env:ProgramFiles 'Docker\Docker\DockerCli.exe'
+            if (Test-Path -LiteralPath $dockerCliExe -PathType Leaf) {
+              try {
+                & $dockerCliExe -SwitchWindowsEngine | Out-Host
+                if ($LASTEXITCODE -eq 0) {
+                  for ($attempt = 1; $attempt -le 12; $attempt++) {
+                    Start-Sleep -Seconds 5
+                    $osTypeAfterSwitch = $null
+                    try {
+                      $osTypeAfterSwitch = & docker info --format '{{.OSType}}' 2>$null
+                    } catch {
+                      continue
+                    }
+                    if ($LASTEXITCODE -eq 0 -and $null -ne $osTypeAfterSwitch) {
+                      $osTypeAfterSwitchNormalized = ([string]$osTypeAfterSwitch).Trim().ToLowerInvariant()
+                      if ($osTypeAfterSwitchNormalized -eq 'windows') {
+                        $resolvedContext = ''
+                        break
+                      }
+                    }
+                  }
+                }
+              } catch {
+                Write-Warning "docker_switch_windows_engine_failed: $($_.Exception.Message)"
+              }
+            }
+          }
+
+          if ($null -eq $resolvedContext) {
+            throw "windows_container_mode_required: unable to resolve a Windows Docker context. Set repository variable WINDOWS_DOCKER_CONTEXT or switch Docker Desktop to Windows containers."
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($resolvedContext)) {
+            & docker context use $resolvedContext | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+              throw "docker_context_switch_failed: failed to activate Docker context '$resolvedContext'."
+            }
+          }
+
+          "resolved_windows_docker_context=$resolvedContext" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Exercise silent installer in Windows container
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outputRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release\windows-container-nsis-selftest-publish'
+          $resolvedContext = '${{ steps.resolve_context.outputs.resolved_windows_docker_context }}'
+          $scriptArgs = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', '.\scripts\Invoke-WindowsContainerNsisSelfTest.ps1',
+            '-Image', '${{ steps.resolve.outputs.local_image }}',
+            '-BuildLocalImage',
+            '-OutputRoot', $outputRoot
+          )
+          if (-not [string]::IsNullOrWhiteSpace($resolvedContext)) {
+            $scriptArgs += @('-DockerContext', $resolvedContext)
+          }
+
+          & pwsh @scriptArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invoke-WindowsContainerNsisSelfTest.ps1 failed with exit code $LASTEXITCODE."
+          }
+
+          $reportPath = Join-Path $outputRoot 'windows-container-nsis-selftest-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Windows self-test report missing: $reportPath"
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$report.status -ne 'succeeded') {
+            throw "Windows self-test report status is '$([string]$report.status)' (expected 'succeeded')."
+          }
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish image tags
+        id: publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $localImage = '${{ steps.resolve.outputs.local_image }}'
+          $imagePresent = (& docker image inspect $localImage 2>$null)
+          if ($LASTEXITCODE -ne 0 -or -not $imagePresent) {
+            throw "Local image missing after self-test build: $localImage"
+          }
+
+          $tagsRaw = '${{ steps.resolve.outputs.tags_csv }}'
+          $tags = @($tagsRaw.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          if ($tags.Count -eq 0) {
+            throw 'No publish tags resolved.'
+          }
+
+          $digest = ''
+          foreach ($tag in $tags) {
+            & docker tag $localImage $tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "docker tag failed for '$tag'."
+            }
+
+            $pushOutput = & docker push $tag 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $pushOutput | ForEach-Object { Write-Host $_ }
+              throw "docker push failed for '$tag'."
+            }
+            $pushOutput | ForEach-Object { Write-Host $_ }
+
+            $pushText = ($pushOutput | Out-String)
+            $digestMatch = [regex]::Match($pushText, 'digest:\s*(sha256:[0-9a-f]{64})')
+            if (-not $digestMatch.Success) {
+              throw "Unable to parse digest from docker push output for '$tag'."
+            }
+
+            $tagDigest = $digestMatch.Groups[1].Value.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($digest)) {
+              $digest = $tagDigest
+            } elseif ($digest -ne $tagDigest) {
+              throw "Digest mismatch across tags. expected '$digest' got '$tagDigest' for '$tag'."
+            }
+          }
+
+          "digest=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish summary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $tagsRaw = '${{ steps.resolve.outputs.tags_csv }}'
+          $tags = @($tagsRaw.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '## Windows NSIS Parity Image Published'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ''
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Image: ``$env:IMAGE_REPO``"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Digest: ``${{ steps.publish.outputs.digest }}``"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Commit: ``$env:GITHUB_SHA``"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Silent self-test: ``Invoke-WindowsContainerNsisSelfTest.ps1`` passed"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Tags:'
+          foreach ($tag in $tags) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "  - ``$tag``"
+          }

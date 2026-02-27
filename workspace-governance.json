@@ -203,6 +203,201 @@
         ],
         "linux_parity_override_image": "nationalinstruments/labview:2025q3-linux@sha256:9938561c6460841674f9b1871d8562242f51fe9fb72a2c39c66608491edf429c"
       }
+    },
+    "release_client": {
+      "schema_version": "1.0",
+      "allowed_repositories": [
+        "LabVIEW-Community-CI-CD/labview-cdev-surface",
+        "svelderrainruiz/labview-cdev-surface"
+      ],
+      "channel_rules": {
+        "default_channel": "stable",
+        "allowed_channels": [
+          "stable",
+          "prerelease",
+          "canary"
+        ],
+        "prerelease_requires_opt_in": true,
+        "canary_requires_opt_in": true,
+        "canary_tag_regex": "(?i)canary"
+      },
+      "signature_policy": {
+        "provider": "authenticode",
+        "mode": "dual-mode-transition",
+        "dual_mode_start_utc": "2026-03-15T00:00:00Z",
+        "canary_enforce_utc": "2026-05-15T00:00:00Z",
+        "grace_end_utc": "2026-07-01T00:00:00Z",
+        "require_timestamp": true,
+        "allow_unsigned_before_dual_mode_start": true
+      },
+      "provenance_required": true,
+      "default_install_root": "C:\\dev",
+      "upgrade_policy": {
+        "allow_downgrade": false,
+        "allow_major_upgrade": false,
+        "allow_prerelease_upgrade_without_opt_in": false
+      },
+      "state_path": "C:\\dev\\artifacts\\workspace-release-state.json",
+      "latest_report_path": "C:\\dev\\artifacts\\workspace-release-client-latest.json",
+      "policy_path": "C:\\dev\\workspace-governance\\release-policy.json",
+      "runtime_images": {
+        "cdev_cli_runtime": {
+          "canonical_repository": "ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime",
+          "source_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
+          "source_commit": "8fef6f9192d81a14add28636c1100c109ae5e977",
+          "digest": "sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423"
+        },
+        "ops_runtime": {
+          "repository": "ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops",
+          "base_repository": "ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime",
+          "base_digest": "sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423"
+        }
+      },
+      "ops_control_plane_policy": {
+        "schema_version": "2.0",
+        "slo_gate": {
+          "lookback_days": 7,
+          "min_success_rate_pct": 100,
+          "max_sync_guard_age_hours": 12,
+          "alert_thresholds": {
+            "warning_min_success_rate_pct": 99.5,
+            "critical_min_success_rate_pct": 99,
+            "warning_reason_codes": [
+              "workflow_missing_runs",
+              "workflow_success_rate_below_threshold"
+            ],
+            "critical_reason_codes": [
+              "workflow_failure_detected",
+              "sync_guard_missing",
+              "sync_guard_stale",
+              "slo_gate_runtime_error"
+            ]
+          },
+          "required_workflows": [
+            "ops-monitoring",
+            "ops-autoremediate",
+            "release-control-plane"
+          ]
+        },
+        "error_budget": {
+          "window_days": 7,
+          "max_failed_runs": 0,
+          "max_failure_rate_pct": 0,
+          "critical_burn_rate_pct": 100
+        },
+        "state_machine": {
+          "version": "1.0",
+          "initial_state": "ops_health_preflight",
+          "terminal_states": [
+            "completed",
+            "failed"
+          ],
+          "transitions": {
+            "ops_health_preflight": {
+              "on_pass": "release_dispatch",
+              "on_fail": "auto_remediation"
+            },
+            "auto_remediation": {
+              "on_pass": "ops_health_verify",
+              "on_fail": "rollback_orchestration"
+            },
+            "ops_health_verify": {
+              "on_pass": "release_dispatch",
+              "on_fail": "rollback_orchestration"
+            },
+            "release_dispatch": {
+              "on_pass": "completed",
+              "on_fail": "rollback_orchestration"
+            },
+            "rollback_orchestration": {
+              "on_pass": "failed_recovered",
+              "on_fail": "failed"
+            }
+          }
+        },
+        "rollback_orchestration": {
+          "enabled": true,
+          "trigger_reason_codes": [
+            "ops_health_gate_failed",
+            "ops_unhealthy",
+            "release_dispatch_watch_timeout",
+            "release_dispatch_watch_failed",
+            "release_dispatch_attempts_exhausted",
+            "release_verification_failed"
+          ],
+          "run_on_dry_run": false
+        },
+        "decision_trail": {
+          "schema_version": "1.0",
+          "artifact_name_prefix": "release-control-plane-decision-trail",
+          "hash_algorithm": "sha256",
+          "include_state_machine": true,
+          "include_rollback_orchestration": true
+        },
+        "incident_lifecycle": {
+          "auto_close_on_recovery": true,
+          "reopen_on_regression": true,
+          "titles": [
+            "Ops Monitoring Alert",
+            "Ops Auto-Remediation Alert",
+            "Release Control Plane Alert",
+            "Ops SLO Gate Alert",
+            "Ops Policy Drift Alert",
+            "Release Guardrails Auto-Remediation Alert",
+            "Release Rollback Drill Alert",
+            "Workflow Bot Token Health Alert"
+          ]
+        },
+        "tag_strategy": {
+          "mode": "dual-mode-semver-preferred",
+          "legacy_tag_family": "legacy_date_window",
+          "semver_only_enforce_utc": "2026-07-01T00:00:00Z"
+        },
+        "stable_promotion_window": {
+          "full_cycle_allowed_utc_weekdays": [
+            "Monday"
+          ],
+          "allow_outside_window_with_override": true,
+          "override_reason_required": true,
+          "override_reason_min_length": 12,
+          "override_reason_pattern": "^(?<reference>(?i:(?:CHG|INC|RFC|PR|TASK)-\\d{3,}|#\\d+))\\s*[:\\-]\\s*(?<summary>.+\\S)$",
+          "override_reason_example": "CHG-1234: emergency stable promotion after incident remediation"
+        },
+        "self_healing": {
+          "enabled": true,
+          "max_attempts": 1,
+          "slo_gate": {
+            "remediation_workflow": "ops-autoremediate.yml",
+            "watch_timeout_minutes": 45,
+            "verify_after_remediation": true
+          },
+          "guardrails": {
+            "remediation_workflow": "release-guardrails-autoremediate.yml",
+            "race_drill_workflow": "release-race-hardening-drill.yml",
+            "watch_timeout_minutes": 120,
+            "verify_after_remediation": true,
+            "race_gate_max_age_hours": 168
+          },
+          "rollback_drill": {
+            "release_workflow": "release-workspace-installer.yml",
+            "release_branch": "main",
+            "watch_timeout_minutes": 120,
+            "verify_after_remediation": true,
+            "canary_sequence_min": 1,
+            "canary_sequence_max": 49
+          }
+        },
+        "rollback_drill": {
+          "channel": "canary",
+          "required_history_count": 2,
+          "release_limit": 100
+        }
+      },
+      "cdev_cli_sync": {
+        "primary_repo": "svelderrainruiz/labview-cdev-cli",
+        "mirror_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
+        "strategy": "fork-and-upstream-full-sync"
+      }
     }
   },
   "managed_repos": [
@@ -503,3 +698,4 @@
     }
   ]
 }
+

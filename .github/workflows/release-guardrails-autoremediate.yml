@@ -1,0 +1,244 @@
+name: release-guardrails-autoremediate
+
+on:
+  schedule:
+    - cron: '25 * * * *'
+  workflow_dispatch:
+    inputs:
+      race_gate_max_age_hours:
+        description: Maximum age of latest successful release race-hardening drill run.
+        required: false
+        default: '168'
+        type: string
+      auto_self_heal:
+        description: Apply bounded autonomous remediation actions.
+        required: false
+        default: true
+        type: boolean
+      max_attempts:
+        description: Maximum remediation attempts.
+        required: false
+        default: '1'
+        type: string
+      drill_watch_timeout_minutes:
+        description: Timeout minutes while watching release race-hardening drill remediation run.
+        required: false
+        default: '120'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  release-guardrails-autoremediate:
+    name: Release Guardrails Auto-Remediation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate workflow bot token
+        shell: pwsh
+        env:
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+            throw "workflow_bot_token_missing: Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with repository administration read/write and actions write scopes."
+          }
+
+      - name: Execute release guardrails auto-remediation
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-guardrails-autoremediate-report.json'
+
+          function Write-InvalidInputReport {
+            param(
+              [Parameter(Mandatory = $true)][string]$Message,
+              [Parameter(Mandatory = $true)][object]$InputSnapshot
+            )
+
+            $report = [ordered]@{
+              schema_version = '1.0'
+              generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+              repository = '${{ github.repository }}'
+              branch = 'main'
+              drill_workflow = 'release-race-hardening-drill.yml'
+              race_gate_max_age_hours = [string]$InputSnapshot.race_gate_max_age_hours
+              auto_self_heal = [string]$InputSnapshot.auto_self_heal
+              max_attempts = [string]$InputSnapshot.max_attempts
+              drill_watch_timeout_minutes = [string]$InputSnapshot.drill_watch_timeout_minutes
+              status = 'fail'
+              reason_code = 'invalid_input'
+              message = $Message
+              remediation_hints = @(
+                'Provide race_gate_max_age_hours between 1 and 720.',
+                'Provide max_attempts between 1 and 5.',
+                'Provide drill_watch_timeout_minutes between 5 and 240.',
+                'Provide auto_self_heal as true or false.'
+              )
+              initial_assessment = $null
+              remediation_attempts = @()
+              final_assessment = $null
+            }
+
+            $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
+          }
+
+          $inputSnapshot = [ordered]@{
+            race_gate_max_age_hours = [string]'${{ inputs.race_gate_max_age_hours }}'
+            auto_self_heal = [string]'${{ inputs.auto_self_heal }}'
+            max_attempts = [string]'${{ inputs.max_attempts }}'
+            drill_watch_timeout_minutes = [string]'${{ inputs.drill_watch_timeout_minutes }}'
+          }
+
+          try {
+            $raceGateMaxAgeText = [string]$inputSnapshot.race_gate_max_age_hours
+            $raceGateMaxAgeHours = 168
+            if (-not [string]::IsNullOrWhiteSpace($raceGateMaxAgeText)) {
+              $parsedRaceGateMaxAge = 0
+              if (-not [int]::TryParse($raceGateMaxAgeText, [ref]$parsedRaceGateMaxAge)) {
+                throw "race_gate_max_age_hours must be an integer. actual='$raceGateMaxAgeText'"
+              }
+              if ($parsedRaceGateMaxAge -lt 1 -or $parsedRaceGateMaxAge -gt 720) {
+                throw "race_gate_max_age_hours must be between 1 and 720. actual='$raceGateMaxAgeText'"
+              }
+              $raceGateMaxAgeHours = $parsedRaceGateMaxAge
+            }
+
+            $maxAttemptsText = [string]$inputSnapshot.max_attempts
+            $maxAttempts = 1
+            if (-not [string]::IsNullOrWhiteSpace($maxAttemptsText)) {
+              $parsedMaxAttempts = 0
+              if (-not [int]::TryParse($maxAttemptsText, [ref]$parsedMaxAttempts)) {
+                throw "max_attempts must be an integer. actual='$maxAttemptsText'"
+              }
+              if ($parsedMaxAttempts -lt 1 -or $parsedMaxAttempts -gt 5) {
+                throw "max_attempts must be between 1 and 5. actual='$maxAttemptsText'"
+              }
+              $maxAttempts = $parsedMaxAttempts
+            }
+
+            $watchTimeoutText = [string]$inputSnapshot.drill_watch_timeout_minutes
+            $watchTimeoutMinutes = 120
+            if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
+              $parsedWatchTimeout = 0
+              if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeout)) {
+                throw "drill_watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+              }
+              if ($parsedWatchTimeout -lt 5 -or $parsedWatchTimeout -gt 240) {
+                throw "drill_watch_timeout_minutes must be between 5 and 240. actual='$watchTimeoutText'"
+              }
+              $watchTimeoutMinutes = $parsedWatchTimeout
+            }
+
+            $autoSelfHealText = [string]$inputSnapshot.auto_self_heal
+            $autoSelfHeal = $true
+            if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
+              try {
+                $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
+              } catch {
+                throw "auto_self_heal must be a boolean. actual='$autoSelfHealText'"
+              }
+            }
+
+            & pwsh -NoProfile -File ./scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1 `
+              -Repository '${{ github.repository }}' `
+              -Branch 'main' `
+              -RaceGateMaxAgeHours $raceGateMaxAgeHours `
+              -AutoSelfHeal:$autoSelfHeal `
+              -MaxAttempts $maxAttempts `
+              -DrillWatchTimeoutMinutes $watchTimeoutMinutes `
+              -OutputPath $reportPath
+          } catch {
+            $failureMessage = [string]$_.Exception.Message
+            if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf) -and (
+              $failureMessage -match '^race_gate_max_age_hours must be ' -or
+              $failureMessage -match '^max_attempts must be ' -or
+              $failureMessage -match '^drill_watch_timeout_minutes must be ' -or
+              $failureMessage -match '^auto_self_heal must be '
+            )) {
+              Write-InvalidInputReport -Message ("invalid_input: $failureMessage") -InputSnapshot $inputSnapshot
+            }
+
+            throw
+          }
+
+      - name: Upload release guardrails auto-remediation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-guardrails-autoremediate-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-guardrails-autoremediate-report.json
+          if-no-files-found: error
+
+      - name: Update release guardrails incident issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Guardrails Auto-Remediation Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-guardrails-autoremediate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release guardrails report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $body = @"
+          Release guardrails auto-remediation failed.
+
+          - Run: $env:RUN_URL
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Repository: $($report.repository)
+          - Branch: $($report.branch)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close release guardrails incident issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Guardrails Auto-Remediation Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-guardrails-autoremediate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release guardrails report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $body = @"
+          Release guardrails auto-remediation recovered.
+
+          - Run: $env:RUN_URL
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Repository: $($report.repository)
+          - Branch: $($report.branch)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

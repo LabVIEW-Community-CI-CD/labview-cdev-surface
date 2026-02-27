@@ -1,0 +1,245 @@
+name: release-race-hardening-drill
+
+on:
+  schedule:
+    - cron: '40 9 * * 2'
+  workflow_dispatch:
+    inputs:
+      auto_remediate:
+        description: Allow release-control-plane to auto-remediate ops drift before canary dispatch.
+        required: false
+        default: true
+        type: boolean
+      keep_latest_canary_n:
+        description: Number of latest SemVer canary tags to keep after control-plane canary publish.
+        required: false
+        default: '1'
+        type: string
+      watch_timeout_minutes:
+        description: Timeout minutes for contender and control-plane workflow watches.
+        required: false
+        default: '120'
+        type: string
+      force_control_plane_watch_timeout:
+        description: Force a deterministic control-plane watch-timeout failure for incident-path drills.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  release-race-hardening-drill:
+    name: Release Race Hardening Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enforce hosted-runner lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerEnvironment = [string]$env:RUNNER_ENVIRONMENT
+          if ($runnerEnvironment -ne 'github-hosted') {
+            throw "hosted_runner_required: release-race-hardening-drill must run on a github-hosted runner. actual='$runnerEnvironment'"
+          }
+
+      - name: Execute release race-hardening drill
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-drill-report.json'
+
+          $keepLatestCanaryNText = [string]'${{ inputs.keep_latest_canary_n }}'
+          $keepLatestCanaryN = 1
+          if (-not [string]::IsNullOrWhiteSpace($keepLatestCanaryNText)) {
+            $parsedKeepLatestCanaryN = 0
+            if (-not [int]::TryParse($keepLatestCanaryNText, [ref]$parsedKeepLatestCanaryN)) {
+              throw "keep_latest_canary_n must be an integer. actual='$keepLatestCanaryNText'"
+            }
+            $keepLatestCanaryN = $parsedKeepLatestCanaryN
+          }
+
+          $watchTimeoutText = [string]'${{ inputs.watch_timeout_minutes }}'
+          $watchTimeoutMinutes = 120
+          if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
+            $parsedWatchTimeoutMinutes = 0
+            if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeoutMinutes)) {
+              throw "watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+            }
+            $watchTimeoutMinutes = $parsedWatchTimeoutMinutes
+          }
+
+          $autoRemediateText = [string]'${{ inputs.auto_remediate }}'
+          $autoRemediate = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoRemediateText)) {
+            $autoRemediate = [System.Convert]::ToBoolean($autoRemediateText)
+          }
+
+          $forceControlPlaneWatchTimeoutText = [string]'${{ inputs.force_control_plane_watch_timeout }}'
+          $forceControlPlaneWatchTimeout = $false
+          if (-not [string]::IsNullOrWhiteSpace($forceControlPlaneWatchTimeoutText)) {
+            $forceControlPlaneWatchTimeout = [System.Convert]::ToBoolean($forceControlPlaneWatchTimeoutText)
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-ReleaseRaceHardeningDrill.ps1 `
+            -Repository '${{ github.repository }}' `
+            -Branch 'main' `
+            -AutoRemediate:$autoRemediate `
+            -KeepLatestCanaryN $keepLatestCanaryN `
+            -WatchTimeoutMinutes $watchTimeoutMinutes `
+            -ForceControlPlaneWatchTimeout:$forceControlPlaneWatchTimeout `
+            -OutputPath $reportPath
+
+      - name: Upload release race-hardening drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-race-hardening-drill-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-race-hardening-drill-report.json
+          if-no-files-found: error
+
+      - name: Write release race-hardening weekly summary
+        if: always()
+        shell: pwsh
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release race-hardening drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $summaryPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-weekly-summary.json'
+          $summary = [ordered]@{
+            schema_version = '1.0'
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+            repository = '${{ github.repository }}'
+            run_id = '${{ github.run_id }}'
+            run_url = $env:RUN_URL
+            workflow = 'release-race-hardening-drill.yml'
+            status = [string]$report.status
+            reason_code = [string]$report.reason_code
+            collision_observed = [bool]$report.evidence.collision_observed
+            collision_retries = [int]$report.evidence.collision_retries
+            collision_signals = @($report.evidence.collision_signals | ForEach-Object { [string]$_ })
+            predicted_target_tag = [string]$report.evidence.predicted_target_tag
+            final_target_tag = [string]$report.evidence.final_target_tag
+            dispatch_status = [string]$report.evidence.dispatch_status
+            release_verification_status = [string]$report.evidence.release_verification_status
+            control_plane_report_artifact = [string]$report.artifacts.control_plane_report_artifact
+          }
+          $summary | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+
+          if (-not [string]::IsNullOrWhiteSpace([string]$env:GITHUB_STEP_SUMMARY)) {
+            $collisionSignals = @($summary.collision_signals)
+            $collisionSignalsText = if ($collisionSignals.Count -gt 0) { [string]::Join(', ', $collisionSignals) } else { 'none' }
+            @(
+              '## Release Race Hardening Drill Summary',
+              "",
+              "- Run: $env:RUN_URL",
+              "- Status: $($summary.status)",
+              "- Reason code: $($summary.reason_code)",
+              "- Collision observed: $($summary.collision_observed)",
+              "- Collision retries: $($summary.collision_retries)",
+              "- Collision signals: $collisionSignalsText",
+              "- Predicted target tag: $($summary.predicted_target_tag)",
+              "- Final target tag: $($summary.final_target_tag)",
+              "- Release verification status: $($summary.release_verification_status)"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload release race-hardening weekly summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-race-hardening-weekly-summary-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-race-hardening-weekly-summary.json
+          if-no-files-found: error
+
+      - name: Update release race-hardening incident issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Race Hardening Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release race-hardening drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $collisionSignals = @($report.evidence.collision_signals | ForEach-Object { [string]$_ })
+          $collisionSignalsText = if ($collisionSignals.Count -gt 0) { [string]::Join(',', $collisionSignals) } else { 'none' }
+          $body = @"
+          Release race-hardening drill failed.
+
+          - Run: $env:RUN_URL
+          - Branch: $($report.branch)
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Predicted target tag: $($report.evidence.predicted_target_tag)
+          - Final target tag: $($report.evidence.final_target_tag)
+          - Collision observed: $($report.evidence.collision_observed)
+          - Collision retries: $($report.evidence.collision_retries)
+          - Collision signals: $collisionSignalsText
+          - Control-plane report artifact: $($report.artifacts.control_plane_report_artifact)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close release race-hardening incident issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Race Hardening Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release race-hardening drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $collisionSignals = @($report.evidence.collision_signals | ForEach-Object { [string]$_ })
+          $collisionSignalsText = if ($collisionSignals.Count -gt 0) { [string]::Join(',', $collisionSignals) } else { 'none' }
+          $body = @"
+          Release race-hardening drill recovered.
+
+          - Run: $env:RUN_URL
+          - Branch: $($report.branch)
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Predicted target tag: $($report.evidence.predicted_target_tag)
+          - Final target tag: $($report.evidence.final_target_tag)
+          - Collision observed: $($report.evidence.collision_observed)
+          - Collision retries: $($report.evidence.collision_retries)
+          - Collision signals: $collisionSignalsText
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

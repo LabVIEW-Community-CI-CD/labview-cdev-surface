@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       release_tag:
-        description: Release tag to publish (for example, v0.1.0).
+        description: "Release tag to publish (SemVer preferred: vX.Y.Z / vX.Y.Z-rc.N / vX.Y.Z-canary.N; legacy migration: v0.YYYYMMDD.N)."
         required: true
         type: string
       allow_existing_tag:
@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_channel:
+        description: Explicit release channel metadata (stable, prerelease, canary).
+        required: false
+        default: ''
+        type: string
       override_applied:
         description: Whether controlled gate override was used.
         required: false
@@ -37,8 +42,76 @@ permissions:
   contents: write
 
 jobs:
+  ops_health_preflight:
+    name: Release Ops Health Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      reason_code: ${{ steps.preflight.outputs.reason_code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: preflight
+        name: Enforce ops health preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-ops-health-preflight.json'
+          try {
+            & pwsh -NoProfile -File ./scripts/Invoke-OpsMonitoringSnapshot.ps1 `
+              -SurfaceRepository '${{ github.repository }}' `
+              -RequiredRunnerLabelsCsv 'self-hosted,windows,self-hosted-windows-lv' `
+              -OutputPath $reportPath
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Ops monitoring snapshot returned non-zero exit.'
+            }
+            "reason_code=ok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            "reason_code=ops_unhealthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            throw "[ops_unhealthy] $($_.Exception.Message)"
+          }
+
+      - name: Upload ops health preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ops-health-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-ops-health-preflight.json
+          if-no-files-found: error
+
+  runner_preflight:
+    name: Release Runner Availability Preflight
+    runs-on: ubuntu-latest
+    needs: [ops_health_preflight]
+    outputs:
+      reason_code: ${{ steps.check.outputs.reason_code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: check
+        name: Validate eligible self-hosted release runner availability
+        uses: ./.github/actions/runner-preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          repository: ${{ github.repository }}
+          required_labels_csv: self-hosted,windows,self-hosted-windows-lv
+          report_path: ${{ runner.temp }}/release-runner-availability-preflight.json
+
+      - name: Upload runner availability preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-runner-availability-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-runner-availability-preflight.json
+          if-no-files-found: error
+
   package:
     name: Package Workspace Installer
+    needs: [ops_health_preflight, runner_preflight]
     runs-on: [self-hosted, windows, self-hosted-windows-lv]
     outputs:
       asset_name: ${{ steps.package.outputs.asset_name }}
@@ -95,6 +168,75 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          $releaseTag = [string]'${{ inputs.release_tag }}'
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            throw 'release_tag is required.'
+          }
+
+          $legacyTagPattern = '^v0\.(?<date>\d{8})\.(?<sequence>\d{1,3})$'
+          $semverTagPattern = '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+          $legacyMatch = [regex]::Match($releaseTag, $legacyTagPattern)
+          $semverMatch = [regex]::Match($releaseTag, $semverTagPattern)
+
+          $tagFamily = ''
+          $channelFromTag = ''
+          $tagImpliesPrerelease = $false
+          $tagMigrationWarning = ''
+
+          if ($legacyMatch.Success) {
+            $sequence = [int]$legacyMatch.Groups['sequence'].Value
+            if ($sequence -ge 1 -and $sequence -le 49) {
+              $channelFromTag = 'canary'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 50 -and $sequence -le 79) {
+              $channelFromTag = 'prerelease'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 80 -and $sequence -le 99) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              throw "Invalid legacy release_tag '$releaseTag'. Sequence must be within 1-99."
+            }
+
+            $tagFamily = 'legacy_date_window'
+            $tagMigrationWarning = "Legacy date-window tag '$releaseTag' is accepted during migration. Prefer SemVer tags (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
+          } elseif ($semverMatch.Success) {
+            $tagFamily = 'semver'
+            $prereleaseLabel = [string]$semverMatch.Groups['prerelease'].Value
+            if ([string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              $tagImpliesPrerelease = $true
+              if ($prereleaseLabel -match '(?i)(^|[.\-])canary([.\-]|$)') {
+                $channelFromTag = 'canary'
+              } else {
+                $channelFromTag = 'prerelease'
+              }
+            }
+          } else {
+            throw "Invalid release_tag '$releaseTag'. Accepted formats: SemVer (vX.Y.Z, vX.Y.Z-rc.N, vX.Y.Z-canary.N) or legacy migration format (v0.YYYYMMDD.N)."
+          }
+
+          $releaseChannel = [string]'${{ inputs.release_channel }}'
+          $isPrereleaseInput = [System.Convert]::ToBoolean([string]'${{ inputs.prerelease }}')
+          if ($isPrereleaseInput -ne $tagImpliesPrerelease) {
+            throw "[channel_tag_mismatch] prerelease input '$isPrereleaseInput' does not match release_tag '$releaseTag' (implied prerelease=$tagImpliesPrerelease)."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = if ($isPrereleaseInput) { 'prerelease' } else { 'stable' }
+          }
+          if ($releaseChannel -notin @('stable', 'prerelease', 'canary')) {
+            throw "Unsupported release channel '$releaseChannel'. Expected stable, prerelease, or canary."
+          }
+          if ($releaseChannel -ne $channelFromTag) {
+            throw "[channel_tag_mismatch] release_channel '$releaseChannel' does not match release_tag '$releaseTag' (implied channel=$channelFromTag)."
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            Write-Warning "[tag_migration_warning] $tagMigrationWarning"
+          }
+
           $assetName = 'lvie-cdev-workspace-installer.exe'
           $releaseRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
           $payloadRoot = Join-Path $releaseRoot 'payload'
@@ -122,6 +264,10 @@ jobs:
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $releaseArtifactRoot = [string]$manifest.installer_contract.release_build_contract.artifact_root
           $parityArtifactRoot = [string]$manifest.installer_contract.container_parity_contract.artifact_root
+          $signaturePolicy = $manifest.installer_contract.release_client.signature_policy
+          $signatureDualModeStartUtc = [DateTime]::Parse([string]$signaturePolicy.dual_mode_start_utc).ToUniversalTime()
+          $signatureCanaryEnforceUtc = [DateTime]::Parse([string]$signaturePolicy.canary_enforce_utc).ToUniversalTime()
+          $signatureGraceEndUtc = [DateTime]::Parse([string]$signaturePolicy.grace_end_utc).ToUniversalTime()
           if ([string]::IsNullOrWhiteSpace($releaseArtifactRoot)) { $releaseArtifactRoot = 'artifacts\release' }
           if ([string]::IsNullOrWhiteSpace($parityArtifactRoot)) { $parityArtifactRoot = 'artifacts\parity' }
 
@@ -169,6 +315,77 @@ jobs:
 
           $assetPath = Join-Path $releaseRoot $assetName
           Copy-Item -LiteralPath $deterministicInstallerPath -Destination $assetPath -Force
+
+          $signatureStatus = 'not_signed'
+          $signatureSubject = ''
+          $signatureThumbprint = ''
+          $signatureTimestampUtc = ''
+          $codesignPfxB64 = [string]'${{ secrets.WORKSPACE_INSTALLER_CODESIGN_PFX_B64 }}'
+          $codesignPfxPassword = [string]'${{ secrets.WORKSPACE_INSTALLER_CODESIGN_PFX_PASSWORD }}'
+          $timestampServer = [string]'${{ vars.WORKSPACE_INSTALLER_TIMESTAMP_SERVER }}'
+          if ([string]::IsNullOrWhiteSpace($timestampServer)) {
+            $timestampServer = 'http://timestamp.digicert.com'
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($codesignPfxB64) -or -not [string]::IsNullOrWhiteSpace($codesignPfxPassword)) {
+            if ([string]::IsNullOrWhiteSpace($codesignPfxB64) -or [string]::IsNullOrWhiteSpace($codesignPfxPassword)) {
+              throw 'Incomplete signing configuration. Configure WORKSPACE_INSTALLER_CODESIGN_PFX_B64 and WORKSPACE_INSTALLER_CODESIGN_PFX_PASSWORD together.'
+            }
+
+            $pfxPath = Join-Path $releaseRoot 'workspace-installer-signing-cert.pfx'
+            [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($codesignPfxB64))
+
+            $securePassword = ConvertTo-SecureString -String $codesignPfxPassword -AsPlainText -Force
+            $certificate = Get-PfxCertificate -FilePath $pfxPath -Password $securePassword
+            if ($null -eq $certificate) {
+              throw 'Failed to load code-signing certificate from PFX.'
+            }
+
+            $signResult = Set-AuthenticodeSignature -FilePath $assetPath -Certificate $certificate -HashAlgorithm SHA256 -TimestampServer $timestampServer
+            if ($null -eq $signResult -or [string]$signResult.Status -ne 'Valid') {
+              throw "Set-AuthenticodeSignature failed. status=$([string]$signResult.Status)"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath $assetPath
+            if ([string]$signature.Status -ne 'Valid') {
+              throw "Signed installer failed signature verification. status=$([string]$signature.Status)"
+            }
+
+            $signatureStatus = 'signed_valid'
+            if ($null -ne $signature.SignerCertificate) {
+              $signatureSubject = [string]$signature.SignerCertificate.Subject
+              $signatureThumbprint = [string]$signature.SignerCertificate.Thumbprint
+            }
+            if ($null -ne $signature.TimeStamperCertificate) {
+              $signatureTimestampUtc = (Get-Date $signature.TimeStamperCertificate.NotBefore).ToUniversalTime().ToString('o')
+            }
+          } else {
+            Write-Warning 'No code-signing certificate configured. Publishing unsigned installer metadata.'
+          }
+
+          $nowUtc = (Get-Date).ToUniversalTime()
+          $signatureRequired = $false
+          $signatureEnforcementState = 'pre_dual_mode'
+          if ($nowUtc -ge $signatureDualModeStartUtc) {
+            $signatureEnforcementState = 'dual_mode_warning'
+            if ($releaseChannel -eq 'canary' -and $nowUtc -ge $signatureCanaryEnforceUtc) {
+              $signatureRequired = $true
+              $signatureEnforcementState = 'canary_enforced'
+            } elseif (($releaseChannel -eq 'stable' -or $releaseChannel -eq 'prerelease') -and $nowUtc -ge $signatureGraceEndUtc) {
+              $signatureRequired = $true
+              $signatureEnforcementState = 'stable_prerelease_enforced'
+            }
+          }
+
+          if ($signatureStatus -ne 'signed_valid') {
+            if ($signatureRequired) {
+              throw "[signature_required] Channel '$releaseChannel' requires signed installer artifacts after policy cutoff. now_utc=$($nowUtc.ToString('o')) signature_status=$signatureStatus"
+            }
+            if ($nowUtc -ge $signatureDualModeStartUtc) {
+              Write-Warning "[signature_warning] Unsigned installer is allowed during dual-mode transition. channel=$releaseChannel dual_mode_start_utc=$($signatureDualModeStartUtc.ToString('o')) canary_enforce_utc=$($signatureCanaryEnforceUtc.ToString('o')) grace_end_utc=$($signatureGraceEndUtc.ToString('o'))"
+            }
+          }
+
           $assetSha = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "{0} *{1}" -f $assetSha, $assetName | Set-Content -LiteralPath (Join-Path $releaseRoot "$assetName.sha256") -Encoding ascii
 
@@ -188,20 +405,56 @@ jobs:
             -OutputPath (Join-Path $provRoot 'provenance-contract-report.json')
           if ($LASTEXITCODE -ne 0) { throw "Provenance contract validation failed." }
 
+          $reproReleasePath = Join-Path $releaseRoot 'reproducibility-report.json'
+          Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination $reproReleasePath -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.spdx.json') -Destination (Join-Path $releaseRoot 'workspace-installer.spdx.json') -Force
+          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.slsa.json') -Destination (Join-Path $releaseRoot 'workspace-installer.slsa.json') -Force
+
+          $releaseManifestPath = Join-Path $releaseRoot 'release-manifest.json'
+          & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseManifest.ps1') `
+            -Repository '${{ github.repository }}' `
+            -ReleaseTag $releaseTag `
+            -Channel $releaseChannel `
+            -InstallerPath $assetPath `
+            -InstallerSha256 $assetSha `
+            -InstallerShaPath (Join-Path $releaseRoot "$assetName.sha256") `
+            -SpdxPath (Join-Path $provRoot 'workspace-installer.spdx.json') `
+            -SlsaPath (Join-Path $provRoot 'workspace-installer.slsa.json') `
+            -ReproducibilityPath $reproReleasePath `
+            -OutputPath $releaseManifestPath `
+            -PublishedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) `
+            -SignatureStatus $signatureStatus `
+            -SignatureSubject $signatureSubject `
+            -SignatureThumbprint $signatureThumbprint `
+            -SignatureTimestampUtc $signatureTimestampUtc
+          if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed." }
+
           $metadataPath = Join-Path $releaseRoot 'workspace-installer-metadata.json'
           [ordered]@{
             asset_name = $assetName
             asset_path = $assetPath
             asset_sha256 = $assetSha
+            release_tag = $releaseTag
+            release_channel = $releaseChannel
+            channel_from_tag = $channelFromTag
+            tag_family = $tagFamily
+            tag_implies_prerelease = $tagImpliesPrerelease
+            tag_migration_warning = $tagMigrationWarning
             install_command = 'lvie-cdev-workspace-installer.exe /S'
             repro_report = (Join-Path $reproRoot 'workspace-installer-determinism-summary.json')
             spdx_path = (Join-Path $provRoot 'workspace-installer.spdx.json')
             slsa_path = (Join-Path $provRoot 'workspace-installer.slsa.json')
+            release_manifest_name = 'release-manifest.json'
+            signature_status = $signatureStatus
+            signature_subject = $signatureSubject
+            signature_thumbprint = $signatureThumbprint
+            signature_timestamp_utc = $signatureTimestampUtc
+            signature_enforcement_state = $signatureEnforcementState
+            signature_required = $signatureRequired
+            signature_dual_mode_start_utc = $signatureDualModeStartUtc.ToString('o')
+            signature_canary_enforce_utc = $signatureCanaryEnforceUtc.ToString('o')
+            signature_grace_end_utc = $signatureGraceEndUtc.ToString('o')
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
-
-          Copy-Item -LiteralPath (Join-Path $reproRoot 'workspace-installer-determinism-summary.json') -Destination (Join-Path $releaseRoot 'reproducibility-report.json') -Force
-          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.spdx.json') -Destination (Join-Path $releaseRoot 'workspace-installer.spdx.json') -Force
-          Copy-Item -LiteralPath (Join-Path $provRoot 'workspace-installer.slsa.json') -Destination (Join-Path $releaseRoot 'workspace-installer.slsa.json') -Force
 
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset_sha256=$assetSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -216,6 +469,7 @@ jobs:
             ${{ runner.temp }}/workspace-installer-release/reproducibility-report.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer.spdx.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer.slsa.json
+            ${{ runner.temp }}/workspace-installer-release/release-manifest.json
             ${{ runner.temp }}/workspace-installer-release/workspace-installer-metadata.json
           if-no-files-found: error
 
@@ -240,6 +494,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           ALLOW_EXISTING_TAG: ${{ inputs.allow_existing_tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_CHANNEL: ${{ inputs.release_channel }}
           RELEASE_TARGET_SHA: ${{ github.sha }}
           OVERRIDE_APPLIED: ${{ inputs.override_applied }}
           OVERRIDE_REASON: ${{ inputs.override_reason }}
@@ -248,34 +503,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $releaseTag = [string]$env:RELEASE_TAG
-          if ($releaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-            throw "Invalid release_tag '$releaseTag'. Expected semantic tag like v0.1.0."
-          }
-
-          $artifactRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
-          $assetPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe'
-          $shaPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe.sha256'
-          $reproPath = Join-Path $artifactRoot 'reproducibility-report.json'
-          $spdxPath = Join-Path $artifactRoot 'workspace-installer.spdx.json'
-          $slsaPath = Join-Path $artifactRoot 'workspace-installer.slsa.json'
-          $metadataPath = Join-Path $artifactRoot 'workspace-installer-metadata.json'
-
-          foreach ($path in @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $metadataPath)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Required release artifact missing: $path"
-            }
-          }
-
-          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
-          $assetName = [string]$metadata.asset_name
-          $assetSha = [string]$metadata.asset_sha256
-          $installCommand = [string]$metadata.install_command
-          if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
-            throw "Installer metadata is missing required fields."
-          }
-          $assetPathNormalized = [string]$assetPath
-          if ($assetPathNormalized -match '(?i)[\\/](artifacts)[\\/](parity)([\\/]|$)') {
-            throw "Parity artifact path was selected for release publish input: $assetPathNormalized"
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            throw 'release_tag is required.'
           }
 
           $allowExistingTag = $false
@@ -291,6 +520,95 @@ jobs:
             $overrideApplied = [System.Convert]::ToBoolean($env:OVERRIDE_APPLIED)
           }
 
+          $legacyTagPattern = '^v0\.(?<date>\d{8})\.(?<sequence>\d{1,3})$'
+          $semverTagPattern = '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+          $legacyMatch = [regex]::Match($releaseTag, $legacyTagPattern)
+          $semverMatch = [regex]::Match($releaseTag, $semverTagPattern)
+
+          $channelFromTag = ''
+          $tagImpliesPrerelease = $false
+          $tagMigrationWarning = ''
+
+          if ($legacyMatch.Success) {
+            $sequence = [int]$legacyMatch.Groups['sequence'].Value
+            if ($sequence -ge 1 -and $sequence -le 49) {
+              $channelFromTag = 'canary'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 50 -and $sequence -le 79) {
+              $channelFromTag = 'prerelease'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 80 -and $sequence -le 99) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              throw "Invalid legacy release_tag '$releaseTag'. Sequence must be within 1-99."
+            }
+
+            $tagMigrationWarning = "Legacy date-window tag '$releaseTag' is accepted during migration. Prefer SemVer tags (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
+          } elseif ($semverMatch.Success) {
+            $prereleaseLabel = [string]$semverMatch.Groups['prerelease'].Value
+            if ([string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              $tagImpliesPrerelease = $true
+              if ($prereleaseLabel -match '(?i)(^|[.\-])canary([.\-]|$)') {
+                $channelFromTag = 'canary'
+              } else {
+                $channelFromTag = 'prerelease'
+              }
+            }
+          } else {
+            throw "Invalid release_tag '$releaseTag'. Accepted formats: SemVer (vX.Y.Z, vX.Y.Z-rc.N, vX.Y.Z-canary.N) or legacy migration format (v0.YYYYMMDD.N)."
+          }
+
+          if ($prerelease -ne $tagImpliesPrerelease) {
+            throw "[channel_tag_mismatch] prerelease input '$prerelease' does not match release_tag '$releaseTag' (implied prerelease=$tagImpliesPrerelease)."
+          }
+
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
+          $assetPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe'
+          $shaPath = Join-Path $artifactRoot 'lvie-cdev-workspace-installer.exe.sha256'
+          $reproPath = Join-Path $artifactRoot 'reproducibility-report.json'
+          $spdxPath = Join-Path $artifactRoot 'workspace-installer.spdx.json'
+          $slsaPath = Join-Path $artifactRoot 'workspace-installer.slsa.json'
+          $releaseManifestPath = Join-Path $artifactRoot 'release-manifest.json'
+          $metadataPath = Join-Path $artifactRoot 'workspace-installer-metadata.json'
+
+          foreach ($path in @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $releaseManifestPath, $metadataPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required release artifact missing: $path"
+            }
+          }
+
+          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $assetName = [string]$metadata.asset_name
+          $assetSha = [string]$metadata.asset_sha256
+          $installCommand = [string]$metadata.install_command
+          $releaseChannel = [string]$metadata.release_channel
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = [string]$env:RELEASE_CHANNEL
+          }
+          if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
+            $releaseChannel = if ($prerelease) { 'prerelease' } else { 'stable' }
+          }
+          if ($releaseChannel -notin @('stable', 'prerelease', 'canary')) {
+            throw "Unsupported release channel '$releaseChannel'. Expected stable, prerelease, or canary."
+          }
+          if ($releaseChannel -ne $channelFromTag) {
+            throw "[channel_tag_mismatch] release_channel '$releaseChannel' does not match release_tag '$releaseTag' (implied channel=$channelFromTag)."
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            Write-Warning "[tag_migration_warning] $tagMigrationWarning"
+          }
+          if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
+            throw "Installer metadata is missing required fields."
+          }
+          $assetPathNormalized = [string]$assetPath
+          if ($assetPathNormalized -match '(?i)[\\/](artifacts)[\\/](parity)([\\/]|$)') {
+            throw "Parity artifact path was selected for release publish input: $assetPathNormalized"
+          }
+
           $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
           $releaseNoteLines = @(
             "# Workspace Installer $releaseTag"
@@ -304,6 +622,10 @@ jobs:
             "- $(Split-Path -Path $reproPath -Leaf)"
             "- $(Split-Path -Path $spdxPath -Leaf)"
             "- $(Split-Path -Path $slsaPath -Leaf)"
+            "- $(Split-Path -Path $releaseManifestPath -Leaf)"
+            ""
+            "Release channel:"
+            "- $releaseChannel"
             ""
             "SHA256:"
             "- $assetSha"
@@ -319,6 +641,13 @@ jobs:
               "- Windows gate override applied: true"
               "- Reason: $env:OVERRIDE_REASON"
               "- Incident: $env:OVERRIDE_INCIDENT_URL"
+            )
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            $releaseNoteLines += @(
+              ""
+              "Tag Policy Notice:"
+              "- $tagMigrationWarning"
             )
           }
           $releaseNoteLines | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
@@ -340,18 +669,19 @@ jobs:
           if ($releaseExists -and -not $allowExistingTag) {
             $publishedAt = [string]$existingReleaseMetadata.publishedAt
             $releaseUrl = [string]$existingReleaseMetadata.url
-            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new semantic tag or set allow_existing_tag=true for break-glass overwrite."
+            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new release tag or set allow_existing_tag=true for break-glass overwrite."
           }
 
           $releaseTitle = "Workspace Installer $releaseTag"
+          $releaseAssets = @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $releaseManifestPath)
 
           if (-not $releaseExists) {
             if ($prerelease) {
-              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+              & gh release create $releaseTag $releaseAssets -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
             } else {
-              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
+              & gh release create $releaseTag $releaseAssets -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
             }
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo'." }
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo' with assets." }
           } else {
             if ($prerelease) {
               & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
@@ -359,13 +689,15 @@ jobs:
               & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
             }
             if ($LASTEXITCODE -ne 0) { throw "Failed to edit release '$releaseTag' for '$repo'." }
-          }
 
-          if ($allowExistingTag) {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo --clobber
-          } else {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath -R $repo
-          }
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload release assets for '$releaseTag'."
+            if ($allowExistingTag) {
+              $uploadOutput = & gh release upload $releaseTag $releaseAssets -R $repo --clobber 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                $uploadText = ($uploadOutput | Out-String).Trim()
+                if ($uploadText -match '(?i)immutable release') {
+                  throw "[release_immutable] Release tag '$releaseTag' is immutable and cannot be overwritten. Publish a new release tag."
+                }
+                throw "Failed to upload release assets for '$releaseTag': $uploadText"
+              }
+            }
           }

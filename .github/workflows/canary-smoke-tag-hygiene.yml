@@ -1,0 +1,91 @@
+name: canary-smoke-tag-hygiene
+
+on:
+  schedule:
+    - cron: '35 4 * * *'
+  workflow_dispatch:
+    inputs:
+      target_date_utc:
+        description: UTC date key in YYYYMMDD format. Defaults to current UTC date when empty.
+        required: false
+        default: ''
+        type: string
+      tag_family:
+        description: Tag family scope for hygiene (auto, legacy_date_window, semver).
+        required: false
+        default: auto
+        type: string
+      keep_latest_n:
+        description: Number of latest canary smoke tags to keep for the target date.
+        required: false
+        default: '1'
+        type: string
+      apply_changes:
+        description: Apply deletions. Set false for dry-run.
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  canary-smoke-tag-hygiene:
+    name: Canary Smoke Tag Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Keep latest canary smoke tag only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'canary-smoke-tag-hygiene-report.json'
+
+          $targetDate = [string]'${{ inputs.target_date_utc }}'
+          if ([string]::IsNullOrWhiteSpace($targetDate)) {
+            $targetDate = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+          }
+
+          $tagFamily = [string]'${{ inputs.tag_family }}'
+          if ([string]::IsNullOrWhiteSpace($tagFamily)) {
+            $tagFamily = 'auto'
+          }
+          if ($tagFamily -notin @('auto', 'legacy_date_window', 'semver')) {
+            throw "tag_family must be one of: auto, legacy_date_window, semver. actual='$tagFamily'"
+          }
+
+          $keepLatestNText = [string]'${{ inputs.keep_latest_n }}'
+          $keepLatestN = 1
+          if (-not [string]::IsNullOrWhiteSpace($keepLatestNText)) {
+            $parsedKeepLatestN = 0
+            if (-not [int]::TryParse($keepLatestNText, [ref]$parsedKeepLatestN)) {
+              throw "keep_latest_n must be an integer. actual='$keepLatestNText'"
+            }
+            $keepLatestN = $parsedKeepLatestN
+          }
+
+          $applyChangesText = [string]'${{ inputs.apply_changes }}'
+          $applyChanges = $true
+          if (-not [string]::IsNullOrWhiteSpace($applyChangesText)) {
+            $applyChanges = [System.Convert]::ToBoolean($applyChangesText)
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-CanarySmokeTagHygiene.ps1 `
+            -Repository '${{ github.repository }}' `
+            -DateUtc $targetDate `
+            -TagFamily $tagFamily `
+            -KeepLatestN $keepLatestN `
+            -Delete:$applyChanges `
+            -OutputPath $reportPath
+
+      - name: Upload canary smoke tag hygiene report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-smoke-tag-hygiene-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/canary-smoke-tag-hygiene-report.json
+          if-no-files-found: error

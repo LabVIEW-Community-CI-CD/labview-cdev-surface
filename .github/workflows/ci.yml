@@ -22,6 +22,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enforce hosted-runner lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerEnvironment = [string]$env:RUNNER_ENVIRONMENT
+          if ($runnerEnvironment -ne 'github-hosted') {
+            throw "hosted_runner_required: CI Pipeline must run on a github-hosted runner. actual='$runnerEnvironment'"
+          }
+
       - name: Install Pester
         shell: pwsh
         run: |
@@ -41,6 +50,9 @@ jobs:
             './tests/WorkspaceShaRefreshPrContract.Tests.ps1',
             './tests/WorkspaceManifestPinRefreshScript.Tests.ps1',
             './tests/WorkspaceInstallerReleaseContract.Tests.ps1',
+            './tests/ReleaseManifestContract.Tests.ps1',
+            './tests/ReleaseClientRuntimeContract.Tests.ps1',
+            './tests/ReleaseClientPolicyContract.Tests.ps1',
             './tests/WorkspaceInstallRuntimeContract.Tests.ps1',
             './tests/Build-WorkspaceBootstrapInstaller.Tests.ps1',
             './tests/Build-RunnerCliBundleFromManifest.Tests.ps1',
@@ -59,16 +71,38 @@ jobs:
             './tests/CancelStaleWorkflowRunsContract.Tests.ps1',
             './tests/WatchWorkflowRunContract.Tests.ps1',
             './tests/PortableOpsRuntimeContract.Tests.ps1',
+            './tests/OpsRuntimeImagePublishWorkflowContract.Tests.ps1',
+            './tests/LinuxNsisParityImagePublishWorkflowContract.Tests.ps1',
+            './tests/WindowsNsisParityImagePublishWorkflowContract.Tests.ps1',
             './tests/VsCodeTasksContract.Tests.ps1',
+            './tests/ReleaseControlPlaneLocalDockerHarnessContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
+            './tests/OpsMonitoringWorkflowContract.Tests.ps1',
+            './tests/OpsIncidentLifecycleContract.Tests.ps1',
+            './tests/OpsAutoRemediationWorkflowContract.Tests.ps1',
+            './tests/OpsSloGateWorkflowContract.Tests.ps1',
+            './tests/WorkflowBotTokenDrillWorkflowContract.Tests.ps1',
+            './tests/OpsPolicyDriftWorkflowContract.Tests.ps1',
+            './tests/ReleaseGuardrailsAutoRemediationWorkflowContract.Tests.ps1',
+            './tests/BranchProtectionDriftWorkflowContract.Tests.ps1',
+            './tests/ReleaseControlPlaneWorkflowContract.Tests.ps1',
+            './tests/ReleaseControlPlaneDecisionTrailContract.Tests.ps1',
+            './tests/ReleaseRaceHardeningGateWorkflowContract.Tests.ps1',
+            './tests/ReleaseRaceHardeningDrillWorkflowContract.Tests.ps1',
+            './tests/ReleaseRollbackDrillWorkflowContract.Tests.ps1',
+            './tests/CanarySmokeTagHygieneWorkflowContract.Tests.ps1',
+            './tests/WeeklyOpsSloReportWorkflowContract.Tests.ps1',
             './tests/NightlySupplyChainCanaryWorkflowContract.Tests.ps1',
             './tests/WindowsLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/LinuxLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/ReleaseWithWindowsGateWorkflowContract.Tests.ps1',
             './tests/DockerDesktopLinuxIterationContract.Tests.ps1',
+            './tests/LinuxContainerNsisParityContract.Tests.ps1',
+            './tests/WindowsContainerNsisSelfTestContract.Tests.ps1',
             './tests/WorkspaceInstallerExerciseContract.Tests.ps1',
-            './tests/WorkspaceInstallerIterationContract.Tests.ps1'
+            './tests/WorkspaceInstallerIterationContract.Tests.ps1',
+            './tests/ScopeAOpsRunbookContract.Tests.ps1'
           ) -CI -Output Detailed
 
   workspace-installer-contract:

@@ -1,0 +1,194 @@
+name: release-rollback-drill
+
+on:
+  schedule:
+    - cron: '55 8 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to evaluate rollback readiness for.
+        required: false
+        default: canary
+        type: choice
+        options:
+          - canary
+          - prerelease
+          - stable
+      required_history_count:
+        description: Number of channel releases required to validate previous rollback target.
+        required: false
+        default: '2'
+        type: string
+      auto_self_heal:
+        description: Enable bounded self-healing when rollback readiness fails.
+        required: false
+        default: true
+        type: boolean
+      self_heal_max_attempts:
+        description: Maximum bounded self-healing attempts.
+        required: false
+        default: '1'
+        type: string
+      self_heal_watch_timeout_minutes:
+        description: Timeout minutes for each release workflow watch.
+        required: false
+        default: '120'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  release-rollback-drill:
+    name: Release Rollback Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Execute rollback drill with bounded self-healing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+
+          $channel = [string]'${{ inputs.channel }}'
+          if ([string]::IsNullOrWhiteSpace($channel)) {
+            $channel = 'canary'
+          }
+
+          $requiredHistoryText = [string]'${{ inputs.required_history_count }}'
+          $requiredHistoryCount = 2
+          if (-not [string]::IsNullOrWhiteSpace($requiredHistoryText)) {
+            $parsedRequiredHistory = 0
+            if (-not [int]::TryParse($requiredHistoryText, [ref]$parsedRequiredHistory)) {
+              throw "required_history_count must be an integer. actual='$requiredHistoryText'"
+            }
+            $requiredHistoryCount = $parsedRequiredHistory
+          }
+
+          $autoSelfHealText = [string]'${{ inputs.auto_self_heal }}'
+          $autoSelfHeal = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
+            $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
+          }
+
+          $selfHealMaxAttemptsText = [string]'${{ inputs.self_heal_max_attempts }}'
+          $selfHealMaxAttempts = 1
+          if (-not [string]::IsNullOrWhiteSpace($selfHealMaxAttemptsText)) {
+            $parsedMaxAttempts = 0
+            if (-not [int]::TryParse($selfHealMaxAttemptsText, [ref]$parsedMaxAttempts)) {
+              throw "self_heal_max_attempts must be an integer. actual='$selfHealMaxAttemptsText'"
+            }
+            $selfHealMaxAttempts = $parsedMaxAttempts
+          }
+
+          $selfHealWatchTimeoutText = [string]'${{ inputs.self_heal_watch_timeout_minutes }}'
+          $selfHealWatchTimeout = 120
+          if (-not [string]::IsNullOrWhiteSpace($selfHealWatchTimeoutText)) {
+            $parsedWatchTimeout = 0
+            if (-not [int]::TryParse($selfHealWatchTimeoutText, [ref]$parsedWatchTimeout)) {
+              throw "self_heal_watch_timeout_minutes must be an integer. actual='$selfHealWatchTimeoutText'"
+            }
+            $selfHealWatchTimeout = $parsedWatchTimeout
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-RollbackDrillSelfHealing.ps1 `
+            -Repository '${{ github.repository }}' `
+            -Branch 'main' `
+            -Channel $channel `
+            -RequiredHistoryCount $requiredHistoryCount `
+            -AutoRemediate:$autoSelfHeal `
+            -MaxAttempts $selfHealMaxAttempts `
+            -WatchTimeoutMinutes $selfHealWatchTimeout `
+            -OutputPath $reportPath
+
+      - name: Upload rollback drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rollback-drill-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-rollback-drill-report.json
+          if-no-files-found: error
+
+      - name: Update rollback drill issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Rollback Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release rollback drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $finalReasonCodes = @($report.final_report.reason_codes | ForEach-Object { [string]$_ })
+          $finalReasonCodeText = if ($finalReasonCodes.Count -gt 0) { [string]::Join(',', $finalReasonCodes) } else { 'unknown' }
+          $attemptCount = @($report.remediation_attempts).Count
+          $finalCandidateCount = if ($null -ne $report.final_report) { [string]$report.final_report.candidate_count } else { 'unknown' }
+          $body = @"
+          Release rollback drill failed.
+
+          - Run: $env:RUN_URL
+          - Channel: $($report.channel)
+          - Reason code: $($report.reason_code)
+          - Final reason codes: $finalReasonCodeText
+          - Message: $($report.message)
+          - Initial candidate count: $($report.initial_report.candidate_count)
+          - Final candidate count: $finalCandidateCount
+          - Auto remediate: $($report.auto_remediate)
+          - Remediation attempts: $attemptCount
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close rollback drill issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Rollback Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release rollback drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $attemptCount = @($report.remediation_attempts).Count
+          $finalCandidateCount = if ($null -ne $report.final_report) { [string]$report.final_report.candidate_count } else { 'unknown' }
+          $body = @"
+          Release rollback drill recovered.
+
+          - Run: $env:RUN_URL
+          - Channel: $($report.channel)
+          - Reason code: $($report.reason_code)
+          - Message: $($report.message)
+          - Final candidate count: $finalCandidateCount
+          - Auto remediated: $($report.reason_code -eq 'remediated')
+          - Remediation attempts: $attemptCount
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body
