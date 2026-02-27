@@ -104,14 +104,48 @@ jobs:
               $dockerArgs += @('--context', $candidate)
             }
 
-            $osType = & docker @($dockerArgs + @('info', '--format', '{{.OSType}}')) 2>$null
-            if ($LASTEXITCODE -ne 0) {
+            $osType = $null
+            try {
+              $osType = & docker @($dockerArgs + @('info', '--format', '{{.OSType}}')) 2>$null
+            } catch {
+              continue
+            }
+            if ($LASTEXITCODE -ne 0 -or $null -eq $osType) {
               continue
             }
             $osTypeNormalized = ([string]$osType).Trim().ToLowerInvariant()
             if ($osTypeNormalized -eq 'windows') {
               $resolvedContext = $candidate
               break
+            }
+          }
+
+          if ($null -eq $resolvedContext) {
+            $dockerCliExe = Join-Path $env:ProgramFiles 'Docker\Docker\DockerCli.exe'
+            if (Test-Path -LiteralPath $dockerCliExe -PathType Leaf) {
+              try {
+                & $dockerCliExe -SwitchWindowsEngine | Out-Host
+                if ($LASTEXITCODE -eq 0) {
+                  for ($attempt = 1; $attempt -le 12; $attempt++) {
+                    Start-Sleep -Seconds 5
+                    $osTypeAfterSwitch = $null
+                    try {
+                      $osTypeAfterSwitch = & docker info --format '{{.OSType}}' 2>$null
+                    } catch {
+                      continue
+                    }
+                    if ($LASTEXITCODE -eq 0 -and $null -ne $osTypeAfterSwitch) {
+                      $osTypeAfterSwitchNormalized = ([string]$osTypeAfterSwitch).Trim().ToLowerInvariant()
+                      if ($osTypeAfterSwitchNormalized -eq 'windows') {
+                        $resolvedContext = ''
+                        break
+                      }
+                    }
+                  }
+                }
+              } catch {
+                Write-Warning "docker_switch_windows_engine_failed: $($_.Exception.Message)"
+              }
             }
           }
 
