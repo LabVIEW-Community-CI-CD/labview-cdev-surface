@@ -106,6 +106,67 @@ function Invoke-PowerShellFile {
     return [int]$LASTEXITCODE
 }
 
+function Invoke-NativeCommandCapture {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [Parameter()]
+        [string[]]$Arguments = @()
+    )
+
+    $previousPreference = $script:ErrorActionPreference
+    $script:ErrorActionPreference = 'Continue'
+    try {
+        $nativeOutput = & $Command @Arguments 2>&1
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        return [pscustomobject]@{
+            exit_code = $exitCode
+            output = @($nativeOutput | ForEach-Object { [string]$_ })
+        }
+    } finally {
+        $script:ErrorActionPreference = $previousPreference
+    }
+}
+
+function Get-FileSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File was not found for SHA256 computation: $Path"
+    }
+
+    $resolved = [string](Resolve-Path -LiteralPath $Path).Path
+    $hashCommand = Get-Command -Name 'Get-FileHash' -ErrorAction SilentlyContinue
+    if ($null -ne $hashCommand) {
+        try {
+            return (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+        } catch {
+            # Fall back to .NET SHA256 when Get-FileHash is unavailable in installer host contexts.
+        }
+    }
+
+    $stream = [System.IO.File]::Open($resolved, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha.ComputeHash($stream)
+        } finally {
+            if ($sha -is [System.IDisposable]) {
+                $sha.Dispose()
+            }
+        }
+    } finally {
+        $stream.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+}
+
 function Add-PostActionSequenceEntry {
     param(
         [Parameter(Mandatory = $true)]
@@ -1556,9 +1617,9 @@ try {
                 }
 
                 Ensure-Directory -Path (Split-Path -Parent $repoPath)
-                $cloneOutput = & git clone $originUrl $repoPath 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    throw "git clone failed for '$repoPath'. $([string]::Join("`n", @($cloneOutput)))"
+                $cloneResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('clone', $originUrl, $repoPath)
+                if ([int]$cloneResult.exit_code -ne 0) {
+                    throw "git clone failed for '$repoPath'. $([string]::Join("`n", @($cloneResult.output)))"
                 }
             }
 
@@ -1573,9 +1634,9 @@ try {
                     continue
                 }
 
-                $currentUrlRaw = & git -C $repoPath remote get-url $remoteName 2>$null
-                $currentExit = $LASTEXITCODE
-                $currentUrl = if ($currentExit -eq 0) { [string]$currentUrlRaw.Trim() } else { '' }
+                $currentUrlResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'remote', 'get-url', $remoteName)
+                $currentExit = [int]$currentUrlResult.exit_code
+                $currentUrl = if ($currentExit -eq 0) { [string]([string]::Join("`n", @($currentUrlResult.output)).Trim()) } else { '' }
                 $remoteCheck = [ordered]@{
                     remote = $remoteName
                     expected = $expectedUrl
@@ -1592,11 +1653,12 @@ try {
                         $repoResult.status = 'fail'
                         $repoResult.issues += "remote_missing_$remoteName"
                     } else {
-                        $addOutput = & git -C $repoPath remote add $remoteName $expectedUrl 2>&1
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to add remote '$remoteName' on '$repoPath'. $([string]::Join("`n", @($addOutput)))"
+                        $addResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'remote', 'add', $remoteName, $expectedUrl)
+                        if ([int]$addResult.exit_code -ne 0) {
+                            throw "Failed to add remote '$remoteName' on '$repoPath'. $([string]::Join("`n", @($addResult.output)))"
                         }
-                        $afterUrl = (& git -C $repoPath remote get-url $remoteName).Trim()
+                        $afterUrlResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'remote', 'get-url', $remoteName)
+                        $afterUrl = [string]([string]::Join("`n", @($afterUrlResult.output)).Trim())
                         $remoteCheck.after = $afterUrl
                         if ((Normalize-Url $afterUrl) -eq (Normalize-Url $expectedUrl)) {
                             $remoteCheck.status = 'added'
@@ -1614,11 +1676,12 @@ try {
                         $repoResult.status = 'fail'
                         $repoResult.issues += "remote_mismatch_$remoteName"
                     } else {
-                        $setOutput = & git -C $repoPath remote set-url $remoteName $expectedUrl 2>&1
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Failed to set remote '$remoteName' on '$repoPath'. $([string]::Join("`n", @($setOutput)))"
+                        $setResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'remote', 'set-url', $remoteName, $expectedUrl)
+                        if ([int]$setResult.exit_code -ne 0) {
+                            throw "Failed to set remote '$remoteName' on '$repoPath'. $([string]::Join("`n", @($setResult.output)))"
                         }
-                        $afterUrl = (& git -C $repoPath remote get-url $remoteName).Trim()
+                        $afterUrlResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'remote', 'get-url', $remoteName)
+                        $afterUrl = [string]([string]::Join("`n", @($afterUrlResult.output)).Trim())
                         $remoteCheck.after = $afterUrl
                         if ((Normalize-Url $afterUrl) -eq (Normalize-Url $expectedUrl)) {
                             $remoteCheck.status = 'updated'
@@ -1636,18 +1699,18 @@ try {
 
             if (-not [string]::IsNullOrWhiteSpace($defaultBranch)) {
                 if ($offlineGitMode) {
-                    & git -C $repoPath cat-file -e "$pinnedSha`^{commit}" 2>$null
-                    if ($LASTEXITCODE -ne 0) {
+                    $catFileResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'cat-file', '-e', "$pinnedSha`^{commit}")
+                    if ([int]$catFileResult.exit_code -ne 0) {
                         throw "Pinned SHA '$pinnedSha' is not present in local object database for '$repoPath' while offline git mode is enabled."
                     }
                 } else {
-                    $fetchOutput = & git -C $repoPath fetch --no-tags origin $defaultBranch 2>&1
-                    if ($LASTEXITCODE -ne 0) {
-                        throw "Failed to fetch origin/$defaultBranch for '$repoPath'. $([string]::Join("`n", @($fetchOutput)))"
+                    $fetchResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'fetch', '--no-tags', 'origin', $defaultBranch)
+                    if ([int]$fetchResult.exit_code -ne 0) {
+                        throw "Failed to fetch origin/$defaultBranch for '$repoPath'. $([string]::Join("`n", @($fetchResult.output)))"
                     }
 
-                    & git -C $repoPath show-ref --verify "refs/remotes/origin/$defaultBranch" *> $null
-                    if ($LASTEXITCODE -ne 0) {
+                    $showRefResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'show-ref', '--verify', "refs/remotes/origin/$defaultBranch")
+                    if ([int]$showRefResult.exit_code -ne 0) {
                         $repoResult.status = 'fail'
                         $repoResult.issues += 'default_branch_missing_on_origin'
                     }
@@ -1655,26 +1718,26 @@ try {
             }
 
             if (-not $existsBefore -and $Mode -eq 'Install') {
-                $checkoutOutput = & git -C $repoPath checkout --detach $pinnedSha 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to checkout pinned_sha '$pinnedSha' in '$repoPath'. $([string]::Join("`n", @($checkoutOutput)))"
+                $checkoutResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'checkout', '--detach', $pinnedSha)
+                if ([int]$checkoutResult.exit_code -ne 0) {
+                    throw "Failed to checkout pinned_sha '$pinnedSha' in '$repoPath'. $([string]::Join("`n", @($checkoutResult.output)))"
                 }
             }
 
-            $headOutput = & git -C $repoPath rev-parse HEAD 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to resolve HEAD for '$repoPath'. $([string]::Join("`n", @($headOutput)))"
+            $headResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'rev-parse', 'HEAD')
+            if ([int]$headResult.exit_code -ne 0) {
+                throw "Failed to resolve HEAD for '$repoPath'. $([string]::Join("`n", @($headResult.output)))"
             }
-            $headSha = [string]$headOutput.Trim().ToLowerInvariant()
+            $headSha = ([string]::Join("`n", @($headResult.output))).Trim().ToLowerInvariant()
             $repoResult.head_sha = $headSha
             if ($headSha -ne $pinnedSha) {
                 $repoResult.status = 'fail'
                 $repoResult.issues += 'head_sha_mismatch'
             }
 
-            $branchOutput = & git -C $repoPath symbolic-ref --quiet --short HEAD 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $branchName = [string]$branchOutput.Trim()
+            $branchResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $repoPath, 'symbolic-ref', '--quiet', '--short', 'HEAD')
+            if ([int]$branchResult.exit_code -eq 0) {
+                $branchName = ([string]::Join("`n", @($branchResult.output))).Trim()
                 $repoResult.branch_state = $branchName
                 if (-not [string]::IsNullOrWhiteSpace($defaultBranch) -and $branchName -ne $defaultBranch) {
                     $repoResult.status = 'fail'
@@ -1803,7 +1866,7 @@ try {
             throw "Bundled runner-cli executable was not found: $runnerCliExePath"
         }
         $expectedSha = Get-ExpectedShaFromFile -ShaFilePath $runnerCliShaPath
-        $actualSha = (Get-FileHash -LiteralPath $runnerCliExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualSha = Get-FileSha256 -Path $runnerCliExePath
         $runnerCliBundle.expected_sha256 = $expectedSha
         $runnerCliBundle.actual_sha256 = $actualSha
         if ($expectedSha -ne $actualSha) {
@@ -1854,11 +1917,11 @@ try {
             throw "cdev-cli Linux SHA file does not match installer contract. expected=$($cliBundle.asset_linux_expected_sha256) actual=$linuxExpectedFromFile"
         }
 
-        $cliBundle.asset_win_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_win_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cliBundle.asset_win_actual_sha256 = Get-FileSha256 -Path $cliBundle.asset_win_path
         if ($cliBundle.asset_win_actual_sha256 -ne [string]$cliBundle.asset_win_expected_sha256) {
             throw "cdev-cli Windows asset hash mismatch. expected=$($cliBundle.asset_win_expected_sha256) actual=$($cliBundle.asset_win_actual_sha256)"
         }
-        $cliBundle.asset_linux_actual_sha256 = (Get-FileHash -LiteralPath $cliBundle.asset_linux_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cliBundle.asset_linux_actual_sha256 = Get-FileSha256 -Path $cliBundle.asset_linux_path
         if ($cliBundle.asset_linux_actual_sha256 -ne [string]$cliBundle.asset_linux_expected_sha256) {
             throw "cdev-cli Linux asset hash mismatch. expected=$($cliBundle.asset_linux_expected_sha256) actual=$($cliBundle.asset_linux_actual_sha256)"
         }
