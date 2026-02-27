@@ -546,14 +546,15 @@ jobs:
           }
 
           $releaseTitle = "Workspace Installer $releaseTag"
+          $releaseAssets = @($assetPath, $shaPath, $reproPath, $spdxPath, $slsaPath, $releaseManifestPath)
 
           if (-not $releaseExists) {
             if ($prerelease) {
-              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
+              & gh release create $releaseTag $releaseAssets -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath --prerelease
             } else {
-              & gh release create $releaseTag -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
+              & gh release create $releaseTag $releaseAssets -R $repo --target $releaseTargetSha --title $releaseTitle --notes-file $releaseNotesPath
             }
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo'." }
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release '$releaseTag' for '$repo' with assets." }
           } else {
             if ($prerelease) {
               & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath --prerelease
@@ -561,13 +562,15 @@ jobs:
               & gh release edit $releaseTag -R $repo --title $releaseTitle --notes-file $releaseNotesPath
             }
             if ($LASTEXITCODE -ne 0) { throw "Failed to edit release '$releaseTag' for '$repo'." }
-          }
 
-          if ($allowExistingTag) {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath $releaseManifestPath -R $repo --clobber
-          } else {
-            & gh release upload $releaseTag $assetPath $shaPath $reproPath $spdxPath $slsaPath $releaseManifestPath -R $repo
-          }
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload release assets for '$releaseTag'."
+            if ($allowExistingTag) {
+              $uploadOutput = & gh release upload $releaseTag $releaseAssets -R $repo --clobber 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                $uploadText = ($uploadOutput | Out-String).Trim()
+                if ($uploadText -match '(?i)immutable release') {
+                  throw "[release_immutable] Release tag '$releaseTag' is immutable and cannot be overwritten. Publish a new semantic tag."
+                }
+                throw "Failed to upload release assets for '$releaseTag': $uploadText"
+              }
+            }
           }
