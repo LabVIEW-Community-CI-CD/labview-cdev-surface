@@ -628,7 +628,7 @@ function Invoke-ReleaseMode {
     $dispatchInputs = @(
         "release_tag=$targetTag",
         'allow_existing_tag=false',
-        "prerelease=$([string]([bool]$modeConfig.prerelease).ToLowerInvariant())",
+        "prerelease=$(([string]([bool]$modeConfig.prerelease)).ToLowerInvariant())",
         "release_channel=$([string]$modeConfig.channel)"
     )
     & $dispatchWorkflowScript `
