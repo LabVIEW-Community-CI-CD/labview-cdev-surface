@@ -52,6 +52,20 @@ Describe 'Release client policy contract' {
         $releaseClient.runtime_images.ops_runtime.repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops'
         $releaseClient.runtime_images.ops_runtime.base_repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $releaseClient.runtime_images.ops_runtime.base_digest | Should -Be 'sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
+        $releaseClient.ops_control_plane_policy.slo_gate.lookback_days | Should -Be 7
+        $releaseClient.ops_control_plane_policy.slo_gate.min_success_rate_pct | Should -Be 100
+        $releaseClient.ops_control_plane_policy.slo_gate.max_sync_guard_age_hours | Should -Be 12
+        @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-monitoring'
+        @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-autoremediate'
+        @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'release-control-plane'
+        $releaseClient.ops_control_plane_policy.incident_lifecycle.auto_close_on_recovery | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.incident_lifecycle.reopen_on_regression | Should -BeTrue
+        @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
+        @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
+        @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
+        $releaseClient.ops_control_plane_policy.rollback_drill.channel | Should -Be 'canary'
+        $releaseClient.ops_control_plane_policy.rollback_drill.required_history_count | Should -Be 2
+        $releaseClient.ops_control_plane_policy.rollback_drill.release_limit | Should -Be 100
 
         ($script:payloadManifest | ConvertTo-Json -Depth 100) | Should -Be ($script:manifest | ConvertTo-Json -Depth 100)
     }
@@ -66,6 +80,9 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'runtime_images_exists'
         $script:policyScriptContent | Should -Match 'runtime_images_cdev_cli_runtime_canonical_repository'
         $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
+        $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
+        $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
+        $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'
     }
 
     It 'has parse-safe PowerShell syntax' {

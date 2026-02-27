@@ -28,14 +28,18 @@ Describe 'Ops monitoring workflow contract' {
 
     It 'runs snapshot script and uploads deterministic report artifact' {
         $script:workflowContent | Should -Match 'Invoke-OpsMonitoringSnapshot\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:workflowContent | Should -Match 'ops-monitoring-report\.json'
         $script:workflowContent | Should -Match 'upload-artifact'
         $script:workflowContent | Should -Match 'Ops Monitoring Alert'
+        $script:workflowContent | Should -Match '-Mode Fail'
+        $script:workflowContent | Should -Match '-Mode Recover'
     }
 
     It 'checks runner and sync-guard health with deterministic reason codes' {
         $script:scriptContent | Should -Match 'repos/\$SurfaceRepository/actions/runners\?per_page=100'
         $script:scriptContent | Should -Match 'Get-GhWorkflowRunsPortable'
+        $script:scriptContent | Should -Match 'AllowEmptyCollection'
         $script:scriptContent | Should -Match 'runner_unavailable'
         $script:scriptContent | Should -Match 'runner_visibility_unavailable'
         $script:scriptContent | Should -Match 'sync_guard_failed'

@@ -1,0 +1,154 @@
+name: ops-slo-gate
+
+on:
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: SLO gate lookback window in days.
+        required: false
+        default: '7'
+        type: string
+      min_success_rate_pct:
+        description: Minimum success rate threshold (0-100).
+        required: false
+        default: '100'
+        type: string
+      sync_guard_max_age_hours:
+        description: Maximum sync-guard success age in hours.
+        required: false
+        default: '12'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  ops-slo-gate:
+    name: Ops SLO Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Evaluate ops SLO gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+
+          $lookbackDaysText = [string]'${{ inputs.lookback_days }}'
+          $lookbackDays = 7
+          if (-not [string]::IsNullOrWhiteSpace($lookbackDaysText)) {
+            $parsedLookback = 0
+            if (-not [int]::TryParse($lookbackDaysText, [ref]$parsedLookback)) {
+              throw "lookback_days must be an integer. actual='$lookbackDaysText'"
+            }
+            $lookbackDays = $parsedLookback
+          }
+
+          $minSuccessRatePctText = [string]'${{ inputs.min_success_rate_pct }}'
+          $minSuccessRatePct = 100.0
+          if (-not [string]::IsNullOrWhiteSpace($minSuccessRatePctText)) {
+            $parsedSuccessRate = 0.0
+            if (-not [double]::TryParse($minSuccessRatePctText, [ref]$parsedSuccessRate)) {
+              throw "min_success_rate_pct must be a number. actual='$minSuccessRatePctText'"
+            }
+            $minSuccessRatePct = $parsedSuccessRate
+          }
+
+          $syncGuardMaxAgeHoursText = [string]'${{ inputs.sync_guard_max_age_hours }}'
+          $syncGuardMaxAgeHours = 12
+          if (-not [string]::IsNullOrWhiteSpace($syncGuardMaxAgeHoursText)) {
+            $parsedMaxAge = 0
+            if (-not [int]::TryParse($syncGuardMaxAgeHoursText, [ref]$parsedMaxAge)) {
+              throw "sync_guard_max_age_hours must be an integer. actual='$syncGuardMaxAgeHoursText'"
+            }
+            $syncGuardMaxAgeHours = $parsedMaxAge
+          }
+
+          & pwsh -NoProfile -File ./scripts/Test-OpsSloGate.ps1 `
+            -SurfaceRepository '${{ github.repository }}' `
+            -LookbackDays $lookbackDays `
+            -MinSuccessRatePct $minSuccessRatePct `
+            -SyncGuardMaxAgeHours $syncGuardMaxAgeHours `
+            -OutputPath $reportPath
+
+      - name: Upload ops SLO gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-slo-gate-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/ops-slo-gate-report.json
+          if-no-files-found: error
+
+      - name: Update ops SLO gate issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Ops SLO Gate Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "ops SLO gate report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Ops SLO gate failed.
+
+          - Run: $env:RUN_URL
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          - Lookback days: $($report.lookback_days)
+          - Min success rate pct: $($report.min_success_rate_pct)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close ops SLO gate issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Ops SLO Gate Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-slo-gate-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "ops SLO gate report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $body = @"
+          Ops SLO gate recovered.
+
+          - Run: $env:RUN_URL
+          - Message: $($report.message)
+          - Lookback days: $($report.lookback_days)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

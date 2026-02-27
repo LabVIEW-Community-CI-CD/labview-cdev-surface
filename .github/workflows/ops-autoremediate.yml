@@ -54,7 +54,7 @@ jobs:
           path: ${{ runner.temp }}/ops-autoremediate-report.json
           if-no-files-found: error
 
-      - name: Open or update auto-remediation incident issue on failure
+      - name: Update auto-remediation incident issue on failure
         if: failure()
         shell: pwsh
         env:
@@ -80,20 +80,33 @@ jobs:
           - Sync guard repository: $($report.sync_guard_repository)
           "@
 
-          $existingJson = & gh issue list -R $env:REPOSITORY --state open --search "$title in:title" --json number --limit 1
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to query existing auto-remediation incident issue.'
-          }
-          $existing = @($existingJson | ConvertFrom-Json)
-          if ($existing.Count -gt 0) {
-            $number = [string]$existing[0].number
-            & gh issue comment $number -R $env:REPOSITORY --body $body
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to append auto-remediation issue comment to #$number."
-            }
-          } else {
-            & gh issue create -R $env:REPOSITORY --title $title --body $body
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Failed to create auto-remediation incident issue.'
-            }
-          }
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close auto-remediation incident issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Ops Auto-Remediation Alert'
+          $body = @"
+          Ops auto-remediation recovered.
+
+          - Run: $env:RUN_URL
+          - Status: pass
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

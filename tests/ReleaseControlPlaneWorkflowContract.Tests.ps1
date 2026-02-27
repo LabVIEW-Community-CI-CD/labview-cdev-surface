@@ -36,8 +36,11 @@ Describe 'Release control plane workflow contract' {
         $script:workflowContent | Should -Match 'RUNNER_ENVIRONMENT'
         $script:workflowContent | Should -Match 'hosted_runner_required'
         $script:workflowContent | Should -Match 'Invoke-ReleaseControlPlane\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:workflowContent | Should -Match 'release-control-plane-report\.json'
         $script:workflowContent | Should -Match 'Release Control Plane Alert'
+        $script:workflowContent | Should -Match '-Mode Fail'
+        $script:workflowContent | Should -Match '-Mode Recover'
         $script:workflowContent | Should -Match 'actions:\s*write'
         $script:workflowContent | Should -Match 'contents:\s*write'
     }
