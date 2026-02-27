@@ -1,0 +1,72 @@
+name: release-race-hardening-gate
+
+on:
+  push:
+    branches:
+      - main
+      - integration/**
+  pull_request:
+    branches:
+      - main
+      - integration/**
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: Branch to evaluate latest successful drill runs from.
+        required: false
+        default: main
+        type: string
+      max_age_hours:
+        description: Maximum age of latest successful drill run.
+        required: false
+        default: '168'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release-race-hardening-gate:
+    name: Release Race Hardening Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Evaluate race-hardening drill gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-gate-report.json'
+
+          $sourceBranch = [string]'${{ inputs.source_branch }}'
+          if ([string]::IsNullOrWhiteSpace($sourceBranch)) {
+            $sourceBranch = 'main'
+          }
+
+          $maxAgeHoursText = [string]'${{ inputs.max_age_hours }}'
+          $maxAgeHours = 168
+          if (-not [string]::IsNullOrWhiteSpace($maxAgeHoursText)) {
+            $parsed = 0
+            if (-not [int]::TryParse($maxAgeHoursText, [ref]$parsed)) {
+              throw "max_age_hours must be an integer. actual='$maxAgeHoursText'"
+            }
+            $maxAgeHours = $parsed
+          }
+
+          & pwsh -NoProfile -File ./scripts/Test-ReleaseRaceHardeningGate.ps1 `
+            -Repository '${{ github.repository }}' `
+            -SourceBranch $sourceBranch `
+            -MaxAgeHours $maxAgeHours `
+            -OutputPath $reportPath
+
+      - name: Upload release race-hardening gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-race-hardening-gate-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-race-hardening-gate-report.json
+          if-no-files-found: error

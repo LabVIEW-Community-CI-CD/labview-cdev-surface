@@ -3,6 +3,11 @@ name: Integration Gate
 on:
   push:
     branches:
+      - main
+      - integration/**
+  pull_request:
+    branches:
+      - main
       - integration/**
   workflow_dispatch:
     inputs:
@@ -26,6 +31,8 @@ jobs:
           TARGET_REPOSITORY: ${{ github.repository }}
           INPUT_REF: ${{ inputs.ref }}
           TRIGGER_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -37,7 +44,11 @@ jobs:
           $targetRef = [string]$env:INPUT_REF
           $sha = ''
           if ([string]::IsNullOrWhiteSpace($targetRef)) {
-            $sha = ([string]$env:TRIGGER_SHA).Trim().ToLowerInvariant()
+            if ([string]$env:EVENT_NAME -eq 'pull_request') {
+              $sha = ([string]$env:PR_HEAD_SHA).Trim().ToLowerInvariant()
+            } else {
+              $sha = ([string]$env:TRIGGER_SHA).Trim().ToLowerInvariant()
+            }
           } else {
             $sha = (& gh api "repos/$repo/commits/$targetRef" --jq '.sha').Trim().ToLowerInvariant()
           }
@@ -59,20 +70,31 @@ jobs:
           $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
 
           while ((Get-Date).ToUniversalTime() -lt $deadline) {
-            $statusJson = & gh api "repos/$repo/commits/$sha/status"
+            $checksJson = & gh api "repos/$repo/commits/$sha/check-runs?per_page=100"
             if ($LASTEXITCODE -ne 0) {
-              throw "Failed to read commit status for '$repo' @ '$sha'."
+              throw "Failed to read commit check-runs for '$repo' @ '$sha'."
             }
 
-            $statusObject = $statusJson | ConvertFrom-Json -ErrorAction Stop
+            $checksObject = $checksJson | ConvertFrom-Json -ErrorAction Stop
             $latestByContext = @{}
-            foreach ($status in @($statusObject.statuses)) {
-              $context = [string]$status.context
+            $orderedChecks = @(
+              @($checksObject.check_runs) |
+                Sort-Object -Property @{ Expression = {
+                  if ([string]::IsNullOrWhiteSpace([string]$_.started_at)) {
+                    [DateTimeOffset]::MinValue
+                  } else {
+                    [DateTimeOffset]::Parse([string]$_.started_at).ToUniversalTime()
+                  }
+                }; Descending = $true }
+            )
+
+            foreach ($check in @($orderedChecks)) {
+              $context = [string]$check.name
               if ([string]::IsNullOrWhiteSpace($context)) {
                 continue
               }
               if (-not $latestByContext.ContainsKey($context)) {
-                $latestByContext[$context] = $status
+                $latestByContext[$context] = $check
               }
             }
 
@@ -86,13 +108,26 @@ jobs:
                 continue
               }
 
-              $state = [string]$latestByContext[$context].state
-              $stateSummary += "$context=$state"
-              switch ($state) {
+              $check = $latestByContext[$context]
+              $status = [string]$check.status
+              $conclusion = [string]$check.conclusion
+              $stateSummary += "$context=$status/$conclusion"
+
+              if ($status -ne 'completed') {
+                $allResolved = $false
+                continue
+              }
+
+              switch ($conclusion) {
                 'success' {}
+                'neutral' {}
+                'skipped' {}
                 'failure' { $hasFailure = $true }
-                'error' { $hasFailure = $true }
-                'pending' { $allResolved = $false }
+                'cancelled' { $hasFailure = $true }
+                'timed_out' { $hasFailure = $true }
+                'action_required' { $hasFailure = $true }
+                'startup_failure' { $hasFailure = $true }
+                'stale' { $hasFailure = $true }
                 default { $allResolved = $false }
               }
             }

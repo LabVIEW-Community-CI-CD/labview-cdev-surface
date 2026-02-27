@@ -37,6 +37,9 @@ Describe 'Workspace surface contract' {
         $script:rollbackDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRollbackDrill.ps1'
         $script:rollbackSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-RollbackDrillSelfHealing.ps1'
         $script:raceHardeningDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRaceHardeningDrill.ps1'
+        $script:raceHardeningGateScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseRaceHardeningGate.ps1'
+        $script:releaseBranchProtectionPolicyScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseBranchProtectionPolicy.ps1'
+        $script:setReleaseBranchProtectionPolicyScriptPath = Join-Path $script:repoRoot 'scripts/Set-ReleaseBranchProtectionPolicy.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
         $script:windowsContainerNsisSelfTestScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-WindowsContainerNsisSelfTest.ps1'
         $script:windowsContainerNsisDockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-windows/Dockerfile'
@@ -54,8 +57,10 @@ Describe 'Workspace surface contract' {
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:opsSloGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-slo-gate.yml'
         $script:opsPolicyDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-policy-drift-check.yml'
+        $script:branchProtectionDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/branch-protection-drift-check.yml'
         $script:rollbackDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-rollback-drill.yml'
         $script:raceHardeningDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-race-hardening-drill.yml'
+        $script:raceHardeningGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-race-hardening-gate.yml'
         $script:linuxNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-linux-nsis-parity-image.yml'
         $script:windowsNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-windows-nsis-parity-image.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
@@ -106,6 +111,9 @@ Describe 'Workspace surface contract' {
             $script:rollbackDrillScriptPath,
             $script:rollbackSelfHealingScriptPath,
             $script:raceHardeningDrillScriptPath,
+            $script:raceHardeningGateScriptPath,
+            $script:releaseBranchProtectionPolicyScriptPath,
+            $script:setReleaseBranchProtectionPolicyScriptPath,
             $script:dockerLinuxIterationScriptPath,
             $script:windowsContainerNsisSelfTestScriptPath,
             $script:windowsContainerNsisDockerfilePath,
@@ -123,8 +131,10 @@ Describe 'Workspace surface contract' {
             $script:canaryWorkflowPath,
             $script:opsSloGateWorkflowPath,
             $script:opsPolicyDriftWorkflowPath,
+            $script:branchProtectionDriftWorkflowPath,
             $script:rollbackDrillWorkflowPath,
             $script:raceHardeningDrillWorkflowPath,
+            $script:raceHardeningGateWorkflowPath,
             $script:linuxNsisParityImagePublishWorkflowPath,
             $script:windowsNsisParityImagePublishWorkflowPath,
             $script:windowsImageGateWorkflowPath,
@@ -397,11 +407,17 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
         $script:agentsContent | Should -Match 'release-race-hardening-drill\.yml'
+        $script:agentsContent | Should -Match 'release-race-hardening-gate\.yml'
+        $script:agentsContent | Should -Match 'branch-protection-drift-check\.yml'
         $script:agentsContent | Should -Match 'Release Race Hardening Drill Alert'
+        $script:agentsContent | Should -Match 'Branch Protection Drift Alert'
         $script:agentsContent | Should -Match 'release-race-hardening-weekly-summary\.json'
         $script:agentsContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Invoke-ReleaseRaceHardeningDrill\.ps1'
+        $script:agentsContent | Should -Match 'Test-ReleaseRaceHardeningGate\.ps1'
+        $script:agentsContent | Should -Match 'Set-ReleaseBranchProtectionPolicy\.ps1'
+        $script:agentsContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:agentsContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:agentsContent | Should -Match 'workflow_failure_detected'
         $script:agentsContent | Should -Match 'release_client_drift'
@@ -438,11 +454,16 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
         $script:readmeContent | Should -Match 'release-race-hardening-drill\.yml'
+        $script:readmeContent | Should -Match 'release-race-hardening-gate\.yml'
+        $script:readmeContent | Should -Match 'branch-protection-drift-check\.yml'
         $script:readmeContent | Should -Match 'Release Race Hardening Drill'
         $script:readmeContent | Should -Match 'release-race-hardening-weekly-summary\.json'
         $script:readmeContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Invoke-ReleaseRaceHardeningDrill\.ps1'
+        $script:readmeContent | Should -Match 'Test-ReleaseRaceHardeningGate\.ps1'
+        $script:readmeContent | Should -Match 'Set-ReleaseBranchProtectionPolicy\.ps1'
+        $script:readmeContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:readmeContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:readmeContent | Should -Match 'workflow_failure_detected'
         $script:readmeContent | Should -Match 'release_client_drift'
@@ -491,6 +512,8 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'OpsSloGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'OpsPolicyDriftWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ReleaseRaceHardeningDrillWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'ReleaseRaceHardeningGateWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'BranchProtectionDriftWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ReleaseRollbackDrillWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxContainerNsisParityContract\.Tests\.ps1'

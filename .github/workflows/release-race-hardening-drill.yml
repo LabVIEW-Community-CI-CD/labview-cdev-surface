@@ -1,9 +1,6 @@
 name: release-race-hardening-drill
 
 on:
-  push:
-    branches:
-      - integration/**
   schedule:
     - cron: '40 9 * * 2'
   workflow_dispatch:

@@ -21,8 +21,6 @@ Describe 'Release race-hardening drill workflow contract' {
 
     It 'is scheduled and dispatchable with bounded drill controls' {
         $script:workflowContent | Should -Match 'schedule:'
-        $script:workflowContent | Should -Match 'push:'
-        $script:workflowContent | Should -Match 'integration/\*\*'
         $script:workflowContent | Should -Match 'workflow_dispatch:'
         $script:workflowContent | Should -Match 'auto_remediate'
         $script:workflowContent | Should -Match 'keep_latest_canary_n'

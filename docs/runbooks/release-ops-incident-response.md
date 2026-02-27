@@ -285,11 +285,64 @@ gh run download <release_race_hardening_run_id> `
 Get-Content .\tmp-race-hardening-summary\release-race-hardening-weekly-summary.json -Raw
 ```
 
+## Release Race-Hardening Gate Verification
+This gate provides required check context `Release Race Hardening Drill` for `main` and `integration/*` PR/push lanes.
+
+Manual gate dispatch:
+
+```powershell
+gh workflow run release-race-hardening-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f source_branch=main `
+  -f max_age_hours=168
+```
+
+Local gate check:
+
+```powershell
+Set-Location D:\dev\labview-cdev-surface-fork
+pwsh -File .\scripts\Test-ReleaseRaceHardeningGate.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -SourceBranch main `
+  -MaxAgeHours 168
+```
+
+Expected gate failure reason codes include:
+- `drill_run_missing`
+- `drill_run_stale`
+- `drill_reason_code_invalid`
+- `drill_collision_evidence_missing`
+
+## Branch Protection Drift + Apply
+Continuous drift monitor:
+
+```powershell
+gh workflow run branch-protection-drift-check.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+Local policy verify:
+
+```powershell
+pwsh -File .\scripts\Test-ReleaseBranchProtectionPolicy.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+Deterministic apply/repair:
+
+```powershell
+pwsh -File .\scripts\Set-ReleaseBranchProtectionPolicy.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+Branch-protection drift incident title:
+- `Branch Protection Drift Alert`
+
 ## Evidence to Attach to Incident
 - `ops-monitoring-report.json`
 - `canary-smoke-tag-hygiene-report.json`
 - `release-control-plane-override-audit.json` (when override is requested/applied)
 - `release-race-hardening-drill-report.json`
 - `release-race-hardening-weekly-summary.json`
+- `release-race-hardening-gate-report.json`
+- `branch-protection-drift-report.json`
 - sync guard run URL
 - parity SHAs (upstream and fork)

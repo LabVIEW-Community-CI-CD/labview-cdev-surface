@@ -1,0 +1,109 @@
+name: branch-protection-drift-check
+
+on:
+  schedule:
+    - cron: '10 * * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  branch-protection-drift-check:
+    name: Branch Protection Drift Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release branch-protection policy
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'branch-protection-drift-report.json'
+          & pwsh -NoProfile -File ./scripts/Test-ReleaseBranchProtectionPolicy.ps1 `
+            -Repository '${{ github.repository }}' `
+            -OutputPath $reportPath
+
+      - name: Upload branch-protection drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-protection-drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/branch-protection-drift-report.json
+          if-no-files-found: error
+
+      - name: Update branch-protection drift incident on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Branch Protection Drift Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'branch-protection-drift-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Branch-protection drift report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Branch-protection drift check failed.
+
+          - Run: $env:RUN_URL
+          - Repository: $($report.repository)
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close branch-protection drift incident on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Branch Protection Drift Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'branch-protection-drift-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Branch-protection drift report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Branch-protection drift check recovered.
+
+          - Run: $env:RUN_URL
+          - Repository: $($report.repository)
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body
