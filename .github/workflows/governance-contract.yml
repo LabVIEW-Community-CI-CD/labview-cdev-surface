@@ -24,6 +24,7 @@ jobs:
           GH_ADMIN_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
           WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
           GH_TOKEN: ${{ github.token }}
+          ENABLE_SELF_HOSTED_CONTRACTS: ${{ vars.ENABLE_SELF_HOSTED_CONTRACTS }}
         run: |
           pwsh -NoProfile -File ./.github/scripts/Invoke-GovernanceContract.ps1 `
             -RepoSlug '${{ github.repository }}' `

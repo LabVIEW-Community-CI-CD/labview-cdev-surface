@@ -37,12 +37,53 @@ if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
     throw 'GH token is required. Set GH_ADMIN_TOKEN (preferred) or WORKFLOW_BOT_TOKEN/GH_TOKEN/GITHUB_TOKEN.'
 }
 
-$requiredContexts = @(
-    'CI Pipeline',
-    'Workspace Installer Contract',
-    'Reproducibility Contract',
-    'Provenance Contract'
-)
+function ConvertTo-BoolOrDefault {
+    param(
+        [Parameter()][AllowNull()][string]$Value = '',
+        [Parameter()][bool]$Default = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace([string]$Value)) {
+        return $Default
+    }
+
+    try {
+        return [System.Convert]::ToBoolean([string]$Value)
+    } catch {
+        $normalized = ([string]$Value).Trim().ToLowerInvariant()
+        if (@('1', 'yes', 'y', 'on') -contains $normalized) {
+            return $true
+        }
+        if (@('0', 'no', 'n', 'off') -contains $normalized) {
+            return $false
+        }
+        return $Default
+    }
+}
+
+$enableSelfHostedContracts = ConvertTo-BoolOrDefault -Value ([string]$env:ENABLE_SELF_HOSTED_CONTRACTS) -Default $false
+$requiredContexts = [System.Collections.Generic.List[string]]::new()
+foreach ($context in @(
+        'CI Pipeline',
+        'Integration Gate',
+        'Release Race Hardening Drill'
+    )) {
+    if (-not $requiredContexts.Contains([string]$context)) {
+        [void]$requiredContexts.Add([string]$context)
+    }
+}
+
+if ($enableSelfHostedContracts) {
+    foreach ($context in @(
+            'Workspace Installer Contract',
+            'Reproducibility Contract',
+            'Provenance Contract'
+        )) {
+        if (-not $requiredContexts.Contains([string]$context)) {
+            [void]$requiredContexts.Add([string]$context)
+        }
+    }
+}
 
 $endpoint = "repos/$RepoSlug/branches/$([uri]::EscapeDataString($Branch))/protection"
 $response = & gh api $endpoint 2>&1
@@ -68,7 +109,7 @@ if ($null -ne $protection.required_status_checks -and $null -ne $protection.requ
     $actualContexts = @($protection.required_status_checks.contexts)
 }
 
-foreach ($context in $requiredContexts) {
+foreach ($context in @($requiredContexts)) {
     if ($actualContexts -notcontains $context) {
         $issues += "missing required status context: $context"
     }
