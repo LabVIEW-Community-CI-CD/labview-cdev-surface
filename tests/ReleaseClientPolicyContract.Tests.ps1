@@ -73,12 +73,18 @@ Describe 'Release client policy contract' {
         ([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_example) | Should -Match '^CHG-'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
+        @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Guardrails Auto-Remediation Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
         $releaseClient.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
         $releaseClient.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
         $releaseClient.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'
         $releaseClient.ops_control_plane_policy.self_healing.slo_gate.watch_timeout_minutes | Should -Be 45
         $releaseClient.ops_control_plane_policy.self_healing.slo_gate.verify_after_remediation | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.self_healing.guardrails.remediation_workflow | Should -Be 'release-guardrails-autoremediate.yml'
+        $releaseClient.ops_control_plane_policy.self_healing.guardrails.race_drill_workflow | Should -Be 'release-race-hardening-drill.yml'
+        $releaseClient.ops_control_plane_policy.self_healing.guardrails.watch_timeout_minutes | Should -Be 120
+        $releaseClient.ops_control_plane_policy.self_healing.guardrails.verify_after_remediation | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.self_healing.guardrails.race_gate_max_age_hours | Should -Be 168
         $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.release_workflow | Should -Be 'release-workspace-installer.yml'
         $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.release_branch | Should -Be 'main'
         $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.watch_timeout_minutes | Should -Be 120
@@ -109,6 +115,7 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_pattern_exists'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_example'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_enabled'
+        $script:policyScriptContent | Should -Match 'ops_policy_self_healing_guardrails_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_rollback_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'
     }

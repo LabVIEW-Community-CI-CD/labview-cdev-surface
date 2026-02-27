@@ -38,6 +38,7 @@ Describe 'Workspace surface contract' {
         $script:rollbackSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-RollbackDrillSelfHealing.ps1'
         $script:raceHardeningDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRaceHardeningDrill.ps1'
         $script:raceHardeningGateScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseRaceHardeningGate.ps1'
+        $script:releaseGuardrailsSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1'
         $script:releaseBranchProtectionPolicyScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseBranchProtectionPolicy.ps1'
         $script:setReleaseBranchProtectionPolicyScriptPath = Join-Path $script:repoRoot 'scripts/Set-ReleaseBranchProtectionPolicy.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
@@ -57,6 +58,7 @@ Describe 'Workspace surface contract' {
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:opsSloGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-slo-gate.yml'
         $script:opsPolicyDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-policy-drift-check.yml'
+        $script:releaseGuardrailsAutoRemediationWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-guardrails-autoremediate.yml'
         $script:branchProtectionDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/branch-protection-drift-check.yml'
         $script:rollbackDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-rollback-drill.yml'
         $script:raceHardeningDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-race-hardening-drill.yml'
@@ -112,6 +114,7 @@ Describe 'Workspace surface contract' {
             $script:rollbackSelfHealingScriptPath,
             $script:raceHardeningDrillScriptPath,
             $script:raceHardeningGateScriptPath,
+            $script:releaseGuardrailsSelfHealingScriptPath,
             $script:releaseBranchProtectionPolicyScriptPath,
             $script:setReleaseBranchProtectionPolicyScriptPath,
             $script:dockerLinuxIterationScriptPath,
@@ -131,6 +134,7 @@ Describe 'Workspace surface contract' {
             $script:canaryWorkflowPath,
             $script:opsSloGateWorkflowPath,
             $script:opsPolicyDriftWorkflowPath,
+            $script:releaseGuardrailsAutoRemediationWorkflowPath,
             $script:branchProtectionDriftWorkflowPath,
             $script:rollbackDrillWorkflowPath,
             $script:raceHardeningDrillWorkflowPath,
@@ -306,12 +310,18 @@ Describe 'Workspace surface contract' {
         ([string]$script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_example) | Should -Match '^CHG-'
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops SLO Gate Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Guardrails Auto-Remediation Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.watch_timeout_minutes | Should -Be 45
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.verify_after_remediation | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails.remediation_workflow | Should -Be 'release-guardrails-autoremediate.yml'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails.race_drill_workflow | Should -Be 'release-race-hardening-drill.yml'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails.watch_timeout_minutes | Should -Be 120
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails.verify_after_remediation | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails.race_gate_max_age_hours | Should -Be 168
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.release_workflow | Should -Be 'release-workspace-installer.yml'
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.release_branch | Should -Be 'main'
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.watch_timeout_minutes | Should -Be 120
@@ -405,16 +415,19 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'ops_control_plane_policy'
         $script:agentsContent | Should -Match 'ops-slo-gate\.yml'
         $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:agentsContent | Should -Match 'release-guardrails-autoremediate\.yml'
         $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
         $script:agentsContent | Should -Match 'release-race-hardening-drill\.yml'
         $script:agentsContent | Should -Match 'release-race-hardening-gate\.yml'
         $script:agentsContent | Should -Match 'branch-protection-drift-check\.yml'
         $script:agentsContent | Should -Match 'Release Race Hardening Drill Alert'
         $script:agentsContent | Should -Match 'Branch Protection Drift Alert'
+        $script:agentsContent | Should -Match 'Release Guardrails Auto-Remediation Alert'
         $script:agentsContent | Should -Match 'release-race-hardening-weekly-summary\.json'
         $script:agentsContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Invoke-ReleaseRaceHardeningDrill\.ps1'
+        $script:agentsContent | Should -Match 'Invoke-ReleaseGuardrailsSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Test-ReleaseRaceHardeningGate\.ps1'
         $script:agentsContent | Should -Match 'Set-ReleaseBranchProtectionPolicy\.ps1'
         $script:agentsContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
@@ -452,15 +465,18 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'runtime_images'
         $script:readmeContent | Should -Match 'ops-slo-gate\.yml'
         $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:readmeContent | Should -Match 'release-guardrails-autoremediate\.yml'
         $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
         $script:readmeContent | Should -Match 'release-race-hardening-drill\.yml'
         $script:readmeContent | Should -Match 'release-race-hardening-gate\.yml'
         $script:readmeContent | Should -Match 'branch-protection-drift-check\.yml'
         $script:readmeContent | Should -Match 'Release Race Hardening Drill'
+        $script:readmeContent | Should -Match 'Release Guardrails Auto-Remediation Alert'
         $script:readmeContent | Should -Match 'release-race-hardening-weekly-summary\.json'
         $script:readmeContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Invoke-ReleaseRaceHardeningDrill\.ps1'
+        $script:readmeContent | Should -Match 'Invoke-ReleaseGuardrailsSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Test-ReleaseRaceHardeningGate\.ps1'
         $script:readmeContent | Should -Match 'Set-ReleaseBranchProtectionPolicy\.ps1'
         $script:readmeContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
@@ -511,6 +527,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'OpsIncidentLifecycleContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'OpsSloGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'OpsPolicyDriftWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'ReleaseGuardrailsAutoRemediationWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ReleaseRaceHardeningDrillWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ReleaseRaceHardeningGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'BranchProtectionDriftWorkflowContract\.Tests\.ps1'
