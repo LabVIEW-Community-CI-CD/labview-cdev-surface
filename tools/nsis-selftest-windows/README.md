@@ -33,5 +33,6 @@ docker build `
 ## Publish from GitHub
 
 - Workflow: `.github/workflows/publish-windows-nsis-parity-image.yml`
+- Trigger: manual `workflow_dispatch` (workflow shape is enforced by hosted-runner CI contract tests)
 - Image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-nsis-windows-parity`
 - Publish is gated by `scripts/Invoke-WindowsContainerNsisSelfTest.ps1` and fails before push if silent install checks fail.

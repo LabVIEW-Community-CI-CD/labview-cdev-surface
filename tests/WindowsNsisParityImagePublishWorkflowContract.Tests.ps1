@@ -15,15 +15,11 @@ Describe 'Windows NSIS parity image publish workflow contract' {
         $script:workflowContent = Get-Content -LiteralPath $script:workflowPath -Raw
     }
 
-    It 'supports manual dispatch and deterministic main-path publish triggers including cdev-cli payload' {
+    It 'is manually dispatched and enforced by hosted-runner CI contract coverage' {
         $script:workflowContent | Should -Match 'workflow_dispatch:'
-        $script:workflowContent | Should -Match 'push:'
-        $script:workflowContent | Should -Match 'tools/nsis-selftest-windows/Dockerfile'
-        $script:workflowContent | Should -Match 'scripts/Invoke-WindowsContainerNsisSelfTest\.ps1'
-        $script:workflowContent | Should -Match 'scripts/Build-RunnerCliBundleFromManifest\.ps1'
-        $script:workflowContent | Should -Match 'scripts/Install-WorkspaceFromManifest\.ps1'
-        $script:workflowContent | Should -Match 'workspace-governance-payload/tools/cdev-cli/\*\*'
-        $script:workflowContent | Should -Match 'workspace-governance\.json'
+        $script:workflowContent | Should -Not -Match 'push:'
+        $script:workflowContent | Should -Match 'promote_latest:'
+        $script:workflowContent | Should -Match 'additional_tag:'
     }
 
     It 'enforces windows container preflight and silent self-test gate before publish' {

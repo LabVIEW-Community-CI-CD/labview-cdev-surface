@@ -220,6 +220,7 @@ Outputs are written under:
 
 Publish the Windows parity image to GHCR with deterministic tags and pre-publish silent-install gating:
 - Workflow: `.github/workflows/publish-windows-nsis-parity-image.yml`
+- Trigger mode: manual `workflow_dispatch` (publish contract is still validated by hosted-runner CI)
 - Image repo: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-nsis-windows-parity`
 - Default tags: `sha-<12-char-commit>`, `2026q1-windows-<yyyymmdd>`
 - Optional manual tags: `latest` (`promote_latest=true`) and `additional_tag`

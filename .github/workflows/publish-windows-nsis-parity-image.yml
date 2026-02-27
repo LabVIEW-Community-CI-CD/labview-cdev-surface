@@ -13,18 +13,6 @@ on:
         required: false
         default: ''
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - tools/nsis-selftest-windows/Dockerfile
-      - tools/nsis-selftest-windows/README.md
-      - scripts/Invoke-WindowsContainerNsisSelfTest.ps1
-      - scripts/Build-RunnerCliBundleFromManifest.ps1
-      - scripts/Install-WorkspaceFromManifest.ps1
-      - workspace-governance.json
-      - workspace-governance-payload/tools/cdev-cli/**
-      - .github/workflows/publish-windows-nsis-parity-image.yml
 
 permissions:
   contents: read
@@ -89,24 +77,56 @@ jobs:
           $tags | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Assert Windows Docker engine
+      - name: Resolve Windows Docker context
+        id: resolve_context
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $dockerArgs = @()
-          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_DOCKER_CONTEXT)) {
-            $dockerArgs += @('--context', $env:WINDOWS_DOCKER_CONTEXT)
+          $candidateContexts = New-Object System.Collections.Generic.List[string]
+          $requestedContext = $env:WINDOWS_DOCKER_CONTEXT
+          if (-not [string]::IsNullOrWhiteSpace($requestedContext)) {
+            $candidateContexts.Add($requestedContext)
+          }
+          $candidateContexts.Add('')
+          $candidateContexts.Add('desktop-windows')
+
+          $seen = @{}
+          $resolvedContext = $null
+          foreach ($candidate in $candidateContexts) {
+            if ($seen.ContainsKey($candidate)) {
+              continue
+            }
+            $seen[$candidate] = $true
+
+            $dockerArgs = @()
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+              $dockerArgs += @('--context', $candidate)
+            }
+
+            $osType = & docker @($dockerArgs + @('info', '--format', '{{.OSType}}')) 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              continue
+            }
+            $osTypeNormalized = ([string]$osType).Trim().ToLowerInvariant()
+            if ($osTypeNormalized -eq 'windows') {
+              $resolvedContext = $candidate
+              break
+            }
           }
 
-          $osType = & docker @($dockerArgs + @('info', '--format', '{{.OSType}}')) 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            throw "docker_info_failed: unable to query Docker engine OSType."
+          if ($null -eq $resolvedContext) {
+            throw "windows_container_mode_required: unable to resolve a Windows Docker context. Set repository variable WINDOWS_DOCKER_CONTEXT or switch Docker Desktop to Windows containers."
           }
-          $osTypeNormalized = ([string]$osType).Trim().ToLowerInvariant()
-          if ($osTypeNormalized -ne 'windows') {
-            throw "windows_container_mode_required: Docker engine OSType is '$osTypeNormalized'."
+
+          if (-not [string]::IsNullOrWhiteSpace($resolvedContext)) {
+            & docker context use $resolvedContext | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+              throw "docker_context_switch_failed: failed to activate Docker context '$resolvedContext'."
+            }
           }
+
+          "resolved_windows_docker_context=$resolvedContext" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Exercise silent installer in Windows container
         shell: powershell
@@ -114,6 +134,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $outputRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release\windows-container-nsis-selftest-publish'
+          $resolvedContext = '${{ steps.resolve_context.outputs.resolved_windows_docker_context }}'
           $scriptArgs = @(
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
@@ -122,8 +143,8 @@ jobs:
             '-BuildLocalImage',
             '-OutputRoot', $outputRoot
           )
-          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_DOCKER_CONTEXT)) {
-            $scriptArgs += @('-DockerContext', $env:WINDOWS_DOCKER_CONTEXT)
+          if (-not [string]::IsNullOrWhiteSpace($resolvedContext)) {
+            $scriptArgs += @('-DockerContext', $resolvedContext)
           }
 
           & powershell @scriptArgs
