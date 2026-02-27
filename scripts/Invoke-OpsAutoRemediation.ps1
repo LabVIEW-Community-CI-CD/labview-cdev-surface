@@ -22,6 +22,14 @@ param(
     [int]$SyncGuardMaxAgeHours = 12,
 
     [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$RequiredRunnerLabels = @(
+        'self-hosted',
+        'windows',
+        'self-hosted-windows-lv'
+    ),
+
+    [Parameter()]
     [ValidateRange(5, 180)]
     [int]$WatchTimeoutMinutes = 45,
 
@@ -67,6 +75,7 @@ try {
     $preHealthPath = Join-Path $tempRoot 'pre-health.json'
     & pwsh -NoProfile -File $opsSnapshotScript `
         -SurfaceRepository $SurfaceRepository `
+        -RequiredRunnerLabels $RequiredRunnerLabels `
         -SyncGuardRepository $SyncGuardRepository `
         -SyncGuardWorkflow $SyncGuardWorkflow `
         -SyncGuardBranch $SyncGuardBranch `
@@ -138,6 +147,7 @@ try {
         try {
             & pwsh -NoProfile -File $opsSnapshotScript `
                 -SurfaceRepository $SurfaceRepository `
+                -RequiredRunnerLabels $RequiredRunnerLabels `
                 -SyncGuardRepository $SyncGuardRepository `
                 -SyncGuardWorkflow $SyncGuardWorkflow `
                 -SyncGuardBranch $SyncGuardBranch `

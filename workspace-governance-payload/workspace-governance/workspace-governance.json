@@ -240,6 +240,19 @@
       "state_path": "C:\\dev\\artifacts\\workspace-release-state.json",
       "latest_report_path": "C:\\dev\\artifacts\\workspace-release-client-latest.json",
       "policy_path": "C:\\dev\\workspace-governance\\release-policy.json",
+      "runtime_images": {
+        "cdev_cli_runtime": {
+          "canonical_repository": "ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime",
+          "source_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",
+          "source_commit": "8fef6f9192d81a14add28636c1100c109ae5e977",
+          "digest": "sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423"
+        },
+        "ops_runtime": {
+          "repository": "ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops",
+          "base_repository": "ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime",
+          "base_digest": "sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423"
+        }
+      },
       "cdev_cli_sync": {
         "primary_repo": "svelderrainruiz/labview-cdev-cli",
         "mirror_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",

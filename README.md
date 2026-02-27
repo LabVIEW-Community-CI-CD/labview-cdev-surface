@@ -341,6 +341,13 @@ Fork/upstream cdev-cli synchronization policy starts with full sync metadata:
 - Mirror repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
 - Strategy: `fork-and-upstream-full-sync`
 
+Runtime image metadata is codified in `installer_contract.release_client.runtime_images`:
+- cdev-cli runtime canonical repository: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime`
+- cdev-cli runtime source repo/commit: `LabVIEW-Community-CI-CD/labview-cdev-cli` @ `8fef6f9192d81a14add28636c1100c109ae5e977`
+- cdev-cli runtime digest: `sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+- ops runtime repository: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
+- ops runtime base repository/digest: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+
 Release channel metadata can be set during publish with workflow input `release_channel` (`stable`, `prerelease`, `canary`).
 
 ## Ops monitoring and hygiene
@@ -348,6 +355,10 @@ Release channel metadata can be set during publish with workflow input `release_
 `ops-monitoring.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-OpsMonitoringSnapshot.ps1` and fails on:
 - runner availability drift (`runner_unavailable`)
 - cdev-cli sync-guard drift/failure (`sync_guard_failed`, `sync_guard_stale`, `sync_guard_missing`, `sync_guard_incomplete`)
+
+Control-plane runner health is intentionally decoupled from Docker Desktop parity labels:
+- `scripts/Invoke-ReleaseControlPlane.ps1` and `scripts/Invoke-OpsAutoRemediation.ps1` call ops monitoring with release-runner labels only (`self-hosted`, `windows`, `self-hosted-windows-lv`).
+- `ops-monitoring.yml` keeps strict defaults for Docker Desktop Windows gate visibility (`self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`).
 
 Every run uploads `ops-monitoring-report.json`. On failure, automation updates a single tracking issue (`Ops Monitoring Alert`).
 
@@ -389,6 +400,9 @@ pwsh -NoProfile -File .\scripts\Invoke-ReleaseControlPlaneLocalDocker.ps1 `
 This executes `scripts/Exercise-ReleaseControlPlaneLocal.ps1` in the portable ops container image and writes artifacts under:
 - `artifacts\release-control-plane-local`
 - Default container image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops:v1`
+- 2-image hierarchy:
+  - Base: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+  - Derived ops runtime: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
 
 For offline or container runtime fallback on the host:
 - add `-HostFallback`
@@ -402,6 +416,12 @@ Deterministic tags:
 - `sha-<12-char-commit>`
 - `v1-YYYYMMDD`
 - `v1` (when `promote_v1=true`)
+
+Ops runtime build policy:
+- Base image is digest-pinned to canonical cdev-cli runtime:
+  - `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+- Canonical consumer path remains org namespace:
+  - `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
 
 Manual publish:
 

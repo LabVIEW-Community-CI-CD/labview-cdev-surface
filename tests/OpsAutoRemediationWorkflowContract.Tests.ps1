@@ -43,4 +43,12 @@ Describe 'Ops auto-remediation workflow contract' {
         $script:runtimeContent | Should -Match 'no_automatable_action'
         $script:runtimeContent | Should -Match 'remediation_failed'
     }
+
+    It 'uses release-runner labels for control-plane remediation health checks' {
+        $script:runtimeContent | Should -Match "self-hosted',\s*'windows',\s*'self-hosted-windows-lv"
+        $script:runtimeContent | Should -Match 'RequiredRunnerLabels \$RequiredRunnerLabels'
+        $script:runtimeContent | Should -Not -Match 'windows-containers'
+        $script:runtimeContent | Should -Not -Match 'user-session'
+        $script:runtimeContent | Should -Not -Match 'cdev-surface-windows-gate'
+    }
 }
