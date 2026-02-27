@@ -44,6 +44,16 @@ Describe 'Release guardrails auto-remediation workflow contract' {
         $script:workflowContent | Should -Match '-Mode Recover'
     }
 
+    It 'writes a deterministic invalid_input report when workflow input guards fail' {
+        $script:workflowContent | Should -Match 'Write-InvalidInputReport'
+        $script:workflowContent | Should -Match "reason_code = 'invalid_input'"
+        $script:workflowContent | Should -Match 'invalid_input:'
+        $script:workflowContent | Should -Match 'race_gate_max_age_hours must be between 1 and 720'
+        $script:workflowContent | Should -Match 'max_attempts must be between 1 and 5'
+        $script:workflowContent | Should -Match 'drill_watch_timeout_minutes must be between 5 and 240'
+        $script:workflowContent | Should -Match 'Set-Content -LiteralPath \$reportPath'
+    }
+
     It 'enforces autonomous remediation paths for branch protection and race gate freshness' {
         $script:runtimeContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:runtimeContent | Should -Match 'Set-ReleaseBranchProtectionPolicy\.ps1'

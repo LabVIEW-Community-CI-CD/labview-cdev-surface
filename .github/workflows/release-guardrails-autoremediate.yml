@@ -57,50 +57,117 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'release-guardrails-autoremediate-report.json'
 
-          $raceGateMaxAgeText = [string]'${{ inputs.race_gate_max_age_hours }}'
-          $raceGateMaxAgeHours = 168
-          if (-not [string]::IsNullOrWhiteSpace($raceGateMaxAgeText)) {
-            $parsedRaceGateMaxAge = 0
-            if (-not [int]::TryParse($raceGateMaxAgeText, [ref]$parsedRaceGateMaxAge)) {
-              throw "race_gate_max_age_hours must be an integer. actual='$raceGateMaxAgeText'"
+          function Write-InvalidInputReport {
+            param(
+              [Parameter(Mandatory = $true)][string]$Message,
+              [Parameter(Mandatory = $true)][object]$InputSnapshot
+            )
+
+            $report = [ordered]@{
+              schema_version = '1.0'
+              generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+              repository = '${{ github.repository }}'
+              branch = 'main'
+              drill_workflow = 'release-race-hardening-drill.yml'
+              race_gate_max_age_hours = [string]$InputSnapshot.race_gate_max_age_hours
+              auto_self_heal = [string]$InputSnapshot.auto_self_heal
+              max_attempts = [string]$InputSnapshot.max_attempts
+              drill_watch_timeout_minutes = [string]$InputSnapshot.drill_watch_timeout_minutes
+              status = 'fail'
+              reason_code = 'invalid_input'
+              message = $Message
+              remediation_hints = @(
+                'Provide race_gate_max_age_hours between 1 and 720.',
+                'Provide max_attempts between 1 and 5.',
+                'Provide drill_watch_timeout_minutes between 5 and 240.',
+                'Provide auto_self_heal as true or false.'
+              )
+              initial_assessment = $null
+              remediation_attempts = @()
+              final_assessment = $null
             }
-            $raceGateMaxAgeHours = $parsedRaceGateMaxAge
+
+            $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
           }
 
-          $maxAttemptsText = [string]'${{ inputs.max_attempts }}'
-          $maxAttempts = 1
-          if (-not [string]::IsNullOrWhiteSpace($maxAttemptsText)) {
-            $parsedMaxAttempts = 0
-            if (-not [int]::TryParse($maxAttemptsText, [ref]$parsedMaxAttempts)) {
-              throw "max_attempts must be an integer. actual='$maxAttemptsText'"
+          $inputSnapshot = [ordered]@{
+            race_gate_max_age_hours = [string]'${{ inputs.race_gate_max_age_hours }}'
+            auto_self_heal = [string]'${{ inputs.auto_self_heal }}'
+            max_attempts = [string]'${{ inputs.max_attempts }}'
+            drill_watch_timeout_minutes = [string]'${{ inputs.drill_watch_timeout_minutes }}'
+          }
+
+          try {
+            $raceGateMaxAgeText = [string]$inputSnapshot.race_gate_max_age_hours
+            $raceGateMaxAgeHours = 168
+            if (-not [string]::IsNullOrWhiteSpace($raceGateMaxAgeText)) {
+              $parsedRaceGateMaxAge = 0
+              if (-not [int]::TryParse($raceGateMaxAgeText, [ref]$parsedRaceGateMaxAge)) {
+                throw "race_gate_max_age_hours must be an integer. actual='$raceGateMaxAgeText'"
+              }
+              if ($parsedRaceGateMaxAge -lt 1 -or $parsedRaceGateMaxAge -gt 720) {
+                throw "race_gate_max_age_hours must be between 1 and 720. actual='$raceGateMaxAgeText'"
+              }
+              $raceGateMaxAgeHours = $parsedRaceGateMaxAge
             }
-            $maxAttempts = $parsedMaxAttempts
-          }
 
-          $watchTimeoutText = [string]'${{ inputs.drill_watch_timeout_minutes }}'
-          $watchTimeoutMinutes = 120
-          if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
-            $parsedWatchTimeout = 0
-            if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeout)) {
-              throw "drill_watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+            $maxAttemptsText = [string]$inputSnapshot.max_attempts
+            $maxAttempts = 1
+            if (-not [string]::IsNullOrWhiteSpace($maxAttemptsText)) {
+              $parsedMaxAttempts = 0
+              if (-not [int]::TryParse($maxAttemptsText, [ref]$parsedMaxAttempts)) {
+                throw "max_attempts must be an integer. actual='$maxAttemptsText'"
+              }
+              if ($parsedMaxAttempts -lt 1 -or $parsedMaxAttempts -gt 5) {
+                throw "max_attempts must be between 1 and 5. actual='$maxAttemptsText'"
+              }
+              $maxAttempts = $parsedMaxAttempts
             }
-            $watchTimeoutMinutes = $parsedWatchTimeout
-          }
 
-          $autoSelfHealText = [string]'${{ inputs.auto_self_heal }}'
-          $autoSelfHeal = $true
-          if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
-            $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
-          }
+            $watchTimeoutText = [string]$inputSnapshot.drill_watch_timeout_minutes
+            $watchTimeoutMinutes = 120
+            if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
+              $parsedWatchTimeout = 0
+              if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeout)) {
+                throw "drill_watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+              }
+              if ($parsedWatchTimeout -lt 5 -or $parsedWatchTimeout -gt 240) {
+                throw "drill_watch_timeout_minutes must be between 5 and 240. actual='$watchTimeoutText'"
+              }
+              $watchTimeoutMinutes = $parsedWatchTimeout
+            }
 
-          & pwsh -NoProfile -File ./scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1 `
-            -Repository '${{ github.repository }}' `
-            -Branch 'main' `
-            -RaceGateMaxAgeHours $raceGateMaxAgeHours `
-            -AutoSelfHeal:$autoSelfHeal `
-            -MaxAttempts $maxAttempts `
-            -DrillWatchTimeoutMinutes $watchTimeoutMinutes `
-            -OutputPath $reportPath
+            $autoSelfHealText = [string]$inputSnapshot.auto_self_heal
+            $autoSelfHeal = $true
+            if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
+              try {
+                $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
+              } catch {
+                throw "auto_self_heal must be a boolean. actual='$autoSelfHealText'"
+              }
+            }
+
+            & pwsh -NoProfile -File ./scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1 `
+              -Repository '${{ github.repository }}' `
+              -Branch 'main' `
+              -RaceGateMaxAgeHours $raceGateMaxAgeHours `
+              -AutoSelfHeal:$autoSelfHeal `
+              -MaxAttempts $maxAttempts `
+              -DrillWatchTimeoutMinutes $watchTimeoutMinutes `
+              -OutputPath $reportPath
+          } catch {
+            $failureMessage = [string]$_.Exception.Message
+            if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf) -and (
+              $failureMessage -match '^race_gate_max_age_hours must be ' -or
+              $failureMessage -match '^max_attempts must be ' -or
+              $failureMessage -match '^drill_watch_timeout_minutes must be ' -or
+              $failureMessage -match '^auto_self_heal must be '
+            )) {
+              Write-InvalidInputReport -Message ("invalid_input: $failureMessage") -InputSnapshot $inputSnapshot
+            }
+
+            throw
+          }
 
       - name: Upload release guardrails auto-remediation report
         if: always()
