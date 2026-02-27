@@ -30,6 +30,10 @@ Describe 'Workspace surface contract' {
         $script:testProvenanceScriptPath = Join-Path $script:repoRoot 'scripts/Test-ProvenanceContracts.ps1'
         $script:installFromReleaseScriptPath = Join-Path $script:repoRoot 'scripts/Install-WorkspaceInstallerFromRelease.ps1'
         $script:testReleaseClientContractsScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseClientContracts.ps1'
+        $script:opsIncidentLifecycleScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-OpsIncidentLifecycle.ps1'
+        $script:opsSloGateScriptPath = Join-Path $script:repoRoot 'scripts/Test-OpsSloGate.ps1'
+        $script:opsPolicyDriftScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseControlPlanePolicyDrift.ps1'
+        $script:rollbackDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRollbackDrill.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
         $script:windowsContainerNsisSelfTestScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-WindowsContainerNsisSelfTest.ps1'
         $script:windowsContainerNsisDockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-windows/Dockerfile'
@@ -45,6 +49,9 @@ Describe 'Workspace surface contract' {
         $script:releaseCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
         $script:releaseWithGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-with-windows-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
+        $script:opsSloGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-slo-gate.yml'
+        $script:opsPolicyDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-policy-drift-check.yml'
+        $script:rollbackDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-rollback-drill.yml'
         $script:linuxNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-linux-nsis-parity-image.yml'
         $script:windowsNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-windows-nsis-parity-image.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
@@ -88,6 +95,10 @@ Describe 'Workspace surface contract' {
             $script:testProvenanceScriptPath,
             $script:installFromReleaseScriptPath,
             $script:testReleaseClientContractsScriptPath,
+            $script:opsIncidentLifecycleScriptPath,
+            $script:opsSloGateScriptPath,
+            $script:opsPolicyDriftScriptPath,
+            $script:rollbackDrillScriptPath,
             $script:dockerLinuxIterationScriptPath,
             $script:windowsContainerNsisSelfTestScriptPath,
             $script:windowsContainerNsisDockerfilePath,
@@ -103,6 +114,9 @@ Describe 'Workspace surface contract' {
             $script:releaseCoreWorkflowPath,
             $script:releaseWithGateWorkflowPath,
             $script:canaryWorkflowPath,
+            $script:opsSloGateWorkflowPath,
+            $script:opsPolicyDriftWorkflowPath,
+            $script:rollbackDrillWorkflowPath,
             $script:linuxNsisParityImagePublishWorkflowPath,
             $script:windowsNsisParityImagePublishWorkflowPath,
             $script:windowsImageGateWorkflowPath,
@@ -253,6 +267,20 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.release_client.runtime_images.ops_runtime.repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops'
         $script:manifest.installer_contract.release_client.runtime_images.ops_runtime.base_repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $script:manifest.installer_contract.release_client.runtime_images.ops_runtime.base_digest | Should -Be 'sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.lookback_days | Should -Be 7
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.min_success_rate_pct | Should -Be 100
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.max_sync_guard_age_hours | Should -Be 12
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'ops-monitoring') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'ops-autoremediate') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'release-control-plane') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.auto_close_on_recovery | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.reopen_on_regression | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops SLO Gate Alert') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.channel | Should -Be 'canary'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.required_history_count | Should -Be 2
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.release_limit | Should -Be 100
         foreach ($repo in @($script:manifest.managed_repos)) {
             $repo.PSObject.Properties.Name | Should -Contain 'required_gh_repo'
             $repo.PSObject.Properties.Name | Should -Contain 'default_branch'
@@ -334,6 +362,14 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'svelderrainruiz/labview-cdev-cli'
         $script:agentsContent | Should -Match 'LabVIEW-Community-CI-CD/labview-cdev-cli'
         $script:agentsContent | Should -Match 'runtime_images'
+        $script:agentsContent | Should -Match 'ops_control_plane_policy'
+        $script:agentsContent | Should -Match 'ops-slo-gate\.yml'
+        $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
+        $script:agentsContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
+        $script:agentsContent | Should -Match 'workflow_failure_detected'
+        $script:agentsContent | Should -Match 'release_client_drift'
+        $script:agentsContent | Should -Match 'rollback_candidate_missing'
         $script:agentsContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $script:agentsContent | Should -Match '8fef6f9192d81a14add28636c1100c109ae5e977'
         $script:agentsContent | Should -Match '0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
@@ -361,6 +397,13 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'workspace-release-state\.json'
         $script:readmeContent | Should -Match 'workspace-release-client-latest\.json'
         $script:readmeContent | Should -Match 'runtime_images'
+        $script:readmeContent | Should -Match 'ops-slo-gate\.yml'
+        $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
+        $script:readmeContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
+        $script:readmeContent | Should -Match 'workflow_failure_detected'
+        $script:readmeContent | Should -Match 'release_client_drift'
+        $script:readmeContent | Should -Match 'rollback_candidate_missing'
         $script:readmeContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $script:readmeContent | Should -Match '8fef6f9192d81a14add28636c1100c109ae5e977'
         $script:readmeContent | Should -Match '0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
@@ -400,6 +443,10 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'CiWorkflowReliabilityContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceShaRefreshPrContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'OpsIncidentLifecycleContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'OpsSloGateWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'OpsPolicyDriftWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'ReleaseRollbackDrillWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxContainerNsisParityContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxNsisParityImagePublishWorkflowContract\.Tests\.ps1'

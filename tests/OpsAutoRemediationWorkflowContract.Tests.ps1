@@ -29,9 +29,11 @@ Describe 'Ops auto-remediation workflow contract' {
 
     It 'executes deterministic remediation and reports incidents' {
         $script:workflowContent | Should -Match 'Invoke-OpsAutoRemediation\.ps1'
+        $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:workflowContent | Should -Match 'ops-autoremediate-report\.json'
         $script:workflowContent | Should -Match 'Ops Auto-Remediation Alert'
-        $script:workflowContent | Should -Match 'gh issue'
+        $script:workflowContent | Should -Match '-Mode Fail'
+        $script:workflowContent | Should -Match '-Mode Recover'
     }
 
     It 'targets sync-guard drift and classifies manual runner intervention' {

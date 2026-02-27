@@ -360,7 +360,11 @@ Control-plane runner health is intentionally decoupled from Docker Desktop parit
 - `scripts/Invoke-ReleaseControlPlane.ps1` and `scripts/Invoke-OpsAutoRemediation.ps1` call ops monitoring with release-runner labels only (`self-hosted`, `windows`, `self-hosted-windows-lv`).
 - `ops-monitoring.yml` keeps strict defaults for Docker Desktop Windows gate visibility (`self-hosted`, `windows`, `self-hosted-windows-lv`, `windows-containers`, `user-session`, `cdev-surface-windows-gate`).
 
-Every run uploads `ops-monitoring-report.json`. On failure, automation updates a single tracking issue (`Ops Monitoring Alert`).
+Incident lifecycle is deterministic and shared by ops workflows via `scripts/Invoke-OpsIncidentLifecycle.ps1`:
+- failure: create/reopen/comment the workflow-specific incident issue
+- recovery: comment and close the open incident issue
+
+Every run uploads `ops-monitoring-report.json`.
 
 `canary-smoke-tag-hygiene.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-CanarySmokeTagHygiene.ps1` to keep latest `v0.YYYYMMDD.N` canary smoke tag(s) for a UTC date and delete older tags deterministically.
 
@@ -383,6 +387,33 @@ Control-plane behavior:
 4. Applies canary smoke tag hygiene after canary publish.
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
+
+`ops-slo-gate.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Test-OpsSloGate.ps1` to enforce:
+- 7-day lookback by default
+- 100% success-rate target for `ops-monitoring`, `ops-autoremediate`, and `release-control-plane`
+- max sync-guard success age of 12 hours
+- deterministic reason codes on failure:
+  - `workflow_missing_runs`
+  - `workflow_failure_detected`
+  - `workflow_success_rate_below_threshold`
+  - `sync_guard_missing`
+  - `sync_guard_stale`
+
+`ops-policy-drift-check.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Test-ReleaseControlPlanePolicyDrift.ps1` and fails on:
+- root/payload release-client policy drift
+- missing runtime image metadata
+- missing control-plane policy metadata
+- deterministic reason codes on failure:
+  - `release_client_drift`
+  - `runtime_images_missing`
+  - `ops_control_plane_policy_missing`
+
+`release-rollback-drill.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-ReleaseRollbackDrill.ps1` to validate deterministic rollback readiness:
+- channel-scoped latest/previous release candidates
+- required release assets for rollback safety (`installer`, `.sha256`, `reproducibility-report.json`, SPDX/SLSA, `release-manifest.json`)
+- deterministic reason codes on failure:
+  - `rollback_candidate_missing`
+  - `rollback_assets_missing`
 
 ## Local Docker package for control-plane exercise
 

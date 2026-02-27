@@ -1,0 +1,136 @@
+name: release-rollback-drill
+
+on:
+  schedule:
+    - cron: '55 8 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to evaluate rollback readiness for.
+        required: false
+        default: canary
+        type: choice
+        options:
+          - canary
+          - prerelease
+          - stable
+      required_history_count:
+        description: Number of channel releases required to validate previous rollback target.
+        required: false
+        default: '2'
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  release-rollback-drill:
+    name: Release Rollback Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Execute rollback drill
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+
+          $channel = [string]'${{ inputs.channel }}'
+          if ([string]::IsNullOrWhiteSpace($channel)) {
+            $channel = 'canary'
+          }
+
+          $requiredHistoryText = [string]'${{ inputs.required_history_count }}'
+          $requiredHistoryCount = 2
+          if (-not [string]::IsNullOrWhiteSpace($requiredHistoryText)) {
+            $parsedRequiredHistory = 0
+            if (-not [int]::TryParse($requiredHistoryText, [ref]$parsedRequiredHistory)) {
+              throw "required_history_count must be an integer. actual='$requiredHistoryText'"
+            }
+            $requiredHistoryCount = $parsedRequiredHistory
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-ReleaseRollbackDrill.ps1 `
+            -Repository '${{ github.repository }}' `
+            -Channel $channel `
+            -RequiredHistoryCount $requiredHistoryCount `
+            -OutputPath $reportPath
+
+      - name: Upload rollback drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rollback-drill-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-rollback-drill-report.json
+          if-no-files-found: error
+
+      - name: Update rollback drill issue on failure
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Rollback Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release rollback drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
+          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $body = @"
+          Release rollback drill failed.
+
+          - Run: $env:RUN_URL
+          - Channel: $($report.channel)
+          - Reason codes: $reasonCodeText
+          - Message: $($report.message)
+          - Candidate count: $($report.candidate_count)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
+
+      - name: Close rollback drill issue on recovery
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Release Rollback Drill Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-rollback-drill-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "release rollback drill report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $body = @"
+          Release rollback drill recovered.
+
+          - Run: $env:RUN_URL
+          - Channel: $($report.channel)
+          - Message: $($report.message)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Recover `
+            -RunUrl $env:RUN_URL `
+            -Body $body

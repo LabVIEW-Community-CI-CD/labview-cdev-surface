@@ -1,61 +1,44 @@
-name: ops-monitoring
+name: ops-policy-drift-check
 
 on:
   schedule:
-    - cron: '15 * * * *'
+    - cron: '50 * * * *'
   workflow_dispatch:
-    inputs:
-      sync_guard_max_age_hours:
-        description: Maximum allowed age in hours for latest successful cdev-cli sync-guard run.
-        required: false
-        default: '12'
-        type: string
 
 permissions:
   contents: read
-  actions: read
   issues: write
 
 jobs:
-  ops-monitoring:
-    name: Ops Monitoring Snapshot
+  ops-policy-drift-check:
+    name: Ops Policy Drift Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - id: snapshot
-        name: Collect runner and sync-guard health snapshot
+      - name: Evaluate control-plane policy drift
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-monitoring-report.json'
-          $syncGuardAgeHoursText = [string]'${{ inputs.sync_guard_max_age_hours }}'
-          $syncGuardAgeHours = 12
-          if (-not [string]::IsNullOrWhiteSpace($syncGuardAgeHoursText)) {
-            $parsed = 0
-            if (-not [int]::TryParse($syncGuardAgeHoursText, [ref]$parsed)) {
-              throw "sync_guard_max_age_hours must be an integer. actual='$syncGuardAgeHoursText'"
-            }
-            $syncGuardAgeHours = $parsed
-          }
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-policy-drift-report.json'
 
-          & pwsh -NoProfile -File ./scripts/Invoke-OpsMonitoringSnapshot.ps1 `
-            -SurfaceRepository '${{ github.repository }}' `
-            -SyncGuardMaxAgeHours $syncGuardAgeHours `
+          & pwsh -NoProfile -File ./scripts/Test-ReleaseControlPlanePolicyDrift.ps1 `
+            -ManifestPath ./workspace-governance.json `
+            -PayloadManifestPath ./workspace-governance-payload/workspace-governance/workspace-governance.json `
             -OutputPath $reportPath
 
-      - name: Upload ops monitoring report
+      - name: Upload policy drift report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ops-monitoring-report-${{ github.run_id }}
-          path: ${{ runner.temp }}/ops-monitoring-report.json
+          name: ops-policy-drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/ops-policy-drift-report.json
           if-no-files-found: error
 
-      - name: Update ops monitoring tracking issue on failure
+      - name: Update ops policy drift issue on failure
         if: failure()
         shell: pwsh
         env:
@@ -64,25 +47,23 @@ jobs:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $title = 'Ops Monitoring Alert'
-          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-monitoring-report.json'
+          $title = 'Ops Policy Drift Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-policy-drift-report.json'
           if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
-            throw "ops monitoring report missing: $reportPath"
+            throw "ops policy drift report missing: $reportPath"
           }
 
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
           $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
-          $message = [string]$report.message
-
           $body = @"
-          Ops monitoring detected a failure.
+          Ops policy drift check failed.
 
           - Run: $env:RUN_URL
           - Reason codes: $reasonCodeText
-          - Message: $message
-          - Surface repository: $($report.surface_repository)
-          - Sync guard repository: $($report.sync_guard.repository)
+          - Message: $($report.message)
+          - Manifest: $($report.manifest_path)
+          - Payload manifest: $($report.payload_manifest_path)
           "@
 
           & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
@@ -92,7 +73,7 @@ jobs:
             -RunUrl $env:RUN_URL `
             -Body $body
 
-      - name: Close ops monitoring tracking issue on recovery
+      - name: Close ops policy drift issue on recovery
         if: success()
         shell: pwsh
         env:
@@ -101,12 +82,18 @@ jobs:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $title = 'Ops Monitoring Alert'
+          $title = 'Ops Policy Drift Alert'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'ops-policy-drift-report.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "ops policy drift report missing: $reportPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
           $body = @"
-          Ops monitoring recovered.
+          Ops policy drift check recovered.
 
           - Run: $env:RUN_URL
-          - Status: pass
+          - Message: $($report.message)
           "@
 
           & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `

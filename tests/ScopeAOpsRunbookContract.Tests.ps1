@@ -26,17 +26,27 @@ Describe 'Scope A ops runbook contract' {
         $script:runbookContent | Should -Match 'fork-upstream-sync-guard'
         $script:runbookContent | Should -Match 'Invoke-ControlledForkForceAlign\.ps1'
         $script:runbookContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
+        $script:runbookContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
+        $script:runbookContent | Should -Match 'ops-slo-gate\.yml'
+        $script:runbookContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:runbookContent | Should -Match 'release-rollback-drill\.yml'
         $script:runbookContent | Should -Match '20260226'
     }
 
     It 'keeps README and AGENTS aligned to Scope A workflows' {
         $script:readmeContent | Should -Match 'ops-monitoring\.yml'
         $script:readmeContent | Should -Match 'canary-smoke-tag-hygiene\.yml'
+        $script:readmeContent | Should -Match 'ops-slo-gate\.yml'
+        $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
         $script:readmeContent | Should -Match 'release-ops-incident-response\.md'
 
         $script:agentsContent | Should -Match 'Ops Monitoring Policy'
         $script:agentsContent | Should -Match 'runner_unavailable'
         $script:agentsContent | Should -Match 'sync_guard_failed'
         $script:agentsContent | Should -Match 'canary-smoke-tag-hygiene\.yml'
+        $script:agentsContent | Should -Match 'ops-slo-gate\.yml'
+        $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
+        $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
     }
 }

@@ -253,6 +253,35 @@
           "base_digest": "sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423"
         }
       },
+      "ops_control_plane_policy": {
+        "slo_gate": {
+          "lookback_days": 7,
+          "min_success_rate_pct": 100,
+          "max_sync_guard_age_hours": 12,
+          "required_workflows": [
+            "ops-monitoring",
+            "ops-autoremediate",
+            "release-control-plane"
+          ]
+        },
+        "incident_lifecycle": {
+          "auto_close_on_recovery": true,
+          "reopen_on_regression": true,
+          "titles": [
+            "Ops Monitoring Alert",
+            "Ops Auto-Remediation Alert",
+            "Release Control Plane Alert",
+            "Ops SLO Gate Alert",
+            "Ops Policy Drift Alert",
+            "Release Rollback Drill Alert"
+          ]
+        },
+        "rollback_drill": {
+          "channel": "canary",
+          "required_history_count": 2,
+          "release_limit": 100
+        }
+      },
       "cdev_cli_sync": {
         "primary_repo": "svelderrainruiz/labview-cdev-cli",
         "mirror_repo": "LabVIEW-Community-CI-CD/labview-cdev-cli",

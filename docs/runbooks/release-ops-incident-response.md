@@ -5,6 +5,9 @@ Deterministic operator response for Scope A hardening controls:
 - runner availability monitoring
 - cdev-cli fork/upstream sync-guard monitoring
 - canary smoke tag hygiene
+- SLO gate enforcement
+- policy drift detection
+- rollback drill readiness
 
 ## Inputs
 - Surface repository: `LabVIEW-Community-CI-CD/labview-cdev-surface-fork`
@@ -16,6 +19,7 @@ Deterministic operator response for Scope A hardening controls:
 2. Read `reason_codes`.
 3. Execute remediation by reason code.
 4. If remediation is automatable, dispatch `ops-autoremediate.yml` first and re-check health.
+5. Incident issue lifecycle is automated (`create/reopen/comment` on failure, `comment/close` on recovery) by `scripts/Invoke-OpsIncidentLifecycle.ps1`.
 
 Reason code mapping:
 - `runner_unavailable`: no online self-hosted runner matched required labels.
@@ -117,6 +121,38 @@ Run validation-only health/policy gate:
 gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
   -f mode=Validate `
   -f dry_run=true
+```
+
+## SLO Gate Dispatch
+Run strict SLO gate with default 7-day window:
+
+```powershell
+gh workflow run ops-slo-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+Run with explicit thresholds:
+
+```powershell
+gh workflow run ops-slo-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f lookback_days=7 `
+  -f min_success_rate_pct=100 `
+  -f sync_guard_max_age_hours=12
+```
+
+## Policy Drift Check Dispatch
+Run control-plane policy drift check:
+
+```powershell
+gh workflow run ops-policy-drift-check.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
+```
+
+## Rollback Drill Dispatch
+Run deterministic rollback drill on canary lane:
+
+```powershell
+gh workflow run release-rollback-drill.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f channel=canary `
+  -f required_history_count=2
 ```
 
 ## Evidence to Attach to Incident
