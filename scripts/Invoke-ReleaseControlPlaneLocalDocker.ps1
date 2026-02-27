@@ -31,6 +31,12 @@ param(
     [switch]$DryRun,
 
     [Parameter()]
+    [bool]$ForceStablePromotionOutsideWindow = $false,
+
+    [Parameter()]
+    [string]$ForceStablePromotionReason = '',
+
+    [Parameter()]
     [switch]$AllowMutatingModes,
 
     [Parameter()]
@@ -73,6 +79,14 @@ if ($RunContractTests) {
 }
 if ($DryRun) {
     $scriptArgs += '-DryRun'
+}
+if ($ForceStablePromotionOutsideWindow) {
+    $scriptArgs += '-ForceStablePromotionOutsideWindow'
+    $scriptArgs += 'true'
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$ForceStablePromotionReason)) {
+    $scriptArgs += '-ForceStablePromotionReason'
+    $scriptArgs += [string]$ForceStablePromotionReason
 }
 if ($AllowMutatingModes) {
     $scriptArgs += '-AllowMutatingModes'

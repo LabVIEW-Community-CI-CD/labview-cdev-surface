@@ -28,6 +28,7 @@ Reason code mapping:
 - `sync_guard_missing`: no sync-guard run found for branch.
 - `sync_guard_incomplete`: only in-progress/queued runs exist; no completed run yet.
 - `promotion_lineage_invalid`: promotion source/target channel, SemVer core, or commit-SHA lineage check failed.
+- `stable_window_override_invalid`: requested stable override violated stable window policy (override disabled, missing reason, or reason too short).
 - `release_dispatch_watch_failed`: release workflow dispatch completed but run conclusion was not `success`.
 - `release_verification_failed`: post-dispatch release verification failed (missing assets or invalid `release-manifest.json` metadata).
 - `canary_hygiene_failed`: SemVer canary retention cleanup failed after publish.
@@ -116,6 +117,17 @@ Run full autonomous cycle manually:
 ```powershell
 gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
   -f mode=FullCycle `
+  -f auto_remediate=true `
+  -f dry_run=false
+```
+
+Force stable promotion outside window (audited emergency path):
+
+```powershell
+gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f mode=FullCycle `
+  -f force_stable_promotion_outside_window=true `
+  -f force_stable_promotion_reason="Emergency promotion after incident remediation" `
   -f auto_remediate=true `
   -f dry_run=false
 ```

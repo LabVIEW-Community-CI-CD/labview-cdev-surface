@@ -27,6 +27,8 @@ Describe 'Release control plane workflow contract' {
         $script:workflowContent | Should -Match 'FullCycle'
         $script:workflowContent | Should -Match 'auto_remediate'
         $script:workflowContent | Should -Match 'keep_latest_canary_n'
+        $script:workflowContent | Should -Match 'force_stable_promotion_outside_window'
+        $script:workflowContent | Should -Match 'force_stable_promotion_reason'
         $script:workflowContent | Should -Match 'dry_run'
     }
 
@@ -50,6 +52,8 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'Resolve-CanaryTargetSemVer'
         $script:runtimeContent | Should -Match 'Resolve-PromotedTargetSemVer'
         $script:runtimeContent | Should -Match 'Resolve-SemVerEnforcementPolicy'
+        $script:runtimeContent | Should -Match 'Resolve-StablePromotionWindowPolicy'
+        $script:runtimeContent | Should -Match 'Resolve-StablePromotionWindowDecision'
         $script:runtimeContent | Should -Match 'Resolve-ControlPlaneFailureReasonCode'
         $script:runtimeContent | Should -Match 'Verify-DispatchedRelease'
         $script:runtimeContent | Should -Match 'Verify-PromotionLineage'
@@ -66,6 +70,9 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'promotion_source_missing'
         $script:runtimeContent | Should -Match 'promotion_source_asset_missing'
         $script:runtimeContent | Should -Match 'promotion_source_not_at_head'
+        $script:runtimeContent | Should -Match 'stable_window_closed'
+        $script:runtimeContent | Should -Match 'stable_window_override_applied'
+        $script:runtimeContent | Should -Match 'stable_window_override_invalid'
         $script:runtimeContent | Should -Match 'stable_already_published'
         $script:runtimeContent | Should -Match '\[tag_migration_warning\]'
         $script:runtimeContent | Should -Match "tag_family = 'semver'"

@@ -100,6 +100,15 @@ try {
                 if (-not $selfHealingPresent) {
                     Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_self_healing_missing'
                 }
+
+                $stableWindowPresent = ($null -ne $releaseClient.ops_control_plane_policy.stable_promotion_window)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_stable_window_present'
+                        passed = $stableWindowPresent
+                    }) | Out-Null
+                if (-not $stableWindowPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_stable_window_missing'
+                }
             }
         }
     }

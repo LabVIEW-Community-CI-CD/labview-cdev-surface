@@ -31,6 +31,12 @@ param(
     [switch]$DryRun,
 
     [Parameter()]
+    [bool]$ForceStablePromotionOutsideWindow = $false,
+
+    [Parameter()]
+    [string]$ForceStablePromotionReason = '',
+
+    [Parameter()]
     [switch]$AllowMutatingModes,
 
     [Parameter()]
@@ -132,6 +138,8 @@ try {
         -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
         -KeepLatestCanaryN $KeepLatestCanaryN `
         -AutoRemediate:$false `
+        -ForceStablePromotionOutsideWindow:$ForceStablePromotionOutsideWindow `
+        -ForceStablePromotionReason $ForceStablePromotionReason `
         -DryRun:$DryRun `
         -OutputPath $controlPlanePath
     if ($LASTEXITCODE -ne 0) {
