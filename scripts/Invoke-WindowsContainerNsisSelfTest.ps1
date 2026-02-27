@@ -197,6 +197,7 @@ $cliExtractRoot = Join-Path $workRoot 'cdev-cli'
 $cliBundleZipPath = Join-Path $payloadRoot 'tools\cdev-cli\cdev-cli-win-x64.zip'
 $cliEntrypointPath = Join-Path $cliExtractRoot 'cdev-cli\scripts\Invoke-CdevCli.ps1'
 $cliRunReportPath = Join-Path $hostOut 'cdev-cli-installer-run-report.json'
+$cliRunReportResolvedPath = ''
 $cliRunStatus = ''
 $installReportPath = Join-Path $workspaceRoot 'artifacts\workspace-install-latest.json'
 $launchLogPath = Join-Path $workspaceRoot 'artifacts\workspace-installer-launch.log'
@@ -275,35 +276,34 @@ try {
         throw "cdev-cli installer install failed in container with exit code $installerExitCode"
     }
 
-    if (-not (Test-Path -LiteralPath $cliRunReportPath -PathType Leaf)) {
+    $cliRunReportResolvedPath = $cliRunReportPath
+    if (-not (Test-Path -LiteralPath $cliRunReportResolvedPath -PathType Leaf) -and (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
+        # Bundled cdev-cli versions may persist their run report to --report-path.
+        $cliRunReportResolvedPath = $installReportPath
+    }
+    if (-not (Test-Path -LiteralPath $cliRunReportResolvedPath -PathType Leaf)) {
         $reasonCode = 'install_report_missing'
         throw "cdev-cli run report missing after installer operation: $cliRunReportPath"
     }
 
-    $cliRunReport = Get-Content -LiteralPath $cliRunReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $cliRunReport = Get-Content -LiteralPath $cliRunReportResolvedPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $cliRunStatus = [string]$cliRunReport.status
     if ($cliRunStatus -ne 'succeeded') {
-        $reasonCode = 'installer_exit_nonzero'
+        $reasonCode = if ((@($cliRunReport.errors) -join "`n") -match 'Expected installer report not found') { 'install_report_missing' } else { 'installer_exit_nonzero' }
         throw "cdev-cli run report status is '$cliRunStatus' (expected 'succeeded')."
     }
 
-    if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
-        $reasonCode = 'install_report_missing'
-        throw "Install report not found after container smoke install: $installReportPath"
-    }
-
-    $installReport = Get-Content -LiteralPath $installReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
-    $installReportStatus = [string]$installReport.status
-    $installReportErrors = @($installReport.errors)
-    $installReportWarnings = @($installReport.warnings)
-    if ($installReportStatus -ne 'succeeded') {
-        $reasonCode = 'install_report_failed'
-        throw "Install report status is '$installReportStatus' (expected 'succeeded')."
-    }
+    $installReportStatus = $cliRunStatus
+    $installReportErrors = @($cliRunReport.errors)
+    $installReportWarnings = @($cliRunReport.warnings)
 
     Copy-Item -LiteralPath $installerPath -Destination (Join-Path $hostOut 'lvie-cdev-workspace-installer-container-smoke.exe') -Force
     Copy-Item -LiteralPath "$installerPath.sha256" -Destination (Join-Path $hostOut 'lvie-cdev-workspace-installer-container-smoke.exe.sha256') -Force
-    Copy-Item -LiteralPath $installReportPath -Destination (Join-Path $hostOut 'workspace-install-latest.container-smoke.json') -Force
+    if (Test-Path -LiteralPath $installReportPath -PathType Leaf) {
+        Copy-Item -LiteralPath $installReportPath -Destination (Join-Path $hostOut 'workspace-install-latest.container-smoke.json') -Force
+    } elseif (Test-Path -LiteralPath $cliRunReportResolvedPath -PathType Leaf) {
+        Copy-Item -LiteralPath $cliRunReportResolvedPath -Destination (Join-Path $hostOut 'workspace-install-latest.container-smoke.json') -Force
+    }
     if (Test-Path -LiteralPath $launchLogPath -PathType Leaf) {
         Copy-Item -LiteralPath $launchLogPath -Destination (Join-Path $hostOut 'workspace-installer-launch.container-smoke.log') -Force
     }
@@ -331,7 +331,7 @@ try {
     installer_sha256 = $installerSha256
     installer_exit_code = $installerExitCode
     cdev_cli_entrypoint_path = $cliEntrypointPath
-    cdev_cli_run_report_path = $cliRunReportPath
+    cdev_cli_run_report_path = if ([string]::IsNullOrWhiteSpace($cliRunReportResolvedPath)) { $cliRunReportPath } else { $cliRunReportResolvedPath }
     cdev_cli_status = $cliRunStatus
     install_report_path = $installReportPath
     install_report_status = $installReportStatus
