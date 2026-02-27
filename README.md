@@ -411,6 +411,7 @@ Control-plane behavior:
 12. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
 13. Loads GA policy contract `installer_contract.release_client.ops_control_plane_policy.schema_version=2.0` and emits state-machine execution evidence (`state_machine.transitions_executed`) in every report.
 14. Executes deterministic rollback orchestration (`Invoke-RollbackDrillSelfHealing.ps1`) when configured trigger reason codes are hit.
+15. Emits deterministic decision-trail evidence artifact `release-control-plane-decision-trail.json` (report hash + state-machine + rollback evidence fingerprint).
 
 Top-level release-control-plane deterministic failure reason codes include:
 - `ops_health_gate_failed`
@@ -471,6 +472,8 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `ops_control_plane_state_machine_missing`
   - `ops_control_plane_state_machine_version_missing`
   - `ops_control_plane_rollback_orchestration_missing`
+  - `ops_control_plane_decision_trail_missing`
+  - `ops_control_plane_decision_trail_schema_version_missing`
   - `ops_control_plane_error_budget_missing`
   - `ops_control_plane_error_budget_window_days_invalid`
   - `ops_control_plane_slo_alert_thresholds_missing`

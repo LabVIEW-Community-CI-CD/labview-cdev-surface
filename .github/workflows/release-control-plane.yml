@@ -162,12 +162,40 @@ jobs:
             -OverrideAuditOutputPath $overrideAuditReportPath `
             -OutputPath $reportPath
 
+      - name: Build release control plane decision trail
+        if: always()
+        shell: pwsh
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-report.json'
+          $decisionTrailPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-decision-trail.json'
+
+          & pwsh -NoProfile -File ./scripts/Write-ReleaseControlPlaneDecisionTrail.ps1 `
+            -ReportPath $reportPath `
+            -Repository '${{ github.repository }}' `
+            -Workflow 'release-control-plane.yml' `
+            -RunId '${{ github.run_id }}' `
+            -RunUrl $env:RUN_URL `
+            -Branch '${{ github.ref_name }}' `
+            -HeadSha '${{ github.sha }}' `
+            -OutputPath $decisionTrailPath
+
       - name: Upload release control plane report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-control-plane-report-${{ github.run_id }}
           path: ${{ runner.temp }}/release-control-plane-report.json
+          if-no-files-found: error
+
+      - name: Upload release control plane decision trail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-control-plane-decision-trail-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-control-plane-decision-trail.json
           if-no-files-found: error
 
       - name: Upload release control plane stable override audit

@@ -77,6 +77,11 @@ Describe 'Release client policy contract' {
         $releaseClient.ops_control_plane_policy.rollback_orchestration.enabled | Should -BeTrue
         @($releaseClient.ops_control_plane_policy.rollback_orchestration.trigger_reason_codes) | Should -Contain 'release_dispatch_watch_timeout'
         @($releaseClient.ops_control_plane_policy.rollback_orchestration.trigger_reason_codes) | Should -Contain 'release_verification_failed'
+        $releaseClient.ops_control_plane_policy.decision_trail.schema_version | Should -Be '1.0'
+        $releaseClient.ops_control_plane_policy.decision_trail.artifact_name_prefix | Should -Be 'release-control-plane-decision-trail'
+        $releaseClient.ops_control_plane_policy.decision_trail.hash_algorithm | Should -Be 'sha256'
+        $releaseClient.ops_control_plane_policy.decision_trail.include_state_machine | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.decision_trail.include_rollback_orchestration | Should -BeTrue
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-monitoring'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-autoremediate'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'release-control-plane'
@@ -139,6 +144,8 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'ops_policy_error_budget_window_days'
         $script:policyScriptContent | Should -Match 'ops_policy_state_machine_version'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_orchestration_enabled'
+        $script:policyScriptContent | Should -Match 'ops_policy_decision_trail_schema_version'
+        $script:policyScriptContent | Should -Match 'ops_policy_decision_trail_hash_algorithm'
         $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_full_cycle_weekday_monday'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_pattern_exists'

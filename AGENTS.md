@@ -216,6 +216,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - `ops_control_plane_policy.schema_version` is required and currently pinned to `2.0`.
 - `ops_control_plane_policy.state_machine` is required and must emit runtime transition evidence in `release-control-plane-report.json`.
 - `ops_control_plane_policy.rollback_orchestration` is required and controls deterministic rollback self-healing trigger behavior.
+- `ops_control_plane_policy.decision_trail` is required and controls deterministic decision-trail evidence emission (`release-control-plane-decision-trail.json`).
 - Control-plane mode contract:
   - `Validate`
   - `CanaryCycle`
@@ -304,6 +305,8 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `ops_control_plane_state_machine_missing`
   - `ops_control_plane_state_machine_version_missing`
   - `ops_control_plane_rollback_orchestration_missing`
+  - `ops_control_plane_decision_trail_missing`
+  - `ops_control_plane_decision_trail_schema_version_missing`
   - `ops_control_plane_error_budget_missing`
   - `ops_control_plane_error_budget_window_days_invalid`
   - `ops_control_plane_slo_alert_thresholds_missing`
