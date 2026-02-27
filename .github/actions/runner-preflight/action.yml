@@ -1,0 +1,131 @@
+name: runner-preflight
+description: Deterministic self-hosted runner availability preflight with 403 visibility fallback.
+
+inputs:
+  repository:
+    description: owner/repo target for runner visibility.
+    required: true
+  required_labels_csv:
+    description: Comma-delimited required runner labels.
+    required: true
+  report_path:
+    description: Absolute path to write preflight JSON report.
+    required: true
+
+outputs:
+  reason_code:
+    description: ok | runner_unavailable | runner_visibility_unavailable
+    value: ${{ steps.check.outputs.reason_code }}
+  report_path:
+    description: Output JSON report path.
+    value: ${{ steps.check.outputs.report_path }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      name: Evaluate runner availability gate
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $repo = [string]'${{ inputs.repository }}'
+        if ([string]::IsNullOrWhiteSpace($repo)) {
+          throw 'repository_required'
+        }
+
+        $requiredLabels = @(
+          [string]'${{ inputs.required_labels_csv }}'.Split(',') |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+        if ($requiredLabels.Count -eq 0) {
+          throw 'required_labels_empty'
+        }
+
+        $reportPath = [string]'${{ inputs.report_path }}'
+        if ([string]::IsNullOrWhiteSpace($reportPath)) {
+          throw 'report_path_required'
+        }
+
+        $runnersJson = & gh api "repos/$repo/actions/runners?per_page=100" 2>&1
+        $runnerApiExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        $runnerVisibility = 'available'
+        $runnerQueryError = ''
+        if ($runnerApiExitCode -ne 0) {
+          $runnerQueryError = [string]::Join("`n", @($runnersJson))
+          if ($runnerQueryError -match 'Resource not accessible by integration' -or $runnerQueryError -match 'HTTP 403') {
+            $runnerVisibility = 'forbidden'
+          } else {
+            throw "Failed to list runners for '$repo'. $runnerQueryError"
+          }
+        }
+
+        $onlineRunners = @()
+        $eligibleRunners = @()
+        if ($runnerVisibility -eq 'available') {
+          $runnerPayload = $runnersJson | ConvertFrom-Json -ErrorAction Stop
+          foreach ($runner in @($runnerPayload.runners)) {
+            if ([string]$runner.status -ne 'online') {
+              continue
+            }
+
+            $onlineRunners += [string]$runner.name
+            $runnerLabels = @{}
+            foreach ($label in @($runner.labels)) {
+              $runnerLabels[[string]$label.name.ToLowerInvariant()] = $true
+            }
+
+            $missingLabels = @($requiredLabels | Where-Object { -not $runnerLabels.ContainsKey($_) })
+            if ($missingLabels.Count -eq 0) {
+              $eligibleRunners += [ordered]@{
+                name = [string]$runner.name
+                labels = @($runner.labels | ForEach-Object { [string]$_.name })
+              }
+            }
+          }
+        }
+
+        $status = 'fail'
+        $reasonCode = 'runner_unavailable'
+        $remediation = 'Register at least one online self-hosted runner with the required labels.'
+        if ($runnerVisibility -eq 'forbidden') {
+          $status = 'warn'
+          $reasonCode = 'runner_visibility_unavailable'
+          $remediation = 'Grant token access to list self-hosted runners, or run an out-of-band runner availability check.'
+        } elseif ($eligibleRunners.Count -gt 0) {
+          $status = 'pass'
+          $reasonCode = 'ok'
+          $remediation = ''
+        }
+
+        $report = [ordered]@{
+          schema_version = '1.0'
+          repository = $repo
+          generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+          required_labels = $requiredLabels
+          runner_visibility = $runnerVisibility
+          runner_query_error = $runnerQueryError
+          online_runners = $onlineRunners
+          eligible_runners = $eligibleRunners
+          status = $status
+          reason_code = $reasonCode
+          remediation = $remediation
+        }
+
+        $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+        "reason_code=$reasonCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "report_path=$reportPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+        if ($status -eq 'pass') {
+          Write-Host "Runner preflight passed. Eligible runners: $($eligibleRunners.Count)."
+          exit 0
+        }
+
+        if ($status -eq 'warn') {
+          Write-Warning "[runner_visibility_unavailable] Runner list API is not accessible with current token. Continuing without fail-fast runner gate."
+          exit 0
+        }
+
+        throw "[runner_unavailable] No online runner matched required labels ($($requiredLabels -join ', ')). Remediation: $remediation"

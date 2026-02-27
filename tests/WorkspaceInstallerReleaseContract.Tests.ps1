@@ -8,14 +8,19 @@ Describe 'Workspace installer release workflow contract' {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
         $script:wrapperWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-workspace-installer.yml'
         $script:coreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
+        $script:runnerPreflightActionPath = Join-Path $script:repoRoot '.github/actions/runner-preflight/action.yml'
         if (-not (Test-Path -LiteralPath $script:wrapperWorkflowPath -PathType Leaf)) {
             throw "Release wrapper workflow not found: $script:wrapperWorkflowPath"
         }
         if (-not (Test-Path -LiteralPath $script:coreWorkflowPath -PathType Leaf)) {
             throw "Release core workflow not found: $script:coreWorkflowPath"
         }
+        if (-not (Test-Path -LiteralPath $script:runnerPreflightActionPath -PathType Leaf)) {
+            throw "Runner preflight action not found: $script:runnerPreflightActionPath"
+        }
         $script:wrapperWorkflowContent = Get-Content -LiteralPath $script:wrapperWorkflowPath -Raw
         $script:coreWorkflowContent = Get-Content -LiteralPath $script:coreWorkflowPath -Raw
+        $script:runnerPreflightActionContent = Get-Content -LiteralPath $script:runnerPreflightActionPath -Raw
     }
 
     It 'keeps dispatch-only wrapper and forwards to release core workflow' {
@@ -55,12 +60,15 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'release-ops-health-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Release Runner Availability Preflight'
         $script:coreWorkflowContent | Should -Match 'Validate eligible self-hosted release runner availability'
-        $script:coreWorkflowContent | Should -Match 'repos/\$repo/actions/runners\?per_page=100'
-        $script:coreWorkflowContent | Should -Match 'reason_code=runner_unavailable'
-        $script:coreWorkflowContent | Should -Match '\[runner_unavailable\]'
-        $script:coreWorkflowContent | Should -Match 'reason_code=runner_visibility_unavailable'
-        $script:coreWorkflowContent | Should -Match 'runner_visibility'
-        $script:coreWorkflowContent | Should -Match '\[runner_visibility_unavailable\]'
+        $script:coreWorkflowContent | Should -Match 'uses:\s*\./\.github/actions/runner-preflight'
+        $script:coreWorkflowContent | Should -Match 'required_labels_csv:\s*self-hosted,windows,self-hosted-windows-lv'
+        $script:runnerPreflightActionContent | Should -Match 'repos/\$repo/actions/runners\?per_page=100'
+        $script:runnerPreflightActionContent | Should -Match 'reason_code'
+        $script:runnerPreflightActionContent | Should -Match 'runner_unavailable'
+        $script:runnerPreflightActionContent | Should -Match 'runner_visibility_unavailable'
+        $script:runnerPreflightActionContent | Should -Match 'runner_visibility'
+        $script:runnerPreflightActionContent | Should -Match '\[runner_unavailable\]'
+        $script:runnerPreflightActionContent | Should -Match '\[runner_visibility_unavailable\]'
         $script:coreWorkflowContent | Should -Match 'release-runner-availability-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Package Workspace Installer'
         $script:coreWorkflowContent | Should -Match 'needs:\s*\[ops_health_preflight,\s*runner_preflight\]'

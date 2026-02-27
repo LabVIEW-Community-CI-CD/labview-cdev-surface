@@ -90,97 +90,13 @@ jobs:
     steps:
       - id: check
         name: Validate eligible self-hosted release runner availability
-        shell: pwsh
+        uses: ./.github/actions/runner-preflight
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $repo = [string]'${{ github.repository }}'
-          $requiredLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv')
-          $reportPath = Join-Path $env:RUNNER_TEMP 'release-runner-availability-preflight.json'
-
-          $runnersJson = & gh api "repos/$repo/actions/runners?per_page=100" 2>&1
-          $runnerApiExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-          $runnerVisibility = 'available'
-          $runnerQueryError = ''
-          if ($runnerApiExitCode -ne 0) {
-            $runnerQueryError = [string]::Join("`n", @($runnersJson))
-            if ($runnerQueryError -match 'Resource not accessible by integration' -or $runnerQueryError -match 'HTTP 403') {
-              $runnerVisibility = 'forbidden'
-            } else {
-              throw "Failed to list runners for '$repo'. $runnerQueryError"
-            }
-          }
-
-          $onlineRunners = @()
-          $eligibleRunners = @()
-          if ($runnerVisibility -eq 'available') {
-            $runnerPayload = $runnersJson | ConvertFrom-Json -ErrorAction Stop
-            foreach ($runner in @($runnerPayload.runners)) {
-              if ([string]$runner.status -ne 'online') {
-                continue
-              }
-
-              $onlineRunners += [string]$runner.name
-              $runnerLabels = @{}
-              foreach ($label in @($runner.labels)) {
-                $runnerLabels[[string]$label.name.ToLowerInvariant()] = $true
-              }
-
-              $missingLabels = @($requiredLabels | Where-Object { -not $runnerLabels.ContainsKey($_) })
-              if ($missingLabels.Count -eq 0) {
-                $eligibleRunners += [ordered]@{
-                  name = [string]$runner.name
-                  labels = @($runner.labels | ForEach-Object { [string]$_.name })
-                }
-              }
-            }
-          }
-
-          $status = 'fail'
-          $reasonCode = 'runner_unavailable'
-          $remediation = 'Register at least one online self-hosted runner with labels self-hosted, windows, self-hosted-windows-lv.'
-          if ($runnerVisibility -eq 'forbidden') {
-            $status = 'warn'
-            $reasonCode = 'runner_visibility_unavailable'
-            $remediation = 'Grant token access to list self-hosted runners, or run an out-of-band runner availability check.'
-          } elseif ($eligibleRunners.Count -gt 0) {
-            $status = 'pass'
-            $reasonCode = 'ok'
-            $remediation = ''
-          }
-
-          $report = [ordered]@{
-            schema_version = '1.0'
-            repository = $repo
-            generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
-            required_labels = $requiredLabels
-            runner_visibility = $runnerVisibility
-            runner_query_error = $runnerQueryError
-            online_runners = $onlineRunners
-            eligible_runners = $eligibleRunners
-            status = $status
-            reason_code = $reasonCode
-            remediation = $remediation
-          }
-
-          $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reportPath -Encoding utf8
-
-          if ($status -eq 'pass') {
-            "reason_code=ok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            Write-Host "Runner preflight passed. Eligible runners: $($eligibleRunners.Count)."
-            exit 0
-          }
-
-          if ($status -eq 'warn') {
-            "reason_code=runner_visibility_unavailable" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            Write-Warning "[runner_visibility_unavailable] Runner list API is not accessible with current token. Continuing without fail-fast runner gate."
-            exit 0
-          }
-
-          "reason_code=runner_unavailable" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          throw "[runner_unavailable] No online runner matched required labels ($($requiredLabels -join ', ')). Remediation: $($report.remediation)"
+        with:
+          repository: ${{ github.repository }}
+          required_labels_csv: self-hosted,windows,self-hosted-windows-lv
+          report_path: ${{ runner.temp }}/release-runner-availability-preflight.json
 
       - name: Upload runner availability preflight report
         if: always()
