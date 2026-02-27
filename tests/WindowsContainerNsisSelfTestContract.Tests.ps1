@@ -8,6 +8,7 @@ Describe 'Windows container NSIS self-test contract' {
         $script:repoRoot = (Resolve-Path -Path (Join-Path $PSScriptRoot '..')).Path
         $script:selfTestScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-WindowsContainerNsisSelfTest.ps1'
         $script:dockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-windows/Dockerfile'
+        $script:installerNsisPath = Join-Path $script:repoRoot 'nsis/workspace-bootstrap-installer.nsi'
 
         if (-not (Test-Path -LiteralPath $script:selfTestScriptPath -PathType Leaf)) {
             throw "Windows container self-test script missing: $script:selfTestScriptPath"
@@ -15,9 +16,13 @@ Describe 'Windows container NSIS self-test contract' {
         if (-not (Test-Path -LiteralPath $script:dockerfilePath -PathType Leaf)) {
             throw "Windows self-test Dockerfile missing: $script:dockerfilePath"
         }
+        if (-not (Test-Path -LiteralPath $script:installerNsisPath -PathType Leaf)) {
+            throw "Workspace bootstrap NSIS script missing: $script:installerNsisPath"
+        }
 
         $script:selfTestScriptContent = Get-Content -LiteralPath $script:selfTestScriptPath -Raw
         $script:dockerfileContent = Get-Content -LiteralPath $script:dockerfilePath -Raw
+        $script:installerNsisContent = Get-Content -LiteralPath $script:installerNsisPath -Raw
     }
 
     It 'builds and runs a Windows containerized NSIS smoke install flow' {
@@ -59,6 +64,12 @@ Describe 'Windows container NSIS self-test contract' {
         $script:dockerfileContent | Should -Not -Match 'dotnet-install\.ps1'
         $script:dockerfileContent | Should -Not -Match 'MinGit-'
         $script:dockerfileContent | Should -Not -Match 'nsis-'
+    }
+
+    It 'skips x86 LabVIEW package bootstrap when installer context is ContainerSmoke' {
+        $script:installerNsisContent | Should -Match '!if\s*"\$\{INSTALL_EXEC_CONTEXT\}"\s*==\s*"ContainerSmoke"'
+        $script:installerNsisContent | Should -Match 'x86_bootstrap_skipped_for_container_smoke'
+        $script:installerNsisContent | Should -Match 'Goto labview_x86_ready'
     }
 
     It 'has parse-safe PowerShell syntax' {

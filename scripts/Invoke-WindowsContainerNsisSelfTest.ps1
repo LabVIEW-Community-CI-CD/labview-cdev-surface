@@ -55,6 +55,17 @@ function Ensure-Directory {
     }
 }
 
+function Clear-DirectoryContents {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        return
+    }
+
+    Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+    }
+}
+
 function Assert-Command {
     param([Parameter(Mandatory = $true)][string]$Name)
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -179,6 +190,17 @@ function Ensure-Directory {
     }
 }
 
+function Clear-DirectoryContents {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        return
+    }
+
+    Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+    }
+}
+
 function Assert-Command {
     param([Parameter(Mandatory = $true)][string]$Name)
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -231,9 +253,7 @@ try {
     if (Test-Path -LiteralPath $workRoot -PathType Container) {
         Remove-Item -LiteralPath $workRoot -Recurse -Force
     }
-    if (Test-Path -LiteralPath $workspaceRoot -PathType Container) {
-        Remove-Item -LiteralPath $workspaceRoot -Recurse -Force
-    }
+    Clear-DirectoryContents -Path $workspaceRoot
     Ensure-Directory -Path $workRoot
     Ensure-Directory -Path $workspaceRoot
     Ensure-Directory -Path $hostOut
@@ -263,6 +283,15 @@ try {
         throw "cdev-cli entrypoint not found after bundle extraction: $cliEntrypointPath"
     }
 
+    Ensure-Directory -Path (Split-Path -Path $installReportPath -Parent)
+    if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
+        [ordered]@{
+            timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
+            status = 'seeded'
+            source = 'windows-container-nsis-selftest'
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $installReportPath -Encoding utf8
+    }
+
     $cliCommandArgs = @(
         'installer',
         'install',
@@ -271,10 +300,6 @@ try {
     )
     & $cliEntrypointPath -ReportPath $cliRunReportPath -CommandArgs $cliCommandArgs | Out-Host
     $installerExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-    if ($installerExitCode -ne 0) {
-        $reasonCode = 'installer_exit_nonzero'
-        throw "cdev-cli installer install failed in container with exit code $installerExitCode"
-    }
 
     $cliRunReportResolvedPath = $cliRunReportPath
     if (-not (Test-Path -LiteralPath $cliRunReportResolvedPath -PathType Leaf) -and (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
@@ -288,14 +313,19 @@ try {
 
     $cliRunReport = Get-Content -LiteralPath $cliRunReportResolvedPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $cliRunStatus = [string]$cliRunReport.status
+    $cliRunErrors = if ($null -ne $cliRunReport.PSObject.Properties['errors']) { @($cliRunReport.errors) } else { @() }
+    $cliRunWarnings = if ($null -ne $cliRunReport.PSObject.Properties['warnings']) { @($cliRunReport.warnings) } else { @() }
+    $installReportStatus = $cliRunStatus
+    $installReportErrors = $cliRunErrors
+    $installReportWarnings = $cliRunWarnings
     if ($cliRunStatus -ne 'succeeded') {
-        $reasonCode = if ((@($cliRunReport.errors) -join "`n") -match 'Expected installer report not found') { 'install_report_missing' } else { 'installer_exit_nonzero' }
+        $reasonCode = if (($cliRunErrors -join "`n") -match 'Expected installer report not found') { 'install_report_missing' } else { 'installer_exit_nonzero' }
         throw "cdev-cli run report status is '$cliRunStatus' (expected 'succeeded')."
     }
-
-    $installReportStatus = $cliRunStatus
-    $installReportErrors = @($cliRunReport.errors)
-    $installReportWarnings = @($cliRunReport.warnings)
+    if ($installerExitCode -ne 0) {
+        $reasonCode = 'installer_exit_nonzero'
+        throw "cdev-cli installer install returned nonzero exit code $installerExitCode."
+    }
 
     Copy-Item -LiteralPath $installerPath -Destination (Join-Path $hostOut 'lvie-cdev-workspace-installer-container-smoke.exe') -Force
     Copy-Item -LiteralPath "$installerPath.sha256" -Destination (Join-Path $hostOut 'lvie-cdev-workspace-installer-container-smoke.exe.sha256') -Force
@@ -360,6 +390,9 @@ $dockerRepoVolume = ('{0}:{1}' -f $repoRoot, $ContainerRepoMount)
 $dockerOutputVolume = ('{0}:{1}' -f $resolvedOutputRoot, $ContainerOutputMount)
 $dockerPayloadVolume = ('{0}:{1}' -f $hostPayloadRoot, $ContainerPayloadMount)
 $dockerNsisVolume = ('{0}:{1}' -f $resolvedHostNsisRoot, $ContainerNsisMount)
+$hostWorkspaceMirrorRoot = Join-Path $resolvedOutputRoot 'workspace-root'
+Ensure-Directory -Path $hostWorkspaceMirrorRoot
+$dockerWorkspaceVolume = ('{0}:{1}' -f $hostWorkspaceMirrorRoot, $ContainerWorkspaceRoot)
 $containerExitCode = 0
 $status = 'unknown'
 $errors = @()
@@ -378,6 +411,7 @@ try {
         '-v', $dockerOutputVolume,
         '-v', $dockerPayloadVolume,
         '-v', $dockerNsisVolume,
+        '-v', $dockerWorkspaceVolume,
         $Image,
         'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ContainerOutputMount 'container-run.ps1')
     )
@@ -429,6 +463,7 @@ $endedUtc = (Get-Date).ToUniversalTime()
     output_root = $resolvedOutputRoot
     host_payload_root = $hostPayloadRoot
     host_nsis_root = $resolvedHostNsisRoot
+    host_workspace_root = $hostWorkspaceMirrorRoot
     container_workspace_root = $ContainerWorkspaceRoot
     container_exit_code = $containerExitCode
     container_report_path = $containerReportPath

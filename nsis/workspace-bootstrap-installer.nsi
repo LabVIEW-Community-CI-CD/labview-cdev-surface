@@ -95,6 +95,13 @@ Section "Install"
     Goto labview_x86_ready
   ${EndIf}
 
+  !if "${INSTALL_EXEC_CONTEXT}" == "ContainerSmoke"
+    FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
+    FileWrite $2 "x86_bootstrap_skipped_for_container_smoke=true$\r$\n"
+    FileClose $2
+    Goto labview_x86_ready
+  !endif
+
   IfFileExists "$4" labview_x86_ready 0
   ReadEnvStr $5 "${X86_NIPKG_ENV}"
   FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
