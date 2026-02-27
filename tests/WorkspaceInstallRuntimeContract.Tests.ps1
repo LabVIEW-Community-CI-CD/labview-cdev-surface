@@ -26,6 +26,8 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match "Get-Command 'pwsh'"
         $script:scriptContent | Should -Match "Required command 'powershell' \(or fallback 'pwsh'\)"
         $script:scriptContent | Should -Match 'foreach \(\$commandName in @\(''git'', ''gh'', ''g-cli''\)\)'
+        $script:scriptContent | Should -Match 'Optional command ''\$commandName'' was not found on PATH for ContainerSmoke context.'
+        $script:scriptContent | Should -Match 'ContainerSmoke context forces LVIE_OFFLINE_GIT_MODE behavior.'
         $script:scriptContent | Should -Match 'invalid pinned_sha'
         $script:scriptContent | Should -Match 'head_sha_mismatch'
         $script:scriptContent | Should -Match 'remote_mismatch_'
@@ -50,9 +52,12 @@ Describe 'Workspace install runtime contract' {
         $script:scriptContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE'
         $script:scriptContent | Should -Match 'host-release'
         $script:scriptContent | Should -Match 'container-parity'
+        $script:scriptContent | Should -Match 'ContainerSmoke context skips repository contract enforcement.'
         $script:scriptContent | Should -Match 'required_ppl_bitnesses'
         $script:scriptContent | Should -Match 'required_vip_bitness'
         $script:scriptContent | Should -Match '-InstallerExecutionContext NsisInstall'
+        $script:scriptContent | Should -Match 'ContainerSmoke context skips runner-cli PPL capability gates.'
+        $script:scriptContent | Should -Match 'ContainerSmoke context skips runner-cli VIP harness gate.'
         $script:scriptContent | Should -Match 'Container parity profile requires LVIE_GATE_SINGLE_PPL_BITNESS'
         $script:scriptContent | Should -Match 'Invoke-RunnerCliPplCapabilityCheck'
         $script:scriptContent | Should -Match 'Test-PplBuildLabVIEWVersionAlignment'

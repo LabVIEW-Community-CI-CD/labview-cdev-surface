@@ -63,6 +63,7 @@ jobs:
             './tests/WatchWorkflowRunContract.Tests.ps1',
             './tests/PortableOpsRuntimeContract.Tests.ps1',
             './tests/OpsRuntimeImagePublishWorkflowContract.Tests.ps1',
+            './tests/LinuxNsisParityImagePublishWorkflowContract.Tests.ps1',
             './tests/VsCodeTasksContract.Tests.ps1',
             './tests/ReleaseControlPlaneLocalDockerHarnessContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
@@ -77,6 +78,8 @@ jobs:
             './tests/LinuxLabviewImageGateWorkflowContract.Tests.ps1',
             './tests/ReleaseWithWindowsGateWorkflowContract.Tests.ps1',
             './tests/DockerDesktopLinuxIterationContract.Tests.ps1',
+            './tests/LinuxContainerNsisParityContract.Tests.ps1',
+            './tests/WindowsContainerNsisSelfTestContract.Tests.ps1',
             './tests/WorkspaceInstallerExerciseContract.Tests.ps1',
             './tests/WorkspaceInstallerIterationContract.Tests.ps1',
             './tests/ScopeAOpsRunbookContract.Tests.ps1'

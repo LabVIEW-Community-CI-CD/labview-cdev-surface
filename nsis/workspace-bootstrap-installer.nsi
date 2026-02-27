@@ -39,6 +39,10 @@ Name "LVIE Cdev Workspace Bootstrap"
   !define REQUIRED_LABVIEW_YEAR "2020"
 !endif
 
+!ifndef INSTALL_EXEC_CONTEXT
+  !define INSTALL_EXEC_CONTEXT "NsisInstall"
+!endif
+
 !ifndef X86_NIPKG_ENV
   !define X86_NIPKG_ENV "LVIE_LABVIEW_X86_NIPKG_INSTALL_CMD"
 !endif
@@ -71,6 +75,7 @@ Section "Install"
   FileWrite $2 "manifest=$INSTDIR\${MANIFEST_REL}$\r$\n"
   FileWrite $2 "report=${WORKSPACE_ROOT}\${REPORT_REL}$\r$\n"
   FileWrite $2 "powershell_exe=$1$\r$\n"
+  FileWrite $2 "install_execution_context=${INSTALL_EXEC_CONTEXT}$\r$\n"
   FileWrite $2 "required_labview_year=${REQUIRED_LABVIEW_YEAR}$\r$\n"
   FileClose $2
 
@@ -131,7 +136,7 @@ Section "Install"
   Abort
   labview_x86_ready:
 
-  ExecWait '"$SYSDIR\cmd.exe" /c ""$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -InstallerExecutionContext NsisInstall -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}" >> "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" 2>&1"' $0
+  ExecWait '"$SYSDIR\cmd.exe" /c ""$1" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\${INSTALL_SCRIPT_REL}" -WorkspaceRoot "${WORKSPACE_ROOT}" -ManifestPath "$INSTDIR\${MANIFEST_REL}" -Mode Install -InstallerExecutionContext ${INSTALL_EXEC_CONTEXT} -OutputPath "${WORKSPACE_ROOT}\${REPORT_REL}" >> "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" 2>&1"' $0
   FileOpen $2 "${WORKSPACE_ROOT}\${LAUNCH_LOG_REL}" a
   FileWrite $2 "exit_code=$0$\r$\n"
   FileClose $2

@@ -31,6 +31,10 @@ Describe 'Workspace surface contract' {
         $script:installFromReleaseScriptPath = Join-Path $script:repoRoot 'scripts/Install-WorkspaceInstallerFromRelease.ps1'
         $script:testReleaseClientContractsScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseClientContracts.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
+        $script:windowsContainerNsisSelfTestScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-WindowsContainerNsisSelfTest.ps1'
+        $script:windowsContainerNsisDockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-windows/Dockerfile'
+        $script:linuxContainerNsisParityScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-LinuxContainerNsisParity.ps1'
+        $script:linuxContainerNsisDockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-linux/Dockerfile'
         $script:nsisInstallerPath = Join-Path $script:repoRoot 'nsis/workspace-bootstrap-installer.nsi'
         $script:ciWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ci.yml'
         $script:driftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workspace-sha-drift-signal.yml'
@@ -41,6 +45,7 @@ Describe 'Workspace surface contract' {
         $script:releaseCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_release-workspace-installer-core.yml'
         $script:releaseWithGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-with-windows-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
+        $script:linuxNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-linux-nsis-parity-image.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
         $script:windowsImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_windows-labview-image-gate-core.yml'
         $script:linuxImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/linux-labview-image-gate.yml'
@@ -83,6 +88,10 @@ Describe 'Workspace surface contract' {
             $script:installFromReleaseScriptPath,
             $script:testReleaseClientContractsScriptPath,
             $script:dockerLinuxIterationScriptPath,
+            $script:windowsContainerNsisSelfTestScriptPath,
+            $script:windowsContainerNsisDockerfilePath,
+            $script:linuxContainerNsisParityScriptPath,
+            $script:linuxContainerNsisDockerfilePath,
             $script:nsisInstallerPath,
             $script:ciWorkflowPath,
             $script:driftWorkflowPath,
@@ -93,6 +102,7 @@ Describe 'Workspace surface contract' {
             $script:releaseCoreWorkflowPath,
             $script:releaseWithGateWorkflowPath,
             $script:canaryWorkflowPath,
+            $script:linuxNsisParityImagePublishWorkflowPath,
             $script:windowsImageGateWorkflowPath,
             $script:windowsImageGateCoreWorkflowPath,
             $script:linuxImageGateWorkflowPath,
@@ -368,6 +378,9 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'WorkspaceShaRefreshPrContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WorkspaceManifestPinRefreshScript\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'LinuxContainerNsisParityContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'LinuxNsisParityImagePublishWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'WindowsContainerNsisSelfTestContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'IsolatedBuildWorkspacePolicyContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'GitSafeDirectoryPolicyContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'ENABLE_SELF_HOSTED_CONTRACTS'

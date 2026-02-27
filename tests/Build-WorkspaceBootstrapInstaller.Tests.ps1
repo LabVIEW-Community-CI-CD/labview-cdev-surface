@@ -41,6 +41,8 @@ Describe 'Build-WorkspaceBootstrapInstaller script' {
 
     It 'supports deterministic compare mode parameters' {
         $scriptContent = Get-Content -Path $script:scriptPath -Raw
+        $scriptContent | Should -Match '\[ValidateSet\(''NsisInstall'', ''LocalInstallerExercise'', ''ContainerSmoke''\)\]'
+        $scriptContent | Should -Match '/DINSTALL_EXEC_CONTEXT='
         $scriptContent | Should -Match '\[bool\]\$Deterministic = \$true'
         $scriptContent | Should -Match '\[long\]\$SourceDateEpoch'
         $scriptContent | Should -Match '\[switch\]\$VerifyDeterminism'

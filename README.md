@@ -199,6 +199,45 @@ pwsh -NoProfile -File .\scripts\Invoke-DockerDesktopLinuxIteration.ps1 `
 This lane bundles manifest-pinned `runner-cli` for `linux-x64`, runs `runner-cli --help` and `runner-cli ppl --help` inside the container, and optionally executes core Pester contract tests.
 If Docker Desktop cannot start, verify Windows virtualization features are enabled (`Microsoft-Hyper-V-All`, `VirtualMachinePlatform`, `Microsoft-Windows-Subsystem-Linux`) and reboot after feature changes.
 
+## Windows container NSIS self-test
+
+Build the NSIS self-test image (optional) and run a full build + silent install in the same Windows container.
+The runtime is aligned to `nationalinstruments/labview:2026q1-windows`:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Invoke-WindowsContainerNsisSelfTest.ps1 `
+  -BuildLocalImage `
+  -Image labview-cdev-surface-nsis-selftest:local
+```
+
+This wrapper fails fast with `windows_container_mode_required` unless Docker reports `OSType=windows`.
+
+Outputs are written under:
+- `artifacts\release\windows-container-nsis-selftest`
+- `container-report.json`
+- `windows-container-nsis-selftest-report.json`
+
+## Linux NSIS parity container
+
+Use the Linux parity runtime aligned to `nationalinstruments/labview:2026q1-linux`:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Invoke-LinuxContainerNsisParity.ps1 `
+  -BuildLocalImage `
+  -Image labview-cdev-surface-nsis-linux-parity:local `
+  -DockerContext desktop-linux
+```
+
+This lane validates Linux toolchain parity (`labviewcli`, `pwsh`, `dotnet`, `git`, `makensis`) and compiles a minimal NSIS smoke installer.
+Installer execution is intentionally skipped on Linux (`windows_installer_not_executable_on_linux`).
+The parity image uses an apt-driven dependency model aligned to NI's Linux custom-image guidance (`labview-for-containers/docs/linux-custom-images.md`).
+
+Publish the Linux parity image to GHCR with deterministic tags:
+- Workflow: `.github/workflows/publish-linux-nsis-parity-image.yml`
+- Image repo: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-nsis-linux-parity`
+- Default tags: `sha-<12-char-commit>`, `2026q1-linux-<yyyymmdd>`
+- Optional manual tags: `latest` (`promote_latest=true`) and `additional_tag`
+
 ## Publish Release (Automated Gate)
 
 Use manual workflow dispatch for release publication:
