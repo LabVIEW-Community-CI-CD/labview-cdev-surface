@@ -327,6 +327,13 @@
           ],
           "run_on_dry_run": false
         },
+        "decision_trail": {
+          "schema_version": "1.0",
+          "artifact_name_prefix": "release-control-plane-decision-trail",
+          "hash_algorithm": "sha256",
+          "include_state_machine": true,
+          "include_rollback_orchestration": true
+        },
         "incident_lifecycle": {
           "auto_close_on_recovery": true,
           "reopen_on_regression": true,

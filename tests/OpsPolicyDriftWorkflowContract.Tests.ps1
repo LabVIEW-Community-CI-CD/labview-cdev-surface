@@ -43,6 +43,8 @@ Describe 'Ops policy drift workflow contract' {
         $script:runtimeContent | Should -Match 'ops_control_plane_state_machine_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_state_machine_version_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_rollback_orchestration_missing'
+        $script:runtimeContent | Should -Match 'ops_control_plane_decision_trail_missing'
+        $script:runtimeContent | Should -Match 'ops_control_plane_decision_trail_schema_version_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_error_budget_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_error_budget_window_days_invalid'
         $script:runtimeContent | Should -Match 'ops_control_plane_slo_alert_thresholds_missing'

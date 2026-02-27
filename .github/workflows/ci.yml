@@ -87,6 +87,7 @@ jobs:
             './tests/ReleaseGuardrailsAutoRemediationWorkflowContract.Tests.ps1',
             './tests/BranchProtectionDriftWorkflowContract.Tests.ps1',
             './tests/ReleaseControlPlaneWorkflowContract.Tests.ps1',
+            './tests/ReleaseControlPlaneDecisionTrailContract.Tests.ps1',
             './tests/ReleaseRaceHardeningGateWorkflowContract.Tests.ps1',
             './tests/ReleaseRaceHardeningDrillWorkflowContract.Tests.ps1',
             './tests/ReleaseRollbackDrillWorkflowContract.Tests.ps1',

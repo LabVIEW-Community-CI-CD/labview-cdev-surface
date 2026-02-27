@@ -128,6 +128,24 @@ try {
                     Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_rollback_orchestration_missing'
                 }
 
+                $decisionTrailPresent = ($null -ne $releaseClient.ops_control_plane_policy.decision_trail)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_decision_trail_present'
+                        passed = $decisionTrailPresent
+                    }) | Out-Null
+                if (-not $decisionTrailPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_decision_trail_missing'
+                } else {
+                    $decisionTrailSchemaVersionPresent = (-not [string]::IsNullOrWhiteSpace([string]$releaseClient.ops_control_plane_policy.decision_trail.schema_version))
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_decision_trail_schema_version_present'
+                            passed = $decisionTrailSchemaVersionPresent
+                        }) | Out-Null
+                    if (-not $decisionTrailSchemaVersionPresent) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_decision_trail_schema_version_missing'
+                    }
+                }
+
                 $errorBudgetPresent = ($null -ne $releaseClient.ops_control_plane_policy.error_budget)
                 $checks.Add([ordered]@{
                         check = 'release_client_ops_control_plane_policy_error_budget_present'
