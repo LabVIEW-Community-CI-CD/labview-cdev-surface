@@ -23,7 +23,7 @@ Describe 'Release control plane local Docker harness contract' {
     It 'wraps release control plane local harness through portable container runtime' {
         $script:wrapperContent | Should -Match 'Invoke-PortableOps\.ps1'
         $script:wrapperContent | Should -Match 'Exercise-ReleaseControlPlaneLocal\.ps1'
-        $script:wrapperContent | Should -Match 'ghcr\.io/svelderrainruiz/labview-cdev-surface-ops:v1'
+        $script:wrapperContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-surface-ops:v1'
         $script:wrapperContent | Should -Match 'BuildLocalImage'
         $script:wrapperContent | Should -Match 'HostFallback'
     }

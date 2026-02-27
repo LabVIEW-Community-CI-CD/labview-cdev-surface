@@ -37,7 +37,7 @@ param(
     [string]$OutputRoot = 'artifacts/release-control-plane-local',
 
     [Parameter()]
-    [string]$Image = 'ghcr.io/svelderrainruiz/labview-cdev-surface-ops:v1',
+    [string]$Image = 'ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops:v1',
 
     [Parameter()]
     [switch]$BuildLocalImage,
