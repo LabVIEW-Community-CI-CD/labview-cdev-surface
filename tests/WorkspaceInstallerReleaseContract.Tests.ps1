@@ -60,6 +60,7 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'release-ops-health-preflight-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'name:\s*Release Runner Availability Preflight'
         $script:coreWorkflowContent | Should -Match 'Validate eligible self-hosted release runner availability'
+        $script:coreWorkflowContent | Should -Match '(?s)runner_preflight:.*?-\s*name:\s*Checkout.*?actions/checkout@v4.*?-\s*id:\s*check'
         $script:coreWorkflowContent | Should -Match 'uses:\s*\./\.github/actions/runner-preflight'
         $script:coreWorkflowContent | Should -Match 'required_labels_csv:\s*self-hosted,windows,self-hosted-windows-lv'
         $script:runnerPreflightActionContent | Should -Match 'repos/\$repo/actions/runners\?per_page=100'
