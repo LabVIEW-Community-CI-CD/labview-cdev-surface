@@ -31,6 +31,11 @@ on:
         required: false
         default: '1'
         type: string
+      watch_timeout_minutes:
+        description: Timeout minutes for watching dispatched release workflows.
+        required: false
+        default: '120'
+        type: string
       force_stable_promotion_outside_window:
         description: Force stable promotion outside policy window for FullCycle (audited).
         required: false
@@ -107,6 +112,19 @@ jobs:
             $keepLatestCanaryN = $parsedKeepLatestCanaryN
           }
 
+          $watchTimeoutText = [string]'${{ inputs.watch_timeout_minutes }}'
+          $watchTimeoutMinutes = 120
+          if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
+            $parsedWatchTimeoutMinutes = 0
+            if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeoutMinutes)) {
+              throw "watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+            }
+            if ($parsedWatchTimeoutMinutes -lt 5 -or $parsedWatchTimeoutMinutes -gt 240) {
+              throw "watch_timeout_minutes must be between 5 and 240. actual='$watchTimeoutText'"
+            }
+            $watchTimeoutMinutes = $parsedWatchTimeoutMinutes
+          }
+
           $autoRemediateText = [string]'${{ inputs.auto_remediate }}'
           $autoRemediate = $true
           if (-not [string]::IsNullOrWhiteSpace($autoRemediateText)) {
@@ -136,6 +154,7 @@ jobs:
             -Mode $mode `
             -SyncGuardMaxAgeHours $syncGuardAgeHours `
             -KeepLatestCanaryN $keepLatestCanaryN `
+            -WatchTimeoutMinutes $watchTimeoutMinutes `
             -AutoRemediate:$autoRemediate `
             -ForceStablePromotionOutsideWindow:$forceStablePromotionOutsideWindow `
             -ForceStablePromotionReason $forceStablePromotionReason `
