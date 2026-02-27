@@ -146,7 +146,7 @@ $resolvedIterationOutputRoot = [System.IO.Path]::GetFullPath($IterationOutputRoo
 $resolvedSmokeWorkspaceRoot = [System.IO.Path]::GetFullPath($SmokeWorkspaceRoot)
 
 $phaseResults = [System.Collections.Generic.List[object]]::new()
-$report = [ordered]@{
+    $report = [ordered]@{
     schema_version = '1.0'
     generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
     status = 'fail'
@@ -174,6 +174,7 @@ $report = [ordered]@{
             output_root = $resolvedIterationOutputRoot
             smoke_workspace_root = $resolvedSmokeWorkspaceRoot
             script_path = $iterationScriptPath
+            iteration_exit_code = $null
         }
         smoke = [ordered]@{}
         vipm_lifecycle = [ordered]@{
@@ -223,14 +224,17 @@ try {
 
     & pwsh @iterationArgs | Out-Host
     $iterationExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-    if ($iterationExitCode -ne 0) {
-        Throw-DrillError -ReasonCode 'iteration_failed' -Message ("Invoke-WorkspaceInstallerIteration.ps1 exited with code {0}." -f $iterationExitCode)
+    $report.details.iteration.iteration_exit_code = $iterationExitCode
+    if ($iterationExitCode -eq 0) {
+        Add-PhaseResult -Target $phaseResults -Phase 'iteration' -Status 'pass' -ReasonCode 'ok'
+    } else {
+        Add-PhaseResult -Target $phaseResults -Phase 'iteration' -Status 'fail' -ReasonCode 'iteration_failed' -Message ("Invoke-WorkspaceInstallerIteration.ps1 exited with code {0}." -f $iterationExitCode)
     }
-    Add-PhaseResult -Target $phaseResults -Phase 'iteration' -Status 'pass' -ReasonCode 'ok'
 
     $iterationSummaryPath = [string]$report.artifacts.iteration_summary
     if (-not (Test-Path -LiteralPath $iterationSummaryPath -PathType Leaf)) {
-        Throw-DrillError -ReasonCode 'iteration_summary_missing' -Message ("Iteration summary is missing: {0}" -f $iterationSummaryPath)
+        $summaryReason = if ($iterationExitCode -ne 0) { 'iteration_failed' } else { 'iteration_summary_missing' }
+        Throw-DrillError -ReasonCode $summaryReason -Message ("Iteration summary is missing: {0}" -f $iterationSummaryPath)
     }
 
     $summary = Get-Content -LiteralPath $iterationSummaryPath -Raw | ConvertFrom-Json -Depth 50
@@ -242,7 +246,8 @@ try {
     $exerciseReportPath = Join-Path $runOutputRoot 'exercise-report.json'
     $report.artifacts.exercise_report = $exerciseReportPath
     if (-not (Test-Path -LiteralPath $exerciseReportPath -PathType Leaf)) {
-        Throw-DrillError -ReasonCode 'exercise_report_missing' -Message ("Exercise report is missing: {0}" -f $exerciseReportPath)
+        $exerciseReason = if ($iterationExitCode -ne 0) { 'iteration_failed' } else { 'exercise_report_missing' }
+        Throw-DrillError -ReasonCode $exerciseReason -Message ("Exercise report is missing: {0}" -f $exerciseReportPath)
     }
 
     $exerciseReport = Get-Content -LiteralPath $exerciseReportPath -Raw | ConvertFrom-Json -Depth 50
@@ -259,34 +264,76 @@ try {
     $smokeStatus = [string]$smokeReport.status
     $executionProfile = [string]$smokeReport.execution_profile
     $selectedPplStatus = ''
+    $selectedPplMessage = ''
+    $selectedPplBuildspecLogPath = ''
+    $selectedPplRunnerCliLogPath = ''
     if ($null -ne $smokeReport.ppl_capability_checks -and $null -ne $smokeReport.ppl_capability_checks.PSObject.Properties[$SelectedPplBitness]) {
-        $selectedPplStatus = [string]$smokeReport.ppl_capability_checks.PSObject.Properties[$SelectedPplBitness].Value.status
+        $selectedPplNode = $smokeReport.ppl_capability_checks.PSObject.Properties[$SelectedPplBitness].Value
+        $selectedPplStatus = [string]$selectedPplNode.status
+        $selectedPplMessage = [string]$selectedPplNode.message
+        $selectedPplBuildspecLogPath = [string]$selectedPplNode.buildspec_log_path
+        if ($selectedPplNode.PSObject.Properties.Name -contains 'runner_cli_log_path') {
+            $selectedPplRunnerCliLogPath = [string]$selectedPplNode.runner_cli_log_path
+        }
     }
     $vipBuildStatus = [string]$smokeReport.vip_package_build_check.status
     $vipOutputPath = [string]$smokeReport.vip_package_build_check.output_vip_path
+    $smokeErrors = @($smokeReport.errors | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $smokeWarnings = @($smokeReport.warnings | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
     $report.details.smoke = [ordered]@{
         status = $smokeStatus
         execution_profile = $executionProfile
         selected_ppl_status = $selectedPplStatus
+        selected_ppl_message = $selectedPplMessage
+        selected_ppl_buildspec_log_path = $selectedPplBuildspecLogPath
+        selected_ppl_runner_cli_log_path = $selectedPplRunnerCliLogPath
         vip_build_status = $vipBuildStatus
         vip_output_path = $vipOutputPath
+        errors = @($smokeErrors)
+        warnings = @($smokeWarnings)
     }
 
-    if ($smokeStatus -ne 'succeeded') {
-        Throw-DrillError -ReasonCode 'smoke_status_failed' -Message ("Smoke installer report status is not succeeded: {0}" -f $smokeStatus)
-    }
     if ($executionProfile -ne 'host-release') {
         Throw-DrillError -ReasonCode 'smoke_execution_profile_mismatch' -Message ("Smoke execution profile is not host-release: {0}" -f $executionProfile)
     }
     if ($selectedPplStatus -ne 'pass') {
-        Throw-DrillError -ReasonCode 'ppl_gate_failed' -Message ("PPL gate status for bitness {0} is not pass: {1}" -f $SelectedPplBitness, $selectedPplStatus)
+        $pplFailureDetails = @()
+        if (-not [string]::IsNullOrWhiteSpace($selectedPplStatus)) {
+            $pplFailureDetails += ("status={0}" -f $selectedPplStatus)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($selectedPplMessage)) {
+            $pplFailureDetails += ("message={0}" -f $selectedPplMessage)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($selectedPplBuildspecLogPath)) {
+            $pplFailureDetails += ("buildspec_log={0}" -f $selectedPplBuildspecLogPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($selectedPplRunnerCliLogPath)) {
+            $pplFailureDetails += ("runner_cli_log={0}" -f $selectedPplRunnerCliLogPath)
+        }
+        if (@($smokeErrors).Count -gt 0) {
+            $pplFailureDetails += ("smoke_errors={0}" -f (@($smokeErrors) -join ' | '))
+        }
+        Throw-DrillError -ReasonCode 'ppl_gate_failed' -Message ("PPL gate status for bitness {0} is not pass. {1}" -f $SelectedPplBitness, (@($pplFailureDetails) -join '; '))
     }
     if ($vipBuildStatus -ne 'pass') {
         Throw-DrillError -ReasonCode 'vip_build_not_pass' -Message ("VIP package build status is not pass: {0}" -f $vipBuildStatus)
     }
     if ([string]::IsNullOrWhiteSpace($vipOutputPath) -or -not (Test-Path -LiteralPath $vipOutputPath -PathType Leaf)) {
         Throw-DrillError -ReasonCode 'vip_output_missing' -Message ("VIP output package is missing: {0}" -f $vipOutputPath)
+    }
+    if ($smokeStatus -ne 'succeeded') {
+        $smokeFailureDetails = @()
+        if (@($smokeErrors).Count -gt 0) {
+            $smokeFailureDetails += ("errors={0}" -f (@($smokeErrors) -join ' | '))
+        }
+        if (@($smokeWarnings).Count -gt 0) {
+            $smokeFailureDetails += ("warnings={0}" -f (@($smokeWarnings) -join ' | '))
+        }
+        Throw-DrillError -ReasonCode 'smoke_status_failed' -Message ("Smoke installer report status is not succeeded: {0}. {1}" -f $smokeStatus, (@($smokeFailureDetails) -join '; '))
+    }
+    if ($iterationExitCode -ne 0) {
+        Throw-DrillError -ReasonCode 'iteration_failed' -Message ("Invoke-WorkspaceInstallerIteration.ps1 exited with code {0}, but smoke contract checks unexpectedly passed." -f $iterationExitCode)
     }
     Add-PhaseResult -Target $phaseResults -Phase 'smoke_contract' -Status 'pass' -ReasonCode 'ok'
 

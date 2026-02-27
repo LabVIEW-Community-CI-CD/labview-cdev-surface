@@ -689,6 +689,8 @@ function Invoke-RunnerCliPplCapabilityCheck {
         buildspec_log_path = ''
         detected_labview_executable = ''
         detected_labview_year = ''
+        runner_cli_log_path = Join-Path $statusRoot ("workspace-installer-ppl-{0}-runner-cli.log" -f $RequiredBitness)
+        runner_cli_output_tail = @()
     }
 
     try {
@@ -756,7 +758,20 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        & $RunnerCliPath @commandArgs | ForEach-Object { Write-Host $_ }
+        $runnerCliOutputLines = @(
+            & $RunnerCliPath @commandArgs 2>&1 | ForEach-Object { [string]$_ }
+        )
+        foreach ($line in @($runnerCliOutputLines)) {
+            Write-Host $line
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$result.runner_cli_log_path)) {
+            $runnerCliLogParent = Split-Path -Path ([string]$result.runner_cli_log_path) -Parent
+            Ensure-Directory -Path $runnerCliLogParent
+            Set-Content -LiteralPath ([string]$result.runner_cli_log_path) -Value @($runnerCliOutputLines) -Encoding utf8
+        }
+        if (@($runnerCliOutputLines).Count -gt 0) {
+            $result.runner_cli_output_tail = @($runnerCliOutputLines | Select-Object -Last 40)
+        }
         $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
             throw "runner-cli ppl build failed with exit code $($result.exit_code)."
@@ -1146,9 +1161,13 @@ $pplCapabilityChecks = [ordered]@{
         command = @()
         exit_code = $null
         labview_install_root = ''
+        labview_ini_path = ''
+        expected_labview_cli_port = 0
         buildspec_log_path = ''
         detected_labview_executable = ''
         detected_labview_year = ''
+        runner_cli_log_path = ''
+        runner_cli_output_tail = @()
     }
     '64' = [ordered]@{
         status = 'not_run'
@@ -1163,9 +1182,13 @@ $pplCapabilityChecks = [ordered]@{
         command = @()
         exit_code = $null
         labview_install_root = ''
+        labview_ini_path = ''
+        expected_labview_cli_port = 0
         buildspec_log_path = ''
         detected_labview_executable = ''
         detected_labview_year = ''
+        runner_cli_log_path = ''
+        runner_cli_output_tail = @()
     }
 }
 $vipPackageBuildCheck = [ordered]@{
@@ -2053,6 +2076,8 @@ try {
                                 buildspec_log_path = [string]$capabilityResult.buildspec_log_path
                                 detected_labview_executable = [string]$capabilityResult.detected_labview_executable
                                 detected_labview_year = [string]$capabilityResult.detected_labview_year
+                                runner_cli_log_path = [string]$capabilityResult.runner_cli_log_path
+                                runner_cli_output_tail = @($capabilityResult.runner_cli_output_tail)
                             }
 
                             Add-PostActionSequenceEntry -Sequence $postActionSequence -Phase 'ppl-build' -Bitness $bitness -Status ([string]$capabilityResult.status) -Message ([string]$capabilityResult.message)
