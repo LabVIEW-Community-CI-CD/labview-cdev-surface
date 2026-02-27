@@ -64,6 +64,10 @@ Describe 'Release client policy contract' {
         $releaseClient.ops_control_plane_policy.tag_strategy.legacy_tag_family | Should -Be 'legacy_date_window'
         ([DateTime]$releaseClient.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-07-01T00:00:00Z'
         ([DateTime]$releaseClient.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be (([DateTime]$releaseClient.signature_policy.grace_end_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        @($releaseClient.ops_control_plane_policy.stable_promotion_window.full_cycle_allowed_utc_weekdays) | Should -Contain 'Monday'
+        $releaseClient.ops_control_plane_policy.stable_promotion_window.allow_outside_window_with_override | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_required | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_min_length | Should -Be 12
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
@@ -98,6 +102,7 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
         $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
+        $script:policyScriptContent | Should -Match 'ops_policy_stable_window_full_cycle_weekday_monday'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_enabled'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_rollback_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'

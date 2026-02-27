@@ -36,6 +36,12 @@ param(
     [switch]$DryRun,
 
     [Parameter()]
+    [bool]$ForceStablePromotionOutsideWindow = $false,
+
+    [Parameter()]
+    [string]$ForceStablePromotionReason = '',
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -129,6 +135,130 @@ function Resolve-SemVerEnforcementPolicy {
     return $policy
 }
 
+function Resolve-StablePromotionWindowPolicy {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManifestPath
+    )
+
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    $validWeekdays = @('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')
+    $policy = [ordered]@{
+        full_cycle_allowed_utc_weekdays = @('Monday')
+        allow_outside_window_with_override = $true
+        override_reason_required = $true
+        override_reason_min_length = 12
+        source = 'default'
+        warnings = @()
+    }
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        [void]$warnings.Add("workspace_governance_missing: path=$ManifestPath")
+        $policy.warnings = @($warnings)
+        return $policy
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -Depth 100
+        $candidateWindow = $manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window
+        if ($null -eq $candidateWindow) {
+            [void]$warnings.Add("stable_promotion_window_missing: path=$ManifestPath")
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        $policy.source = 'workspace_governance'
+
+        $candidateWeekdays = @($candidateWindow.full_cycle_allowed_utc_weekdays)
+        $normalizedWeekdays = [System.Collections.Generic.List[string]]::new()
+        foreach ($candidateWeekday in @($candidateWeekdays)) {
+            $value = ([string]$candidateWeekday).Trim()
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+
+            $canonical = @(
+                $validWeekdays |
+                    Where-Object { [string]::Equals([string]$_, $value, [System.StringComparison]::OrdinalIgnoreCase) } |
+                    Select-Object -First 1
+            )
+            if (@($canonical).Count -eq 1) {
+                $day = [string]$canonical[0]
+                if (-not $normalizedWeekdays.Contains($day)) {
+                    [void]$normalizedWeekdays.Add($day)
+                }
+            } else {
+                [void]$warnings.Add("stable_promotion_window_invalid_weekday: value=$value")
+            }
+        }
+        if ($normalizedWeekdays.Count -gt 0) {
+            $policy.full_cycle_allowed_utc_weekdays = @($normalizedWeekdays)
+        } else {
+            [void]$warnings.Add('stable_promotion_window_weekdays_missing_or_invalid')
+        }
+
+        $allowOverride = $candidateWindow.allow_outside_window_with_override
+        if ($allowOverride -is [bool]) {
+            $policy.allow_outside_window_with_override = [bool]$allowOverride
+        } elseif ($null -ne $allowOverride) {
+            $parsedAllowOverride = $false
+            $allowOverrideParsed = $false
+            try {
+                $parsedAllowOverride = [System.Convert]::ToBoolean([string]$allowOverride, [Globalization.CultureInfo]::InvariantCulture)
+                $allowOverrideParsed = $true
+            } catch {
+                $allowOverrideParsed = $false
+            }
+
+            if ($allowOverrideParsed) {
+                $policy.allow_outside_window_with_override = $parsedAllowOverride
+            } else {
+                [void]$warnings.Add("stable_promotion_window_allow_override_invalid: value=$allowOverride")
+            }
+        } else {
+            [void]$warnings.Add('stable_promotion_window_allow_override_missing')
+        }
+
+        $reasonRequired = $candidateWindow.override_reason_required
+        if ($reasonRequired -is [bool]) {
+            $policy.override_reason_required = [bool]$reasonRequired
+        } elseif ($null -ne $reasonRequired) {
+            $parsedReasonRequired = $false
+            $reasonRequiredParsed = $false
+            try {
+                $parsedReasonRequired = [System.Convert]::ToBoolean([string]$reasonRequired, [Globalization.CultureInfo]::InvariantCulture)
+                $reasonRequiredParsed = $true
+            } catch {
+                $reasonRequiredParsed = $false
+            }
+
+            if ($reasonRequiredParsed) {
+                $policy.override_reason_required = $parsedReasonRequired
+            } else {
+                [void]$warnings.Add("stable_promotion_window_reason_required_invalid: value=$reasonRequired")
+            }
+        } else {
+            [void]$warnings.Add('stable_promotion_window_reason_required_missing')
+        }
+
+        $reasonMinLength = $candidateWindow.override_reason_min_length
+        if ($null -ne $reasonMinLength) {
+            $parsedMinLength = -1
+            if ([int]::TryParse(([string]$reasonMinLength).Trim(), [ref]$parsedMinLength) -and $parsedMinLength -ge 0 -and $parsedMinLength -le 512) {
+                $policy.override_reason_min_length = $parsedMinLength
+            } else {
+                [void]$warnings.Add("stable_promotion_window_reason_min_length_invalid: value=$reasonMinLength")
+            }
+        } else {
+            [void]$warnings.Add('stable_promotion_window_reason_min_length_missing')
+        }
+    } catch {
+        [void]$warnings.Add("stable_promotion_window_policy_load_failed: $([string]$_.Exception.Message)")
+    }
+
+    $policy.warnings = @($warnings)
+    return $policy
+}
+
 $defaultSemverOnlyEnforceUtc = [DateTimeOffset]::Parse('2026-07-01T00:00:00Z')
 $workspaceGovernancePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'workspace-governance.json'
 $semverPolicy = Resolve-SemVerEnforcementPolicy -ManifestPath $workspaceGovernancePath -FallbackEnforceUtc $defaultSemverOnlyEnforceUtc
@@ -137,6 +267,16 @@ $script:semverPolicySource = [string]$semverPolicy.source
 $script:semverOnlyEnforced = ([DateTimeOffset]::UtcNow -ge $script:semverOnlyEnforceUtc)
 foreach ($warning in @($semverPolicy.warnings)) {
     Write-Warning "[semver_policy_warning] $warning"
+}
+
+$stablePromotionWindowPolicy = Resolve-StablePromotionWindowPolicy -ManifestPath $workspaceGovernancePath
+$script:stablePromotionWindowPolicySource = [string]$stablePromotionWindowPolicy.source
+$script:stablePromotionFullCycleAllowedUtcWeekdays = @($stablePromotionWindowPolicy.full_cycle_allowed_utc_weekdays)
+$script:stablePromotionAllowOutsideWindowWithOverride = [bool]$stablePromotionWindowPolicy.allow_outside_window_with_override
+$script:stablePromotionOverrideReasonRequired = [bool]$stablePromotionWindowPolicy.override_reason_required
+$script:stablePromotionOverrideReasonMinLength = [int]$stablePromotionWindowPolicy.override_reason_min_length
+foreach ($warning in @($stablePromotionWindowPolicy.warnings)) {
+    Write-Warning "[stable_promotion_window_policy_warning] $warning"
 }
 
 $script:releaseRequiredAssets = @(
@@ -169,6 +309,7 @@ function Resolve-ControlPlaneFailureReasonCode {
     if ($message -match '^promotion_source_commit_invalid') { return 'promotion_source_commit_invalid' }
     if ($message -match '^promotion_source_not_at_head') { return 'promotion_source_not_at_head' }
     if ($message -match '^promotion_lineage_invalid') { return 'promotion_lineage_invalid' }
+    if ($message -match '^stable_window_override_') { return 'stable_window_override_invalid' }
     if ($message -match '^branch_head_unresolved') { return 'branch_head_unresolved' }
     if ($message -match '^semver_prerelease_sequence_exhausted') { return 'semver_prerelease_sequence_exhausted' }
     if ($message -match '^release_watch_failed|^release_watch_not_success') { return 'release_dispatch_watch_failed' }
@@ -732,6 +873,69 @@ function Resolve-PromotedTargetSemVer {
     throw "unsupported_target_channel: $TargetChannel"
 }
 
+function Resolve-StablePromotionWindowDecision {
+    param(
+        [Parameter(Mandatory = $true)][DateTimeOffset]$NowUtc,
+        [Parameter(Mandatory = $true)][bool]$OverrideRequested,
+        [Parameter()][string]$OverrideReason = ''
+    )
+
+    $allowedWeekdays = @($script:stablePromotionFullCycleAllowedUtcWeekdays | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if (@($allowedWeekdays).Count -eq 0) {
+        $allowedWeekdays = @('Monday')
+    }
+
+    $currentWeekday = $NowUtc.ToUniversalTime().DayOfWeek.ToString()
+    $withinWindow = (@($allowedWeekdays | Where-Object { [string]$_ -eq $currentWeekday }).Count -gt 0)
+    $normalizedReason = ([string]$OverrideReason).Trim()
+
+    $decision = [ordered]@{
+        status = 'evaluated'
+        policy_source = [string]$script:stablePromotionWindowPolicySource
+        current_utc = $NowUtc.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        current_utc_weekday = $currentWeekday
+        full_cycle_allowed_utc_weekdays = @($allowedWeekdays)
+        within_window = [bool]$withinWindow
+        override_requested = [bool]$OverrideRequested
+        override_applied = $false
+        allow_outside_window_with_override = [bool]$script:stablePromotionAllowOutsideWindowWithOverride
+        override_reason_required = [bool]$script:stablePromotionOverrideReasonRequired
+        override_reason_min_length = [int]$script:stablePromotionOverrideReasonMinLength
+        override_reason = $normalizedReason
+        can_promote = $false
+        reason_code = ''
+    }
+
+    if ($withinWindow) {
+        $decision.can_promote = $true
+        $decision.reason_code = 'stable_window_open'
+        return $decision
+    }
+
+    if (-not $OverrideRequested) {
+        $decision.can_promote = $false
+        $decision.reason_code = 'stable_window_closed'
+        return $decision
+    }
+
+    if (-not [bool]$script:stablePromotionAllowOutsideWindowWithOverride) {
+        throw "stable_window_override_blocked: current_utc_weekday=$currentWeekday"
+    }
+
+    if ([bool]$script:stablePromotionOverrideReasonRequired -and [string]::IsNullOrWhiteSpace($normalizedReason)) {
+        throw "stable_window_override_reason_required: min_length=$([int]$script:stablePromotionOverrideReasonMinLength)"
+    }
+
+    if ([int]$script:stablePromotionOverrideReasonMinLength -gt 0 -and $normalizedReason.Length -lt [int]$script:stablePromotionOverrideReasonMinLength) {
+        throw "stable_window_override_reason_too_short: min_length=$([int]$script:stablePromotionOverrideReasonMinLength) actual_length=$($normalizedReason.Length)"
+    }
+
+    $decision.can_promote = $true
+    $decision.override_applied = $true
+    $decision.reason_code = 'stable_window_override_applied'
+    return $decision
+}
+
 function Invoke-ReleaseMode {
     param(
         [Parameter(Mandatory = $true)][string]$ModeName,
@@ -956,6 +1160,19 @@ $report = [ordered]@{
     semver_policy_source = $script:semverPolicySource
     semver_only_enforce_utc = $script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
     semver_only_enforced = [bool]$script:semverOnlyEnforced
+    stable_promotion_window = [ordered]@{
+        policy_source = [string]$script:stablePromotionWindowPolicySource
+        full_cycle_allowed_utc_weekdays = @($script:stablePromotionFullCycleAllowedUtcWeekdays)
+        allow_outside_window_with_override = [bool]$script:stablePromotionAllowOutsideWindowWithOverride
+        override_reason_required = [bool]$script:stablePromotionOverrideReasonRequired
+        override_reason_min_length = [int]$script:stablePromotionOverrideReasonMinLength
+        override_requested = [bool]$ForceStablePromotionOutsideWindow
+        override_reason = ([string]$ForceStablePromotionReason).Trim()
+        decision = [ordered]@{
+            status = 'skipped'
+            reason_code = 'not_full_cycle_mode'
+        }
+    }
     status = 'fail'
     reason_code = ''
     message = ''
@@ -1027,17 +1244,24 @@ try {
             $prereleaseExec = Invoke-ReleaseMode -ModeName 'PromotePrerelease' -DateKey $dateKey -ScratchRoot $scratchRoot
             [void]$executionList.Add($prereleaseExec)
 
+            $stableWindowDecision = Resolve-StablePromotionWindowDecision `
+                -NowUtc ([DateTimeOffset]::UtcNow) `
+                -OverrideRequested ([bool]$ForceStablePromotionOutsideWindow) `
+                -OverrideReason ([string]$ForceStablePromotionReason)
+            $report.stable_promotion_window.decision = $stableWindowDecision
+
             $stableExec = [ordered]@{
                 target_release = [ordered]@{
                     mode = 'PromoteStable'
                     status = 'skipped'
-                    reason_code = 'stable_window_closed'
+                    reason_code = [string]$stableWindowDecision.reason_code
                     tag_family = 'semver'
                 }
+                stable_window_gate = $stableWindowDecision
             }
-            $dayOfWeekUtc = (Get-Date).ToUniversalTime().DayOfWeek.ToString()
-            if ($dayOfWeekUtc -eq 'Monday') {
+            if ([bool]$stableWindowDecision.can_promote) {
                 $stableExec = Invoke-ReleaseMode -ModeName 'PromoteStable' -DateKey $dateKey -ScratchRoot $scratchRoot
+                $stableExec.stable_window_gate = $stableWindowDecision
             }
             [void]$executionList.Add($stableExec)
         } else {

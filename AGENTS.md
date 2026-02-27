@@ -223,6 +223,15 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - canary: `vX.Y.Z-canary.N`
   - prerelease: `vX.Y.Z-rc.N` (promoted from semver canary)
   - stable: `vX.Y.Z` (promoted from semver prerelease)
+- Stable promotion window policy must be explicit under `ops_control_plane_policy.stable_promotion_window`:
+  - `full_cycle_allowed_utc_weekdays`
+  - `allow_outside_window_with_override`
+  - `override_reason_required`
+  - `override_reason_min_length`
+- Full-cycle stable promotion must evaluate stable window policy and record deterministic decision codes (`stable_window_open`, `stable_window_closed`, `stable_window_override_applied`) in execution report metadata.
+- Emergency stable override is workflow-dispatch only and audited:
+  - `force_stable_promotion_outside_window`
+  - `force_stable_promotion_reason`
 - Release-control-plane canary hygiene invocation must enforce `TagFamily=semver`.
 - Legacy date-window tags (`v0.YYYYMMDD.N`) may still exist during migration but are non-canonical for control-plane dispatch.
 - Control-plane tag strategy policy must define `ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`) and keep it aligned with signature grace-end during dual-mode transition.
@@ -239,6 +248,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `promotion_source_asset_missing`
   - `promotion_source_not_at_head`
   - `promotion_lineage_invalid`
+  - `stable_window_override_invalid`
   - `release_dispatch_watch_failed`
   - `release_verification_failed`
   - `canary_hygiene_failed`
@@ -269,6 +279,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
+  - `ops_control_plane_stable_window_missing`
   - `policy_drift_runtime_error`
 - `.github/workflows/release-rollback-drill.yml` must run `scripts/Invoke-RollbackDrillSelfHealing.ps1`.
 - Rollback self-healing reason codes must remain explicit:

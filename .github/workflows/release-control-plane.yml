@@ -31,6 +31,16 @@ on:
         required: false
         default: '1'
         type: string
+      force_stable_promotion_outside_window:
+        description: Force stable promotion outside policy window for FullCycle (audited).
+        required: false
+        default: false
+        type: boolean
+      force_stable_promotion_reason:
+        description: Audit reason when forcing stable promotion outside policy window.
+        required: false
+        default: ''
+        type: string
       dry_run:
         description: Run planning and health gates only; do not dispatch releases.
         required: false
@@ -104,6 +114,17 @@ jobs:
             $dryRun = [System.Convert]::ToBoolean($dryRunText)
           }
 
+          $forceStablePromotionOutsideWindowText = [string]'${{ inputs.force_stable_promotion_outside_window }}'
+          $forceStablePromotionOutsideWindow = $false
+          if (-not [string]::IsNullOrWhiteSpace($forceStablePromotionOutsideWindowText)) {
+            $forceStablePromotionOutsideWindow = [System.Convert]::ToBoolean($forceStablePromotionOutsideWindowText)
+          }
+
+          $forceStablePromotionReason = [string]'${{ inputs.force_stable_promotion_reason }}'
+          if ($null -eq $forceStablePromotionReason) {
+            $forceStablePromotionReason = ''
+          }
+
           & pwsh -NoProfile -File ./scripts/Invoke-ReleaseControlPlane.ps1 `
             -Repository '${{ github.repository }}' `
             -Branch 'main' `
@@ -111,6 +132,8 @@ jobs:
             -SyncGuardMaxAgeHours $syncGuardAgeHours `
             -KeepLatestCanaryN $keepLatestCanaryN `
             -AutoRemediate:$autoRemediate `
+            -ForceStablePromotionOutsideWindow:$forceStablePromotionOutsideWindow `
+            -ForceStablePromotionReason $forceStablePromotionReason `
             -DryRun:$dryRun `
             -OutputPath $reportPath
 

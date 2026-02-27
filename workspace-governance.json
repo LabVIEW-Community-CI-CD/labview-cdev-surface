@@ -281,6 +281,14 @@
           "legacy_tag_family": "legacy_date_window",
           "semver_only_enforce_utc": "2026-07-01T00:00:00Z"
         },
+        "stable_promotion_window": {
+          "full_cycle_allowed_utc_weekdays": [
+            "Monday"
+          ],
+          "allow_outside_window_with_override": true,
+          "override_reason_required": true,
+          "override_reason_min_length": 12
+        },
         "self_healing": {
           "enabled": true,
           "max_attempts": 1,

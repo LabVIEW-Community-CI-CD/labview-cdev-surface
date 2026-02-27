@@ -391,13 +391,17 @@ Control-plane behavior:
 2. Dispatches release workflow with deterministic SemVer channel tags:
    - canary: `vX.Y.Z-canary.N`
    - prerelease: `vX.Y.Z-rc.N` (promoted from latest semver canary)
-   - stable: `vX.Y.Z` (promoted from latest semver prerelease on Monday window)
+   - stable: `vX.Y.Z` (promoted from latest semver prerelease during policy window)
 3. Verifies run completion and promotion source integrity (`assets + source commit == branch head`).
 4. Performs post-dispatch release verification (`required assets + release-manifest channel/tag/provenance checks`).
 5. Verifies promotion lineage for `PromotePrerelease` and `PromoteStable` (`source/target channel + SemVer core + commit SHA`).
 6. Applies canary smoke tag hygiene with `tag_family=semver` after canary publish.
 7. Reads SemVer gate policy from `installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`).
-8. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
+8. Reads stable promotion window policy from `installer_contract.release_client.ops_control_plane_policy.stable_promotion_window` (default: full-cycle Mondays only, override allowed with audited reason).
+9. Supports manual emergency override for FullCycle stable promotion via workflow_dispatch inputs:
+   - `force_stable_promotion_outside_window=true`
+   - `force_stable_promotion_reason=<non-empty reason (min length enforced by policy)>`
+10. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
 
 Top-level release-control-plane deterministic failure reason codes include:
 - `ops_health_gate_failed`
@@ -407,6 +411,7 @@ Top-level release-control-plane deterministic failure reason codes include:
 - `promotion_source_asset_missing`
 - `promotion_source_not_at_head`
 - `promotion_lineage_invalid`
+- `stable_window_override_invalid`
 - `release_dispatch_watch_failed`
 - `release_verification_failed`
 - `canary_hygiene_failed`
@@ -441,6 +446,7 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
+  - `ops_control_plane_stable_window_missing`
 
 `release-rollback-drill.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-RollbackDrillSelfHealing.ps1` to validate deterministic rollback readiness:
 - channel-scoped latest/previous release candidates

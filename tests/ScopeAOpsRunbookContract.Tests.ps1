@@ -34,8 +34,10 @@ Describe 'Scope A ops runbook contract' {
         $script:runbookContent | Should -Match '20260226'
         $script:runbookContent | Should -Match 'release_verification_failed'
         $script:runbookContent | Should -Match 'promotion_lineage_invalid'
+        $script:runbookContent | Should -Match 'stable_window_override_invalid'
         $script:runbookContent | Should -Match 'release-manifest\.json'
         $script:runbookContent | Should -Match 'release_dispatch_watch_failed'
+        $script:runbookContent | Should -Match 'force_stable_promotion_outside_window=true'
     }
 
     It 'keeps README and AGENTS aligned to Scope A workflows' {
