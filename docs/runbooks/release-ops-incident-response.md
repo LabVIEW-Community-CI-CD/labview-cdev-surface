@@ -234,9 +234,45 @@ gh workflow run release-rollback-drill.yml -R LabVIEW-Community-CI-CD/labview-cd
   -f auto_self_heal=false
 ```
 
+## Release Race-Hardening Drill Dispatch
+Run collision-retry verification drill on the canary release lane:
+
+```powershell
+gh workflow run release-race-hardening-drill.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f auto_remediate=true `
+  -f keep_latest_canary_n=1 `
+  -f watch_timeout_minutes=120
+```
+
+Run the same drill directly from the repo:
+
+```powershell
+Set-Location D:\dev\labview-cdev-surface-fork
+pwsh -File .\scripts\Invoke-ReleaseRaceHardeningDrill.ps1 `
+  -Repository LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -Branch main `
+  -AutoRemediate:$true `
+  -KeepLatestCanaryN 1 `
+  -WatchTimeoutMinutes 120
+```
+
+Expected pass evidence in `release-race-hardening-drill-report.json`:
+- `reason_code=drill_passed`
+- `evidence.collision_observed=true`
+- `evidence.collision_signals` includes at least one collision marker (`collision_retries_ge_1`, `attempt_status_collision_*`, or `dispatch_status_collision_*`)
+- `artifacts.control_plane_report_artifact` is `release-control-plane-report-<run_id>`
+- `evidence.release_verification_status=pass`
+
+Deterministic drill failure reason codes:
+- `control_plane_collision_not_observed`
+- `control_plane_report_download_failed`
+- `control_plane_report_missing`
+- `control_plane_run_failed`
+
 ## Evidence to Attach to Incident
 - `ops-monitoring-report.json`
 - `canary-smoke-tag-hygiene-report.json`
 - `release-control-plane-override-audit.json` (when override is requested/applied)
+- `release-race-hardening-drill-report.json`
 - sync guard run URL
 - parity SHAs (upstream and fork)

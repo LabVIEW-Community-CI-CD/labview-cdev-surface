@@ -1,0 +1,93 @@
+name: release-race-hardening-drill
+
+on:
+  schedule:
+    - cron: '40 9 * * 2'
+  workflow_dispatch:
+    inputs:
+      auto_remediate:
+        description: Allow release-control-plane to auto-remediate ops drift before canary dispatch.
+        required: false
+        default: true
+        type: boolean
+      keep_latest_canary_n:
+        description: Number of latest SemVer canary tags to keep after control-plane canary publish.
+        required: false
+        default: '1'
+        type: string
+      watch_timeout_minutes:
+        description: Timeout minutes for contender and control-plane workflow watches.
+        required: false
+        default: '120'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  release-race-hardening-drill:
+    name: Release Race Hardening Drill
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enforce hosted-runner lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerEnvironment = [string]$env:RUNNER_ENVIRONMENT
+          if ($runnerEnvironment -ne 'github-hosted') {
+            throw "hosted_runner_required: release-race-hardening-drill must run on a github-hosted runner. actual='$runnerEnvironment'"
+          }
+
+      - name: Execute release race-hardening drill
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-race-hardening-drill-report.json'
+
+          $keepLatestCanaryNText = [string]'${{ inputs.keep_latest_canary_n }}'
+          $keepLatestCanaryN = 1
+          if (-not [string]::IsNullOrWhiteSpace($keepLatestCanaryNText)) {
+            $parsedKeepLatestCanaryN = 0
+            if (-not [int]::TryParse($keepLatestCanaryNText, [ref]$parsedKeepLatestCanaryN)) {
+              throw "keep_latest_canary_n must be an integer. actual='$keepLatestCanaryNText'"
+            }
+            $keepLatestCanaryN = $parsedKeepLatestCanaryN
+          }
+
+          $watchTimeoutText = [string]'${{ inputs.watch_timeout_minutes }}'
+          $watchTimeoutMinutes = 120
+          if (-not [string]::IsNullOrWhiteSpace($watchTimeoutText)) {
+            $parsedWatchTimeoutMinutes = 0
+            if (-not [int]::TryParse($watchTimeoutText, [ref]$parsedWatchTimeoutMinutes)) {
+              throw "watch_timeout_minutes must be an integer. actual='$watchTimeoutText'"
+            }
+            $watchTimeoutMinutes = $parsedWatchTimeoutMinutes
+          }
+
+          $autoRemediateText = [string]'${{ inputs.auto_remediate }}'
+          $autoRemediate = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoRemediateText)) {
+            $autoRemediate = [System.Convert]::ToBoolean($autoRemediateText)
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-ReleaseRaceHardeningDrill.ps1 `
+            -Repository '${{ github.repository }}' `
+            -Branch 'main' `
+            -AutoRemediate:$autoRemediate `
+            -KeepLatestCanaryN $keepLatestCanaryN `
+            -WatchTimeoutMinutes $watchTimeoutMinutes `
+            -OutputPath $reportPath
+
+      - name: Upload release race-hardening drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-race-hardening-drill-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-race-hardening-drill-report.json
+          if-no-files-found: error

@@ -301,6 +301,15 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `rollback_candidate_missing`
   - `rollback_assets_missing`
   - `rollback_drill_runtime_error`
+- `.github/workflows/release-race-hardening-drill.yml` must run `scripts/Invoke-ReleaseRaceHardeningDrill.ps1`.
+- Race-hardening drill must dispatch both `release-workspace-installer.yml` (contender) and `release-control-plane.yml` (`mode=CanaryCycle`, `dry_run=false`) and validate collision handling using control-plane artifact evidence.
+- Race-hardening drill reason codes must remain explicit:
+  - `drill_passed`
+  - `control_plane_collision_not_observed`
+  - `control_plane_report_download_failed`
+  - `control_plane_report_missing`
+  - `control_plane_run_failed`
+  - `race_hardening_drill_runtime_error`
 - Operational incident handling runbook is `docs/runbooks/release-ops-incident-response.md`.
 
 ## Integration Gate Policy

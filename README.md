@@ -466,6 +466,18 @@ Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` still em
 - `rollback_candidate_missing`
 - `rollback_assets_missing`
 
+`release-race-hardening-drill.yml` is scheduled weekly and supports manual dispatch. It runs `scripts/Invoke-ReleaseRaceHardeningDrill.ps1` to prove release-tag collision handling under parallel dispatch pressure:
+- dispatches a contender `release-workspace-installer.yml` run at predicted next SemVer canary tag
+- dispatches `release-control-plane.yml` in `CanaryCycle` mode immediately after
+- watches both runs and downloads `release-control-plane-report-<run_id>` artifact
+- requires collision evidence in control-plane execution (`collision_retries >= 1` and/or collision attempt statuses)
+- requires release verification evidence from control-plane report (`release_verification.status=pass`)
+- deterministic failure reason codes include:
+  - `control_plane_collision_not_observed`
+  - `control_plane_report_download_failed`
+  - `control_plane_report_missing`
+  - `control_plane_run_failed`
+
 ## Local Docker package for control-plane exercise
 
 Run the local Docker harness (safe default, validate + dry-run):
