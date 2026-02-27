@@ -49,6 +49,7 @@ $opsRemediateScript = Join-Path $PSScriptRoot 'Invoke-OpsAutoRemediation.ps1'
 $dispatchWorkflowScript = Join-Path $PSScriptRoot 'Dispatch-WorkflowAtRemoteHead.ps1'
 $watchWorkflowScript = Join-Path $PSScriptRoot 'Watch-WorkflowRun.ps1'
 $canaryHygieneScript = Join-Path $PSScriptRoot 'Invoke-CanarySmokeTagHygiene.ps1'
+$releaseRunnerLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv')
 
 foreach ($requiredScript in @($opsSnapshotScript, $opsRemediateScript, $dispatchWorkflowScript, $watchWorkflowScript, $canaryHygieneScript)) {
     if (-not (Test-Path -LiteralPath $requiredScript -PathType Leaf)) {
@@ -347,6 +348,7 @@ try {
     try {
         & pwsh -NoProfile -File $opsSnapshotScript `
             -SurfaceRepository $Repository `
+            -RequiredRunnerLabels $releaseRunnerLabels `
             -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
             -OutputPath $preHealthPath
         if ($LASTEXITCODE -eq 0) {
@@ -364,6 +366,7 @@ try {
         $remediationPath = Join-Path $scratchRoot 'remediation.json'
         & pwsh -NoProfile -File $opsRemediateScript `
             -SurfaceRepository $Repository `
+            -RequiredRunnerLabels $releaseRunnerLabels `
             -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
             -OutputPath $remediationPath
         if (Test-Path -LiteralPath $remediationPath -PathType Leaf) {
@@ -374,6 +377,7 @@ try {
     $postHealthPath = Join-Path $scratchRoot 'post-health.json'
     & pwsh -NoProfile -File $opsSnapshotScript `
         -SurfaceRepository $Repository `
+        -RequiredRunnerLabels $releaseRunnerLabels `
         -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
         -OutputPath $postHealthPath
     if ($LASTEXITCODE -ne 0) {

@@ -45,6 +45,13 @@ Describe 'Release client policy contract' {
         $releaseClient.cdev_cli_sync.primary_repo | Should -Be 'svelderrainruiz/labview-cdev-cli'
         $releaseClient.cdev_cli_sync.mirror_repo | Should -Be 'LabVIEW-Community-CI-CD/labview-cdev-cli'
         $releaseClient.cdev_cli_sync.strategy | Should -Be 'fork-and-upstream-full-sync'
+        $releaseClient.runtime_images.cdev_cli_runtime.canonical_repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime'
+        $releaseClient.runtime_images.cdev_cli_runtime.source_repo | Should -Be 'LabVIEW-Community-CI-CD/labview-cdev-cli'
+        $releaseClient.runtime_images.cdev_cli_runtime.source_commit | Should -Be '8fef6f9192d81a14add28636c1100c109ae5e977'
+        $releaseClient.runtime_images.cdev_cli_runtime.digest | Should -Be 'sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
+        $releaseClient.runtime_images.ops_runtime.repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops'
+        $releaseClient.runtime_images.ops_runtime.base_repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime'
+        $releaseClient.runtime_images.ops_runtime.base_digest | Should -Be 'sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
 
         ($script:payloadManifest | ConvertTo-Json -Depth 100) | Should -Be ($script:manifest | ConvertTo-Json -Depth 100)
     }
@@ -56,6 +63,9 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'svelderrainruiz/labview-cdev-surface'
         $script:policyScriptContent | Should -Match 'cdev_cli_sync_primary_repo'
         $script:policyScriptContent | Should -Match 'cdev_cli_sync_mirror_repo'
+        $script:policyScriptContent | Should -Match 'runtime_images_exists'
+        $script:policyScriptContent | Should -Match 'runtime_images_cdev_cli_runtime_canonical_repository'
+        $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
     }
 
     It 'has parse-safe PowerShell syntax' {

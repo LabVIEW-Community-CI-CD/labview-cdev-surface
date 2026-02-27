@@ -18,9 +18,10 @@ Describe 'Portable ops runtime contract' {
         $script:wrapperContent = Get-Content -LiteralPath $script:wrapper -Raw
     }
 
-    It 'pins a PowerShell-based container runtime with git gh jq' {
-        $script:dockerContent | Should -Match 'mcr\.microsoft\.com/powershell'
-        $script:dockerContent | Should -Match 'git jq gh'
+    It 'pins cdev-cli runtime base by digest and resets entrypoint for ops scripts' {
+        $script:dockerContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
+        $script:dockerContent | Should -Match 'ENTRYPOINT \[\]'
+        $script:dockerContent | Should -Match 'Install-Module -Name Pester'
     }
 
     It 'mounts workspace and forwards GH_TOKEN to containerized ops scripts' {

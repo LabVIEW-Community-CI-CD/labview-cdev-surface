@@ -56,4 +56,12 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'release_tag_range_exhausted'
         $script:runtimeContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
     }
+
+    It 'decouples control-plane runner health gate to release-runner labels' {
+        $script:runtimeContent | Should -Match 'RequiredRunnerLabels \$releaseRunnerLabels'
+        $script:runtimeContent | Should -Match "self-hosted', 'windows', 'self-hosted-windows-lv"
+        $script:runtimeContent | Should -Not -Match 'windows-containers'
+        $script:runtimeContent | Should -Not -Match 'user-session'
+        $script:runtimeContent | Should -Not -Match 'cdev-surface-windows-gate'
+    }
 }

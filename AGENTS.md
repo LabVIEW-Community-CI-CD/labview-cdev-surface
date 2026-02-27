@@ -141,6 +141,13 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - primary repo: `svelderrainruiz/labview-cdev-cli`
   - mirror repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
   - strategy: `fork-and-upstream-full-sync`
+- Runtime image metadata is required in `installer_contract.release_client.runtime_images`:
+  - cdev-cli runtime canonical repository: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime`
+  - cdev-cli runtime source repo: `LabVIEW-Community-CI-CD/labview-cdev-cli`
+  - cdev-cli runtime source commit: `8fef6f9192d81a14add28636c1100c109ae5e977`
+  - cdev-cli runtime digest: `sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+  - ops runtime repository: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
+  - ops runtime base repository/digest: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
 
 ## Installer Runtime Gate Contract
 - Installer runtime (`scripts/Install-WorkspaceFromManifest.ps1`) must fail fast if bundled `runner-cli` integrity checks fail.
@@ -181,6 +188,11 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `sync_guard_missing`
   - `sync_guard_incomplete`
 - Failure path must upload `ops-monitoring-report.json` and update a single issue titled `Ops Monitoring Alert`.
+- Release-control-plane health checks must use release-runner labels only (`self-hosted`, `windows`, `self-hosted-windows-lv`) when invoking `Invoke-OpsMonitoringSnapshot.ps1` from:
+  - `scripts/Invoke-ReleaseControlPlane.ps1`
+  - `scripts/Invoke-OpsAutoRemediation.ps1`
+  - `scripts/Exercise-ReleaseControlPlaneLocal.ps1`
+- `.github/workflows/ops-monitoring.yml` remains strict-default and must keep Docker Desktop parity visibility labels in its default snapshot path (`windows-containers`, `user-session`, `cdev-surface-windows-gate`).
 - `.github/workflows/canary-smoke-tag-hygiene.yml` is the canary smoke tag retention workflow.
 - It must run `scripts/Invoke-CanarySmokeTagHygiene.ps1` and enforce deterministic keep-latest behavior for tags matching `v0.YYYYMMDD.N`.
 - `.github/workflows/ops-autoremediate.yml` is the deterministic remediation workflow and must run `scripts/Invoke-OpsAutoRemediation.ps1`.
@@ -244,6 +256,9 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Use `scripts/Invoke-WindowsContainerNsisSelfTest.ps1` to build the workspace NSIS installer and run silent install (`/S`) inside the same Windows container with `ContainerSmoke` execution context; this image is aligned to `nationalinstruments/labview:2026q1-windows` and fails fast with `windows_container_mode_required` if Docker is not in Windows container mode.
 - Use `scripts/Invoke-LinuxContainerNsisParity.ps1 -DockerContext desktop-linux` for parity checks aligned to `nationalinstruments/labview:2026q1-linux`; this lane compiles NSIS smoke output but does not execute Windows installers on Linux.
 - Use `scripts/Invoke-ReleaseControlPlaneLocalDocker.ps1` for local containerized release-control-plane exercise (`Validate` + `DryRun` default).
+- Portable ops runtime image hierarchy is required:
+  - base image: `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+  - derived image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
 - If Docker Desktop Linux context is unavailable, confirm `Microsoft-Hyper-V-All`, `VirtualMachinePlatform`, and `Microsoft-Windows-Subsystem-Linux` are enabled, then reboot before retrying.
 - Use `scripts/Test-RunnerCliBundleDeterminism.ps1` and `scripts/Test-WorkspaceInstallerDeterminism.ps1` locally before proposing release-tag publication.
 - Keep local iteration artifacts under `artifacts\release\iteration`.

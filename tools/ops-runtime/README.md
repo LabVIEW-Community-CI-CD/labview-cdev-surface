@@ -5,6 +5,9 @@ This container is the portable Docker package for local ops exercises.
 Default image:
 - `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops:v1`
 
+Base image (digest pinned):
+- `ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime@sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423`
+
 Build locally:
 
 ```powershell

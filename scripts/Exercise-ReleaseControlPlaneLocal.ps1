@@ -95,9 +95,12 @@ function Add-StepResult {
 }
 
 try {
+    $releaseRunnerLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv')
+
     $opsSnapshotPath = Join-Path $resolvedOutputRoot 'ops-monitoring-report.json'
     & pwsh -NoProfile -File $opsSnapshotScript `
         -SurfaceRepository $Repository `
+        -RequiredRunnerLabels $releaseRunnerLabels `
         -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
         -OutputPath $opsSnapshotPath
     if ($LASTEXITCODE -ne 0) {
@@ -109,6 +112,7 @@ try {
         $opsRemediatePath = Join-Path $resolvedOutputRoot 'ops-autoremediate-report.json'
         & pwsh -NoProfile -File $opsRemediateScript `
             -SurfaceRepository $Repository `
+            -RequiredRunnerLabels $releaseRunnerLabels `
             -SyncGuardMaxAgeHours $SyncGuardMaxAgeHours `
             -OutputPath $opsRemediatePath
         if ($LASTEXITCODE -ne 0) {
