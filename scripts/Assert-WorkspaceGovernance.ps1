@@ -30,6 +30,28 @@ if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN) -and -not [string]::IsNullOrWhit
 
 $script:GhAvailable = [bool](Get-Command gh -ErrorAction SilentlyContinue)
 
+function Invoke-NativeCommandCapture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [Parameter()]
+        [string[]]$Arguments = @()
+    )
+
+    $previousPreference = $script:ErrorActionPreference
+    $script:ErrorActionPreference = 'Continue'
+    try {
+        $nativeOutput = & $Command @Arguments 2>&1
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        return [pscustomobject]@{
+            exit_code = $exitCode
+            output = @($nativeOutput | ForEach-Object { [string]$_ })
+        }
+    } finally {
+        $script:ErrorActionPreference = $previousPreference
+    }
+}
+
 function Normalize-Url {
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) {
@@ -44,11 +66,11 @@ function Get-RemoteUrl {
         [string]$RemoteName
     )
 
-    $url = & git -C $RepoPath remote get-url $RemoteName 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $RepoPath, 'remote', 'get-url', $RemoteName)
+    if ([int]$result.exit_code -ne 0) {
         return $null
     }
-    return $url.Trim()
+    return ([string]::Join("`n", @($result.output))).Trim()
 }
 
 function Assert-Remote {
@@ -73,7 +95,12 @@ function Assert-Remote {
 
     if ([string]::IsNullOrWhiteSpace($current)) {
         if ($OperationMode -eq 'Fix') {
-            & git -C $RepoPath remote add $RemoteName $ExpectedUrl | Out-Null
+            $addResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $RepoPath, 'remote', 'add', $RemoteName, $ExpectedUrl)
+            if ([int]$addResult.exit_code -ne 0) {
+                $result.status = 'failed-add'
+                $result.message = [string]::Join("`n", @($addResult.output))
+                return [pscustomobject]$result
+            }
             $after = Get-RemoteUrl -RepoPath $RepoPath -RemoteName $RemoteName
             $result.after = $after
             if ((Normalize-Url $after) -eq (Normalize-Url $ExpectedUrl)) {
@@ -96,7 +123,12 @@ function Assert-Remote {
     }
 
     if ($OperationMode -eq 'Fix') {
-        & git -C $RepoPath remote set-url $RemoteName $ExpectedUrl | Out-Null
+        $setResult = Invoke-NativeCommandCapture -Command 'git' -Arguments @('-C', $RepoPath, 'remote', 'set-url', $RemoteName, $ExpectedUrl)
+        if ([int]$setResult.exit_code -ne 0) {
+            $result.status = 'failed-update'
+            $result.message = [string]::Join("`n", @($setResult.output))
+            return [pscustomobject]$result
+        }
         $after = Get-RemoteUrl -RepoPath $RepoPath -RemoteName $RemoteName
         $result.after = $after
         if ((Normalize-Url $after) -eq (Normalize-Url $ExpectedUrl)) {
@@ -125,17 +157,17 @@ function Invoke-GhJson {
         }
     }
 
-    $output = & gh api $Endpoint 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-NativeCommandCapture -Command 'gh' -Arguments @('api', $Endpoint)
+    if ([int]$result.exit_code -ne 0) {
         return [pscustomobject]@{
             ok = $false
             data = $null
-            error = ([string]::Join("`n", @($output)))
+            error = ([string]::Join("`n", @($result.output)))
         }
     }
 
     try {
-        $data = $output | ConvertFrom-Json
+        $data = ([string]::Join("`n", @($result.output))) | ConvertFrom-Json
         return [pscustomobject]@{
             ok = $true
             data = $data
