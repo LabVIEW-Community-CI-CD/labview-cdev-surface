@@ -388,16 +388,22 @@ Control-plane behavior:
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
 
-`ops-slo-gate.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Test-OpsSloGate.ps1` to enforce:
+`ops-slo-gate.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-OpsSloSelfHealing.ps1` to enforce:
 - 7-day lookback by default
 - 100% success-rate target for `ops-monitoring`, `ops-autoremediate`, and `release-control-plane`
 - max sync-guard success age of 12 hours
+- bounded self-healing by dispatching `ops-autoremediate.yml` and re-verifying SLO status
 - deterministic reason codes on failure:
-  - `workflow_missing_runs`
-  - `workflow_failure_detected`
-  - `workflow_success_rate_below_threshold`
-  - `sync_guard_missing`
-  - `sync_guard_stale`
+  - `auto_remediation_disabled`
+  - `remediation_verify_failed`
+  - `slo_self_heal_runtime_error`
+
+Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic `reason_codes`:
+- `workflow_missing_runs`
+- `workflow_failure_detected`
+- `workflow_success_rate_below_threshold`
+- `sync_guard_missing`
+- `sync_guard_stale`
 
 `ops-policy-drift-check.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Test-ReleaseControlPlanePolicyDrift.ps1` and fails on:
 - root/payload release-client policy drift
@@ -407,13 +413,21 @@ Control-plane behavior:
   - `release_client_drift`
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
+  - `ops_control_plane_self_healing_missing`
 
-`release-rollback-drill.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-ReleaseRollbackDrill.ps1` to validate deterministic rollback readiness:
+`release-rollback-drill.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-RollbackDrillSelfHealing.ps1` to validate deterministic rollback readiness:
 - channel-scoped latest/previous release candidates
 - required release assets for rollback safety (`installer`, `.sha256`, `reproducibility-report.json`, SPDX/SLSA, `release-manifest.json`)
+- bounded self-healing for `rollback_candidate_missing` by dispatching one canary release and re-verifying rollback readiness
 - deterministic reason codes on failure:
-  - `rollback_candidate_missing`
-  - `rollback_assets_missing`
+  - `auto_remediation_disabled`
+  - `no_automatable_action`
+  - `remediation_verify_failed`
+  - `rollback_self_heal_runtime_error`
+
+Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` still emits deterministic `reason_codes`:
+- `rollback_candidate_missing`
+- `rollback_assets_missing`
 
 ## Local Docker package for control-plane exercise
 

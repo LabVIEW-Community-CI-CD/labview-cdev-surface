@@ -20,10 +20,25 @@ on:
         required: false
         default: '12'
         type: string
+      auto_self_heal:
+        description: Enable bounded self-healing when SLO gate fails.
+        required: false
+        default: true
+        type: boolean
+      self_heal_max_attempts:
+        description: Maximum bounded self-healing attempts.
+        required: false
+        default: '1'
+        type: string
+      self_heal_watch_timeout_minutes:
+        description: Timeout minutes for each remediation workflow watch.
+        required: false
+        default: '45'
+        type: string
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   issues: write
 
 jobs:
@@ -34,7 +49,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Evaluate ops SLO gate
+      - name: Evaluate ops SLO gate with bounded self-healing
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -72,11 +87,40 @@ jobs:
             $syncGuardMaxAgeHours = $parsedMaxAge
           }
 
-          & pwsh -NoProfile -File ./scripts/Test-OpsSloGate.ps1 `
+          $autoSelfHealText = [string]'${{ inputs.auto_self_heal }}'
+          $autoSelfHeal = $true
+          if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
+            $autoSelfHeal = [System.Convert]::ToBoolean($autoSelfHealText)
+          }
+
+          $selfHealMaxAttemptsText = [string]'${{ inputs.self_heal_max_attempts }}'
+          $selfHealMaxAttempts = 1
+          if (-not [string]::IsNullOrWhiteSpace($selfHealMaxAttemptsText)) {
+            $parsedMaxAttempts = 0
+            if (-not [int]::TryParse($selfHealMaxAttemptsText, [ref]$parsedMaxAttempts)) {
+              throw "self_heal_max_attempts must be an integer. actual='$selfHealMaxAttemptsText'"
+            }
+            $selfHealMaxAttempts = $parsedMaxAttempts
+          }
+
+          $selfHealWatchTimeoutText = [string]'${{ inputs.self_heal_watch_timeout_minutes }}'
+          $selfHealWatchTimeout = 45
+          if (-not [string]::IsNullOrWhiteSpace($selfHealWatchTimeoutText)) {
+            $parsedWatchTimeout = 0
+            if (-not [int]::TryParse($selfHealWatchTimeoutText, [ref]$parsedWatchTimeout)) {
+              throw "self_heal_watch_timeout_minutes must be an integer. actual='$selfHealWatchTimeoutText'"
+            }
+            $selfHealWatchTimeout = $parsedWatchTimeout
+          }
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsSloSelfHealing.ps1 `
             -SurfaceRepository '${{ github.repository }}' `
             -LookbackDays $lookbackDays `
             -MinSuccessRatePct $minSuccessRatePct `
             -SyncGuardMaxAgeHours $syncGuardMaxAgeHours `
+            -AutoRemediate:$autoSelfHeal `
+            -MaxAttempts $selfHealMaxAttempts `
+            -WatchTimeoutMinutes $selfHealWatchTimeout `
             -OutputPath $reportPath
 
       - name: Upload ops SLO gate report
@@ -103,16 +147,20 @@ jobs:
           }
 
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
-          $reasonCodes = @($report.reason_codes | ForEach-Object { [string]$_ })
-          $reasonCodeText = if ($reasonCodes.Count -gt 0) { [string]::Join(',', $reasonCodes) } else { 'unknown' }
+          $finalReasonCodes = @($report.final_report.reason_codes | ForEach-Object { [string]$_ })
+          $finalReasonCodeText = if ($finalReasonCodes.Count -gt 0) { [string]::Join(',', $finalReasonCodes) } else { 'unknown' }
+          $attemptCount = @($report.remediation_attempts).Count
           $body = @"
           Ops SLO gate failed.
 
           - Run: $env:RUN_URL
-          - Reason codes: $reasonCodeText
+          - Reason code: $($report.reason_code)
+          - Final reason codes: $finalReasonCodeText
           - Message: $($report.message)
           - Lookback days: $($report.lookback_days)
           - Min success rate pct: $($report.min_success_rate_pct)
+          - Auto remediate: $($report.auto_remediate)
+          - Remediation attempts: $attemptCount
           "@
 
           & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
@@ -138,12 +186,16 @@ jobs:
           }
 
           $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $attemptCount = @($report.remediation_attempts).Count
           $body = @"
           Ops SLO gate recovered.
 
           - Run: $env:RUN_URL
+          - Reason code: $($report.reason_code)
           - Message: $($report.message)
           - Lookback days: $($report.lookback_days)
+          - Auto remediated: $($report.reason_code -eq 'remediated')
+          - Remediation attempts: $attemptCount
           "@
 
           & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `

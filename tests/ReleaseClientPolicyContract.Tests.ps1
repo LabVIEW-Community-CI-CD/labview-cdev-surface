@@ -63,6 +63,17 @@ Describe 'Release client policy contract' {
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
+        $releaseClient.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
+        $releaseClient.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'
+        $releaseClient.ops_control_plane_policy.self_healing.slo_gate.watch_timeout_minutes | Should -Be 45
+        $releaseClient.ops_control_plane_policy.self_healing.slo_gate.verify_after_remediation | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.release_workflow | Should -Be 'release-workspace-installer.yml'
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.release_branch | Should -Be 'main'
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.watch_timeout_minutes | Should -Be 120
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.verify_after_remediation | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.canary_sequence_min | Should -Be 1
+        $releaseClient.ops_control_plane_policy.self_healing.rollback_drill.canary_sequence_max | Should -Be 49
         $releaseClient.ops_control_plane_policy.rollback_drill.channel | Should -Be 'canary'
         $releaseClient.ops_control_plane_policy.rollback_drill.required_history_count | Should -Be 2
         $releaseClient.ops_control_plane_policy.rollback_drill.release_limit | Should -Be 100
@@ -82,6 +93,8 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
         $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
+        $script:policyScriptContent | Should -Match 'ops_policy_self_healing_enabled'
+        $script:policyScriptContent | Should -Match 'ops_policy_self_healing_rollback_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'
     }
 

@@ -130,6 +130,13 @@ Run strict SLO gate with default 7-day window:
 gh workflow run ops-slo-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
 ```
 
+The workflow runs bounded self-healing by default. Disable it for diagnostics:
+
+```powershell
+gh workflow run ops-slo-gate.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f auto_self_heal=false
+```
+
 Run with explicit thresholds:
 
 ```powershell
@@ -153,6 +160,15 @@ Run deterministic rollback drill on canary lane:
 gh workflow run release-rollback-drill.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
   -f channel=canary `
   -f required_history_count=2
+```
+
+The workflow performs bounded self-healing by default for `rollback_candidate_missing` by dispatching one canary release and then re-checking rollback readiness. Disable for diagnostics:
+
+```powershell
+gh workflow run release-rollback-drill.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f channel=canary `
+  -f required_history_count=2 `
+  -f auto_self_heal=false
 ```
 
 ## Evidence to Attach to Incident
