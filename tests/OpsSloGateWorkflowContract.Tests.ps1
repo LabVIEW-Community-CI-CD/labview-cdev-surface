@@ -30,6 +30,8 @@ Describe 'Ops SLO gate workflow contract' {
         $script:workflowContent | Should -Match 'auto_self_heal'
         $script:workflowContent | Should -Match 'self_heal_max_attempts'
         $script:workflowContent | Should -Match 'self_heal_watch_timeout_minutes'
+        $script:workflowContent | Should -Match 'warning_min_success_rate_pct'
+        $script:workflowContent | Should -Match 'critical_min_success_rate_pct'
     }
 
     It 'runs self-healing SLO runtime, uploads report, and manages incident lifecycle' {
@@ -62,6 +64,11 @@ Describe 'Ops SLO gate workflow contract' {
         $script:selfHealingContent | Should -Match '\$dispatchInputs = @\('
         $script:selfHealingContent | Should -Match '-Inputs \$dispatchInputs'
         $script:selfHealingContent | Should -Match 'sync_guard_max_age_hours'
+        $script:selfHealingContent | Should -Match 'warning_min_success_rate_pct'
+        $script:selfHealingContent | Should -Match 'critical_min_success_rate_pct'
+        $script:selfHealingContent | Should -Match 'alert_severity'
+        $script:selfHealingContent | Should -Match 'critical_reason_codes'
+        $script:selfHealingContent | Should -Match 'warning_reason_codes'
         $script:selfHealingContent | Should -Match 'already_healthy'
         $script:selfHealingContent | Should -Match 'remediated'
         $script:selfHealingContent | Should -Match 'auto_remediation_disabled'

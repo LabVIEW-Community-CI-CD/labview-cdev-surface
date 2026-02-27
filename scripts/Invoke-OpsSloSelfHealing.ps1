@@ -37,6 +37,30 @@ param(
     [int]$WatchTimeoutMinutes = 45,
 
     [Parameter()]
+    [ValidateRange(0, 100)]
+    [double]$WarningMinSuccessRatePct = 99.5,
+
+    [Parameter()]
+    [ValidateRange(0, 100)]
+    [double]$CriticalMinSuccessRatePct = 99.0,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$WarningReasonCodes = @(
+        'workflow_missing_runs',
+        'workflow_success_rate_below_threshold'
+    ),
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$CriticalReasonCodes = @(
+        'workflow_failure_detected',
+        'sync_guard_missing',
+        'sync_guard_stale',
+        'slo_gate_runtime_error'
+    ),
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -53,6 +77,116 @@ foreach ($requiredScript in @($sloGateScript, $dispatchWorkflowScript, $watchWor
     if (-not (Test-Path -LiteralPath $requiredScript -PathType Leaf)) {
         throw "required_script_missing: $requiredScript"
     }
+}
+
+function ConvertTo-StringArray {
+    param([Parameter()][AllowNull()]$Value)
+
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    if ($Value -is [string]) {
+        if ([string]::IsNullOrWhiteSpace([string]$Value)) {
+            return @()
+        }
+        return @([string]$Value)
+    }
+
+    $items = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in @($Value)) {
+        $text = [string]$entry
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            continue
+        }
+        if (-not $items.Contains($text)) {
+            [void]$items.Add($text)
+        }
+    }
+
+    return @($items)
+}
+
+function Test-ContainsAnyReasonCode {
+    param(
+        [Parameter()][string[]]$Source = @(),
+        [Parameter()][string[]]$Candidates = @()
+    )
+
+    $normalizedSource = ConvertTo-StringArray -Value $Source
+    foreach ($reason in @($normalizedSource)) {
+        if (@($Candidates) -contains [string]$reason) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-LowestWorkflowSuccessRate {
+    param([Parameter()][AllowNull()]$GateReport)
+
+    if ($null -eq $GateReport) {
+        return $null
+    }
+
+    $evaluations = @($GateReport.workflow_evaluations)
+    if (@($evaluations).Count -eq 0) {
+        return $null
+    }
+
+    $lowest = $null
+    foreach ($evaluation in @($evaluations)) {
+        $value = $null
+        try {
+            $value = [double]$evaluation.success_rate_pct
+        } catch {
+            $value = $null
+        }
+
+        if ($null -eq $value) {
+            continue
+        }
+
+        if ($null -eq $lowest -or [double]$value -lt [double]$lowest) {
+            $lowest = [double]$value
+        }
+    }
+
+    return $lowest
+}
+
+function Resolve-OpsSloAlertSeverity {
+    param(
+        [Parameter()][string]$OverallStatus = 'fail',
+        [Parameter()][AllowNull()]$GateReport = $null,
+        [Parameter()][double]$WarningThreshold = 99.5,
+        [Parameter()][double]$CriticalThreshold = 99.0,
+        [Parameter()][string[]]$WarningCodes = @(),
+        [Parameter()][string[]]$CriticalCodes = @()
+    )
+
+    if ([string]$OverallStatus -eq 'pass') {
+        return 'none'
+    }
+
+    $reasonCodes = ConvertTo-StringArray -Value @($GateReport.reason_codes)
+    if (Test-ContainsAnyReasonCode -Source @($reasonCodes) -Candidates @($CriticalCodes)) {
+        return 'critical'
+    }
+    if (Test-ContainsAnyReasonCode -Source @($reasonCodes) -Candidates @($WarningCodes)) {
+        return 'warning'
+    }
+
+    $lowestSuccessRate = Get-LowestWorkflowSuccessRate -GateReport $GateReport
+    if ($null -ne $lowestSuccessRate -and [double]$lowestSuccessRate -lt $CriticalThreshold) {
+        return 'critical'
+    }
+    if ($null -ne $lowestSuccessRate -and [double]$lowestSuccessRate -lt $WarningThreshold) {
+        return 'warning'
+    }
+
+    return 'warning'
 }
 
 function Invoke-SloGateAssessment {
@@ -123,6 +257,13 @@ $report = [ordered]@{
     remediation_branch = $RemediationBranch
     max_attempts = $MaxAttempts
     watch_timeout_minutes = $WatchTimeoutMinutes
+    alert_thresholds = [ordered]@{
+        warning_min_success_rate_pct = $WarningMinSuccessRatePct
+        critical_min_success_rate_pct = $CriticalMinSuccessRatePct
+        warning_reason_codes = @($WarningReasonCodes)
+        critical_reason_codes = @($CriticalReasonCodes)
+    }
+    alert_severity = 'none'
     status = 'fail'
     reason_code = ''
     message = ''
@@ -265,10 +406,27 @@ try {
             }
         }
     }
+
+    $severityGateReport = if ($null -ne $report.final_report) { $report.final_report } else { $report.initial_report }
+    $report.alert_severity = Resolve-OpsSloAlertSeverity `
+        -OverallStatus ([string]$report.status) `
+        -GateReport $severityGateReport `
+        -WarningThreshold $WarningMinSuccessRatePct `
+        -CriticalThreshold $CriticalMinSuccessRatePct `
+        -WarningCodes @($WarningReasonCodes) `
+        -CriticalCodes @($CriticalReasonCodes)
 } catch {
     $report.status = 'fail'
     $report.reason_code = 'slo_self_heal_runtime_error'
     $report.message = [string]$_.Exception.Message
+    $severityGateReport = if ($null -ne $report.final_report) { $report.final_report } else { $report.initial_report }
+    $report.alert_severity = Resolve-OpsSloAlertSeverity `
+        -OverallStatus ([string]$report.status) `
+        -GateReport $severityGateReport `
+        -WarningThreshold $WarningMinSuccessRatePct `
+        -CriticalThreshold $CriticalMinSuccessRatePct `
+        -WarningCodes @($WarningReasonCodes) `
+        -CriticalCodes @($CriticalReasonCodes)
 }
 finally {
     Write-WorkflowOpsReport -Report $report -OutputPath $OutputPath | Out-Null

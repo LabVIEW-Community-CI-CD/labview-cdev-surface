@@ -33,6 +33,7 @@ Describe 'Workspace surface contract' {
         $script:opsIncidentLifecycleScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-OpsIncidentLifecycle.ps1'
         $script:opsSloGateScriptPath = Join-Path $script:repoRoot 'scripts/Test-OpsSloGate.ps1'
         $script:opsSloSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-OpsSloSelfHealing.ps1'
+        $script:workflowBotTokenHealthScriptPath = Join-Path $script:repoRoot 'scripts/Test-WorkflowBotTokenHealth.ps1'
         $script:opsPolicyDriftScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseControlPlanePolicyDrift.ps1'
         $script:rollbackDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRollbackDrill.ps1'
         $script:rollbackSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-RollbackDrillSelfHealing.ps1'
@@ -58,6 +59,7 @@ Describe 'Workspace surface contract' {
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:opsSloGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-slo-gate.yml'
         $script:opsPolicyDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/ops-policy-drift-check.yml'
+        $script:workflowBotTokenDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/workflow-bot-token-drill.yml'
         $script:releaseGuardrailsAutoRemediationWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-guardrails-autoremediate.yml'
         $script:branchProtectionDriftWorkflowPath = Join-Path $script:repoRoot '.github/workflows/branch-protection-drift-check.yml'
         $script:rollbackDrillWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-rollback-drill.yml'
@@ -109,6 +111,7 @@ Describe 'Workspace surface contract' {
             $script:opsIncidentLifecycleScriptPath,
             $script:opsSloGateScriptPath,
             $script:opsSloSelfHealingScriptPath,
+            $script:workflowBotTokenHealthScriptPath,
             $script:opsPolicyDriftScriptPath,
             $script:rollbackDrillScriptPath,
             $script:rollbackSelfHealingScriptPath,
@@ -134,6 +137,7 @@ Describe 'Workspace surface contract' {
             $script:canaryWorkflowPath,
             $script:opsSloGateWorkflowPath,
             $script:opsPolicyDriftWorkflowPath,
+            $script:workflowBotTokenDrillWorkflowPath,
             $script:releaseGuardrailsAutoRemediationWorkflowPath,
             $script:branchProtectionDriftWorkflowPath,
             $script:rollbackDrillWorkflowPath,
@@ -295,6 +299,14 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'ops-monitoring') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'ops-autoremediate') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'release-control-plane') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.warning_min_success_rate_pct | Should -Be 99.5
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.critical_min_success_rate_pct | Should -Be 99
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.warning_reason_codes) -contains 'workflow_missing_runs') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.warning_reason_codes) -contains 'workflow_success_rate_below_threshold') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) -contains 'workflow_failure_detected') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) -contains 'sync_guard_missing') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) -contains 'sync_guard_stale') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) -contains 'slo_gate_runtime_error') | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.auto_close_on_recovery | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.reopen_on_regression | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.mode | Should -Be 'dual-mode-semver-preferred'
@@ -312,6 +324,7 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Guardrails Auto-Remediation Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue
+        (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Workflow Bot Token Health Alert') | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'

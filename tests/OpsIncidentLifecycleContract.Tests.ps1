@@ -34,5 +34,8 @@ Describe 'Ops incident lifecycle contract' {
         $script:scriptContent | Should -Match 'schema_version'
         $script:scriptContent | Should -Match 'Write-WorkflowOpsReport'
         $script:scriptContent | Should -Match 'runtime_error'
+        $script:scriptContent | Should -Match 'Normalize-IncidentBody'
+        $script:scriptContent | Should -Match 'body_line_count'
+        $script:scriptContent | Should -Match 'body_sha256'
     }
 }

@@ -92,6 +92,15 @@ try {
             if (-not $opsPolicyPresent) {
                 Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_policy_missing'
             } else {
+                $sloAlertThresholdsPresent = ($null -ne $releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_slo_alert_thresholds_present'
+                        passed = $sloAlertThresholdsPresent
+                    }) | Out-Null
+                if (-not $sloAlertThresholdsPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_slo_alert_thresholds_missing'
+                }
+
                 $selfHealingPresent = ($null -ne $releaseClient.ops_control_plane_policy.self_healing)
                 $checks.Add([ordered]@{
                         check = 'release_client_ops_control_plane_policy_self_healing_present'
