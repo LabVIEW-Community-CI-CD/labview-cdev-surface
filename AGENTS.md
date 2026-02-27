@@ -302,12 +302,16 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `rollback_assets_missing`
   - `rollback_drill_runtime_error`
 - `.github/workflows/release-race-hardening-drill.yml` must run `scripts/Invoke-ReleaseRaceHardeningDrill.ps1`.
-- Race-hardening drill workflow must run on weekly schedule and on `integration/*` push events so release PR lanes receive deterministic collision-proof status.
+- Race-hardening drill workflow is release-lane evidence generation and must run on weekly schedule + manual dispatch only.
 - Race-hardening drill must dispatch both `release-workspace-installer.yml` (contender) and `release-control-plane.yml` (`mode=CanaryCycle`, `dry_run=false`) and validate collision handling using control-plane artifact evidence.
 - Race-hardening drill workflow must publish both:
   - `release-race-hardening-drill-report.json`
   - `release-race-hardening-weekly-summary.json`
 - Race-hardening drill workflow must manage incident lifecycle through `scripts/Invoke-OpsIncidentLifecycle.ps1` with title `Release Race Hardening Drill Alert`.
+- `.github/workflows/release-race-hardening-gate.yml` must run `scripts/Test-ReleaseRaceHardeningGate.ps1` and provide required check context `Release Race Hardening Drill` for `main` + `integration/*` PR/push lanes.
+- Race-hardening gate must fail when latest successful drill evidence is missing/stale, `reason_code != drill_passed`, or collision evidence is absent.
+- `.github/workflows/branch-protection-drift-check.yml` must run `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and maintain incident lifecycle title `Branch Protection Drift Alert`.
+- `scripts/Set-ReleaseBranchProtectionPolicy.ps1` is the deterministic apply path for required-check drift repair.
 - Race-hardening drill reason codes must remain explicit:
   - `drill_passed`
   - `control_plane_collision_not_observed`
@@ -319,7 +323,9 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 
 ## Integration Gate Policy
 - `.github/workflows/integration-gate.yml` is the integration-branch aggregator workflow.
+- It must run on `push` + `pull_request` for `main` and `integration/*` (plus dispatch).
 - It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`, `Release Race Hardening Drill`.
+- It must evaluate commit check-runs (not legacy commit status contexts) and treat `success`, `neutral`, and `skipped` as pass states.
 - Keep this as a distinct check context (`Integration Gate`) for branch-protection phase-in after promotion criteria are met.
 
 ## Installer Harness Execution Contract

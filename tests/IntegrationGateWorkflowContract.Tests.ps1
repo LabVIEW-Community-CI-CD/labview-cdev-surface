@@ -16,7 +16,9 @@ Describe 'Integration gate workflow contract' {
     It 'runs on integration branch pushes and on demand' {
         $script:workflowContent | Should -Match 'name:\s*Integration Gate'
         $script:workflowContent | Should -Match 'push:'
+        $script:workflowContent | Should -Match 'main'
         $script:workflowContent | Should -Match 'integration/\*\*'
+        $script:workflowContent | Should -Match 'pull_request:'
         $script:workflowContent | Should -Match 'workflow_dispatch:'
         $script:workflowContent | Should -Match 'ref:'
     }
@@ -31,7 +33,11 @@ Describe 'Integration gate workflow contract' {
         )) {
             $script:workflowContent | Should -Match ([regex]::Escape($context))
         }
-        $script:workflowContent | Should -Match 'repos/\$repo/commits/\$sha/status'
+        $script:workflowContent | Should -Match 'repos/\$repo/commits/\$sha/check-runs'
+        $script:workflowContent | Should -Match 'pull_request'
+        $script:workflowContent | Should -Match 'PR_HEAD_SHA'
+        $script:workflowContent | Should -Match 'neutral'
+        $script:workflowContent | Should -Match 'skipped'
         $script:workflowContent | Should -Match 'Start-Sleep -Seconds'
         $script:workflowContent | Should -Match 'Integration gate passed'
         $script:workflowContent | Should -Match 'Integration gate timed out'

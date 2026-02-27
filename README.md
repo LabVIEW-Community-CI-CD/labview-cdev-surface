@@ -124,8 +124,12 @@ Additional supply-chain contract jobs:
 
 ## Integration gate
 
-`integration-gate.yml` provides a single `Integration Gate` context for `integration/*` branches (and manual dispatch).  
-It polls commit statuses and only passes when these contexts are successful:
+`integration-gate.yml` provides a single `Integration Gate` context for:
+- `push` to `main` and `integration/*`
+- `pull_request` targeting `main` and `integration/*`
+- manual dispatch
+
+It polls commit check-runs and only passes when these contexts are successful (or intentionally skipped):
 - `CI Pipeline`
 - `Workspace Installer Contract`
 - `Reproducibility Contract`
@@ -469,7 +473,6 @@ Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` still em
 
 `release-race-hardening-drill.yml` runs on:
 - weekly schedule
-- `push` to `integration/*` (release PR enforcement lane)
 - manual dispatch
 
 It runs `scripts/Invoke-ReleaseRaceHardeningDrill.ps1` to prove release-tag collision handling under parallel dispatch pressure:
@@ -488,6 +491,21 @@ Operational behavior:
 - uploads `release-race-hardening-drill-report.json`
 - emits weekly-review artifact `release-race-hardening-weekly-summary.json`
 - uses incident lifecycle automation (`Invoke-OpsIncidentLifecycle.ps1`) with issue title `Release Race Hardening Drill Alert` on failure/recovery
+
+`release-race-hardening-gate.yml` provides the required branch-protection context (`Release Race Hardening Drill`) for:
+- `push` to `main` and `integration/*`
+- `pull_request` targeting `main` and `integration/*`
+
+It runs `scripts/Test-ReleaseRaceHardeningGate.ps1` and fails when:
+- no recent successful drill run exists
+- latest drill report is missing or not `reason_code=drill_passed`
+- latest drill report does not include collision evidence
+
+`branch-protection-drift-check.yml` continuously validates release branch-protection policy via `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and reports drift for:
+- `main`
+- `integration/*`
+
+Use `scripts/Set-ReleaseBranchProtectionPolicy.ps1` to deterministically apply/repair required check contracts.
 
 ## Local Docker package for control-plane exercise
 
