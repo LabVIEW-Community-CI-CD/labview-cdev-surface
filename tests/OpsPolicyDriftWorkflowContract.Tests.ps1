@@ -41,5 +41,7 @@ Describe 'Ops policy drift workflow contract' {
         $script:runtimeContent | Should -Match 'ops_control_plane_policy_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_self_healing_missing'
         $script:runtimeContent | Should -Match 'ops_control_plane_stable_window_missing'
+        $script:runtimeContent | Should -Match 'ops_control_plane_stable_window_reason_pattern_missing'
+        $script:runtimeContent | Should -Match 'ops_control_plane_stable_window_reason_example_missing'
     }
 }

@@ -42,6 +42,9 @@ param(
     [string]$ForceStablePromotionReason = '',
 
     [Parameter()]
+    [string]$OverrideAuditOutputPath = '',
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -147,6 +150,8 @@ function Resolve-StablePromotionWindowPolicy {
         allow_outside_window_with_override = $true
         override_reason_required = $true
         override_reason_min_length = 12
+        override_reason_pattern = '^(?<reference>(?i:(?:CHG|INC|RFC|PR|TASK)-\d{3,}|#\d+))\s*[:\-]\s*(?<summary>.+\S)$'
+        override_reason_example = 'CHG-1234: emergency stable promotion after incident remediation'
         source = 'default'
         warnings = @()
     }
@@ -251,6 +256,25 @@ function Resolve-StablePromotionWindowPolicy {
         } else {
             [void]$warnings.Add('stable_promotion_window_reason_min_length_missing')
         }
+
+        $reasonPattern = [string]$candidateWindow.override_reason_pattern
+        if ([string]::IsNullOrWhiteSpace($reasonPattern)) {
+            [void]$warnings.Add('stable_promotion_window_reason_pattern_missing')
+        } else {
+            try {
+                [void][regex]::new($reasonPattern)
+                $policy.override_reason_pattern = $reasonPattern
+            } catch {
+                [void]$warnings.Add("stable_promotion_window_reason_pattern_invalid: value=$reasonPattern")
+            }
+        }
+
+        $reasonExample = [string]$candidateWindow.override_reason_example
+        if ([string]::IsNullOrWhiteSpace($reasonExample)) {
+            [void]$warnings.Add('stable_promotion_window_reason_example_missing')
+        } else {
+            $policy.override_reason_example = $reasonExample.Trim()
+        }
     } catch {
         [void]$warnings.Add("stable_promotion_window_policy_load_failed: $([string]$_.Exception.Message)")
     }
@@ -275,6 +299,8 @@ $script:stablePromotionFullCycleAllowedUtcWeekdays = @($stablePromotionWindowPol
 $script:stablePromotionAllowOutsideWindowWithOverride = [bool]$stablePromotionWindowPolicy.allow_outside_window_with_override
 $script:stablePromotionOverrideReasonRequired = [bool]$stablePromotionWindowPolicy.override_reason_required
 $script:stablePromotionOverrideReasonMinLength = [int]$stablePromotionWindowPolicy.override_reason_min_length
+$script:stablePromotionOverrideReasonPattern = [string]$stablePromotionWindowPolicy.override_reason_pattern
+$script:stablePromotionOverrideReasonExample = [string]$stablePromotionWindowPolicy.override_reason_example
 foreach ($warning in @($stablePromotionWindowPolicy.warnings)) {
     Write-Warning "[stable_promotion_window_policy_warning] $warning"
 }
@@ -901,7 +927,12 @@ function Resolve-StablePromotionWindowDecision {
         allow_outside_window_with_override = [bool]$script:stablePromotionAllowOutsideWindowWithOverride
         override_reason_required = [bool]$script:stablePromotionOverrideReasonRequired
         override_reason_min_length = [int]$script:stablePromotionOverrideReasonMinLength
+        override_reason_pattern = [string]$script:stablePromotionOverrideReasonPattern
+        override_reason_example = [string]$script:stablePromotionOverrideReasonExample
         override_reason = $normalizedReason
+        override_reference = ''
+        override_summary = ''
+        structured_reason_valid = $false
         can_promote = $false
         reason_code = ''
     }
@@ -930,10 +961,172 @@ function Resolve-StablePromotionWindowDecision {
         throw "stable_window_override_reason_too_short: min_length=$([int]$script:stablePromotionOverrideReasonMinLength) actual_length=$($normalizedReason.Length)"
     }
 
+    $reasonPattern = ([string]$script:stablePromotionOverrideReasonPattern).Trim()
+    if ([string]::IsNullOrWhiteSpace($reasonPattern)) {
+        throw 'stable_window_override_reason_pattern_missing'
+    }
+
+    $reasonMatch = $null
+    try {
+        $reasonMatch = [regex]::Match($normalizedReason, $reasonPattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    } catch {
+        throw "stable_window_override_reason_pattern_invalid: pattern=$reasonPattern"
+    }
+
+    if ($null -eq $reasonMatch -or -not $reasonMatch.Success) {
+        throw "stable_window_override_reason_format_invalid: expected_pattern=$reasonPattern"
+    }
+
+    $referenceGroup = $reasonMatch.Groups['reference']
+    $summaryGroup = $reasonMatch.Groups['summary']
+    $overrideReference = if ($null -ne $referenceGroup -and $referenceGroup.Success) { ([string]$referenceGroup.Value).Trim() } else { '' }
+    $overrideSummary = if ($null -ne $summaryGroup -and $summaryGroup.Success) { ([string]$summaryGroup.Value).Trim() } else { '' }
+    if ([string]::IsNullOrWhiteSpace($overrideReference)) {
+        throw 'stable_window_override_reason_reference_missing'
+    }
+    if ([string]::IsNullOrWhiteSpace($overrideSummary)) {
+        throw 'stable_window_override_reason_summary_missing'
+    }
+
     $decision.can_promote = $true
     $decision.override_applied = $true
+    $decision.override_reference = $overrideReference
+    $decision.override_summary = $overrideSummary
+    $decision.structured_reason_valid = $true
     $decision.reason_code = 'stable_window_override_applied'
     return $decision
+}
+
+function Write-StableOverrideAuditReport {
+    param(
+        [Parameter(Mandatory = $true)][object]$ControlPlaneReport,
+        [Parameter()][string]$OutputPath = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace([string]$OutputPath)) {
+        return
+    }
+
+    $window = $ControlPlaneReport.stable_promotion_window
+    $decision = $null
+    if ($null -ne $window) {
+        $decision = $window.decision
+    }
+
+    function Get-PropertyValueOrDefault {
+        param(
+            [Parameter()][AllowNull()]$Object,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter()][AllowNull()]$DefaultValue = $null
+        )
+
+        if ($null -eq $Object) {
+            return $DefaultValue
+        }
+
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -eq $prop) {
+            return $DefaultValue
+        }
+
+        return $prop.Value
+    }
+
+    $stableExecution = @(
+        @($ControlPlaneReport.executions) |
+            Where-Object { [string]$_.mode -eq 'PromoteStable' } |
+            Select-Object -First 1
+    )
+
+    $stableTargetTag = ''
+    $stableDispatchRunId = ''
+    $stableReleaseUrl = ''
+    if (@($stableExecution).Count -eq 1) {
+        if ($null -ne $stableExecution[0].target_release) {
+            $stableTargetTag = [string]$stableExecution[0].target_release.tag
+        }
+        if ($null -ne $stableExecution[0].dispatch) {
+            $stableDispatchRunId = [string]$stableExecution[0].dispatch.run_id
+        }
+        if ($null -ne $stableExecution[0].release_verification) {
+            $stableReleaseUrl = [string]$stableExecution[0].release_verification.release_url
+        }
+    }
+
+    $overrideRequested = $false
+    $overrideApplied = $false
+    $structuredReasonValid = $false
+    $overrideReason = ''
+    $overrideReference = ''
+    $overrideSummary = ''
+    $policySource = ''
+    $decisionReason = ''
+    $currentUtc = ''
+    $currentUtcWeekday = ''
+    $allowedWeekdays = @()
+    $auditStatus = 'not_applicable'
+    $auditReason = 'not_full_cycle_mode'
+
+    if ($null -ne $window) {
+        $overrideRequested = [bool](Get-PropertyValueOrDefault -Object $window -Name 'override_requested' -DefaultValue $false)
+        $overrideReason = [string](Get-PropertyValueOrDefault -Object $window -Name 'override_reason' -DefaultValue '')
+        $policySource = [string](Get-PropertyValueOrDefault -Object $window -Name 'policy_source' -DefaultValue '')
+        $allowedWeekdays = @((Get-PropertyValueOrDefault -Object $window -Name 'full_cycle_allowed_utc_weekdays' -DefaultValue @()))
+    }
+
+    if ($null -ne $decision) {
+        $decisionReason = [string](Get-PropertyValueOrDefault -Object $decision -Name 'reason_code' -DefaultValue '')
+        $currentUtc = [string](Get-PropertyValueOrDefault -Object $decision -Name 'current_utc' -DefaultValue '')
+        $currentUtcWeekday = [string](Get-PropertyValueOrDefault -Object $decision -Name 'current_utc_weekday' -DefaultValue '')
+        $overrideApplied = [bool](Get-PropertyValueOrDefault -Object $decision -Name 'override_applied' -DefaultValue $false)
+        $overrideReference = [string](Get-PropertyValueOrDefault -Object $decision -Name 'override_reference' -DefaultValue '')
+        $overrideSummary = [string](Get-PropertyValueOrDefault -Object $decision -Name 'override_summary' -DefaultValue '')
+        $structuredReasonValid = [bool](Get-PropertyValueOrDefault -Object $decision -Name 'structured_reason_valid' -DefaultValue $false)
+    }
+
+    if ([string]$decisionReason -eq 'stable_window_override_applied') {
+        $auditStatus = 'override_applied'
+        $auditReason = 'stable_window_override_applied'
+    } elseif ($overrideRequested) {
+        $auditStatus = 'override_requested_not_applied'
+        $auditReason = if ([string]::IsNullOrWhiteSpace($decisionReason)) { 'override_requested' } else { $decisionReason }
+    } elseif ([string]$ControlPlaneReport.mode -eq 'FullCycle') {
+        $auditStatus = 'window_default_path'
+        $auditReason = if ([string]::IsNullOrWhiteSpace($decisionReason)) { 'stable_window_not_evaluated' } else { $decisionReason }
+    }
+
+    if ([string]$ControlPlaneReport.status -eq 'fail' -and [string]$ControlPlaneReport.reason_code -eq 'stable_window_override_invalid') {
+        $auditStatus = 'override_rejected'
+        $auditReason = 'stable_window_override_invalid'
+    }
+
+    $auditReport = [ordered]@{
+        schema_version = '1.0'
+        timestamp_utc = Get-UtcNowIso
+        repository = [string]$ControlPlaneReport.repository
+        branch = [string]$ControlPlaneReport.branch
+        mode = [string]$ControlPlaneReport.mode
+        run_status = [string]$ControlPlaneReport.status
+        run_reason_code = [string]$ControlPlaneReport.reason_code
+        status = $auditStatus
+        reason_code = $auditReason
+        stable_target_tag = $stableTargetTag
+        stable_dispatch_run_id = $stableDispatchRunId
+        stable_release_url = $stableReleaseUrl
+        override_requested = $overrideRequested
+        override_applied = $overrideApplied
+        override_reason = $overrideReason
+        override_reference = $overrideReference
+        override_summary = $overrideSummary
+        structured_reason_valid = $structuredReasonValid
+        policy_source = $policySource
+        full_cycle_allowed_utc_weekdays = @($allowedWeekdays)
+        current_utc = $currentUtc
+        current_utc_weekday = $currentUtcWeekday
+        decision_reason_code = $decisionReason
+    }
+
+    Write-WorkflowOpsReport -Report $auditReport -OutputPath $OutputPath | Out-Null
 }
 
 function Invoke-ReleaseMode {
@@ -1166,6 +1359,8 @@ $report = [ordered]@{
         allow_outside_window_with_override = [bool]$script:stablePromotionAllowOutsideWindowWithOverride
         override_reason_required = [bool]$script:stablePromotionOverrideReasonRequired
         override_reason_min_length = [int]$script:stablePromotionOverrideReasonMinLength
+        override_reason_pattern = [string]$script:stablePromotionOverrideReasonPattern
+        override_reason_example = [string]$script:stablePromotionOverrideReasonExample
         override_requested = [bool]$ForceStablePromotionOutsideWindow
         override_reason = ([string]$ForceStablePromotionReason).Trim()
         decision = [ordered]@{
@@ -1283,6 +1478,11 @@ catch {
 }
 finally {
     Write-WorkflowOpsReport -Report $report -OutputPath $OutputPath | Out-Null
+    try {
+        Write-StableOverrideAuditReport -ControlPlaneReport $report -OutputPath $OverrideAuditOutputPath
+    } catch {
+        Write-Warning ("[stable_override_audit_warning] {0}" -f [string]$_.Exception.Message)
+    }
     if (Test-Path -LiteralPath $scratchRoot -PathType Container) {
         Remove-Item -LiteralPath $scratchRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

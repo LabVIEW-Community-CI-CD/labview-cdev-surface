@@ -38,6 +38,9 @@ Describe 'Scope A ops runbook contract' {
         $script:runbookContent | Should -Match 'release-manifest\.json'
         $script:runbookContent | Should -Match 'release_dispatch_watch_failed'
         $script:runbookContent | Should -Match 'force_stable_promotion_outside_window=true'
+        $script:runbookContent | Should -Match 'CHG-1234'
+        $script:runbookContent | Should -Match 'Release Control Plane Stable Override Alert'
+        $script:runbookContent | Should -Match 'release-control-plane-override-audit\.json'
     }
 
     It 'keeps README and AGENTS aligned to Scope A workflows' {

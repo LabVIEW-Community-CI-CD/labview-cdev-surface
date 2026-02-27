@@ -228,10 +228,15 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `allow_outside_window_with_override`
   - `override_reason_required`
   - `override_reason_min_length`
+  - `override_reason_pattern`
+  - `override_reason_example`
 - Full-cycle stable promotion must evaluate stable window policy and record deterministic decision codes (`stable_window_open`, `stable_window_closed`, `stable_window_override_applied`) in execution report metadata.
 - Emergency stable override is workflow-dispatch only and audited:
   - `force_stable_promotion_outside_window`
   - `force_stable_promotion_reason`
+- Out-of-window stable override reason must satisfy policy regex and include structured reference (`?<reference>`) plus summary (`?<summary>`).
+- Release-control-plane workflow must always publish `release-control-plane-override-audit.json`.
+- Release-control-plane workflow must auto-open incident title `Release Control Plane Stable Override Alert` when out-of-window stable override is applied.
 - Release-control-plane canary hygiene invocation must enforce `TagFamily=semver`.
 - Legacy date-window tags (`v0.YYYYMMDD.N`) may still exist during migration but are non-canonical for control-plane dispatch.
 - Control-plane tag strategy policy must define `ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`) and keep it aligned with signature grace-end during dual-mode transition.
@@ -280,6 +285,8 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
   - `ops_control_plane_stable_window_missing`
+  - `ops_control_plane_stable_window_reason_pattern_missing`
+  - `ops_control_plane_stable_window_reason_example_missing`
   - `policy_drift_runtime_error`
 - `.github/workflows/release-rollback-drill.yml` must run `scripts/Invoke-RollbackDrillSelfHealing.ps1`.
 - Rollback self-healing reason codes must remain explicit:

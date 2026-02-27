@@ -400,8 +400,10 @@ Control-plane behavior:
 8. Reads stable promotion window policy from `installer_contract.release_client.ops_control_plane_policy.stable_promotion_window` (default: full-cycle Mondays only, override allowed with audited reason).
 9. Supports manual emergency override for FullCycle stable promotion via workflow_dispatch inputs:
    - `force_stable_promotion_outside_window=true`
-   - `force_stable_promotion_reason=<non-empty reason (min length enforced by policy)>`
-10. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
+   - `force_stable_promotion_reason=<structured reason with ticket/change reference, validated by policy regex>`
+10. Emits explicit override audit artifact `release-control-plane-override-audit.json` for every run.
+11. Auto-opens incident title `Release Control Plane Stable Override Alert` whenever decision code is `stable_window_override_applied`.
+12. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
 
 Top-level release-control-plane deterministic failure reason codes include:
 - `ops_health_gate_failed`
@@ -447,6 +449,8 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `ops_control_plane_policy_missing`
   - `ops_control_plane_self_healing_missing`
   - `ops_control_plane_stable_window_missing`
+  - `ops_control_plane_stable_window_reason_pattern_missing`
+  - `ops_control_plane_stable_window_reason_example_missing`
 
 `release-rollback-drill.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-RollbackDrillSelfHealing.ps1` to validate deterministic rollback readiness:
 - channel-scoped latest/previous release candidates

@@ -287,7 +287,9 @@
           ],
           "allow_outside_window_with_override": true,
           "override_reason_required": true,
-          "override_reason_min_length": 12
+          "override_reason_min_length": 12,
+          "override_reason_pattern": "^(?<reference>(?i:(?:CHG|INC|RFC|PR|TASK)-\\d{3,}|#\\d+))\\s*[:\\-]\\s*(?<summary>.+\\S)$",
+          "override_reason_example": "CHG-1234: emergency stable promotion after incident remediation"
         },
         "self_healing": {
           "enabled": true,

@@ -36,6 +36,7 @@ Describe 'Release control plane local Docker harness contract' {
         $script:harnessContent | Should -Match 'RequiredRunnerLabelsCsv \$releaseRunnerLabelsCsv'
         $script:harnessContent | Should -Match "self-hosted', 'windows', 'self-hosted-windows-lv"
         $script:harnessContent | Should -Match 'release-control-plane-local-summary\.json'
+        $script:harnessContent | Should -Match 'release-control-plane-override-audit\.json'
     }
 
     It 'guards mutating modes unless explicitly allowed' {

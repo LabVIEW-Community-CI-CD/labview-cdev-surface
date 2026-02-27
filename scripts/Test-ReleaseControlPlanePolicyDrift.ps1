@@ -108,6 +108,24 @@ try {
                     }) | Out-Null
                 if (-not $stableWindowPresent) {
                     Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_stable_window_missing'
+                } else {
+                    $stableWindowPatternPresent = (-not [string]::IsNullOrWhiteSpace([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_pattern))
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_stable_window_reason_pattern_present'
+                            passed = $stableWindowPatternPresent
+                        }) | Out-Null
+                    if (-not $stableWindowPatternPresent) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_stable_window_reason_pattern_missing'
+                    }
+
+                    $stableWindowReasonExamplePresent = (-not [string]::IsNullOrWhiteSpace([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_example))
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_stable_window_reason_example_present'
+                            passed = $stableWindowReasonExamplePresent
+                        }) | Out-Null
+                    if (-not $stableWindowReasonExamplePresent) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_stable_window_reason_example_missing'
+                    }
                 }
             }
         }
