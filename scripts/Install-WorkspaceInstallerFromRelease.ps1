@@ -83,6 +83,111 @@ function Resolve-Sha256Hex {
     return (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Resolve-HostValidationProfile {
+    param([Parameter(Mandatory = $true)]$Policy)
+
+    if ($null -eq $Policy.PSObject.Properties['host_validation_profile']) {
+        return $null
+    }
+
+    $profile = $Policy.host_validation_profile
+    if ($null -eq $profile) {
+        return $null
+    }
+
+    $executionProfile = [string]$profile.execution_profile
+    if ([string]::IsNullOrWhiteSpace($executionProfile)) {
+        Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message 'host_validation_profile.execution_profile is required when host_validation_profile is defined.'
+    }
+    if ($executionProfile -notin @('host-release', 'container-parity')) {
+        Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message "host_validation_profile.execution_profile '$executionProfile' is invalid. Expected 'host-release' or 'container-parity'."
+    }
+
+    $executionYear = [string]$profile.runnercli_execution_labview_year
+    if (-not [string]::IsNullOrWhiteSpace($executionYear) -and $executionYear -notmatch '^\d{4}$') {
+        Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message "host_validation_profile.runnercli_execution_labview_year '$executionYear' is invalid. Expected a 4-digit year."
+    }
+
+    $singlePplBitness = [string]$profile.single_ppl_bitness
+    if (-not [string]::IsNullOrWhiteSpace($singlePplBitness) -and $singlePplBitness -notin @('32', '64')) {
+        Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message "host_validation_profile.single_ppl_bitness '$singlePplBitness' is invalid. Expected '32' or '64'."
+    }
+
+    $parityWindowsTag = [string]$profile.parity_windows_tag
+    if ($executionProfile -eq 'container-parity') {
+        if ($singlePplBitness -notin @('32', '64')) {
+            Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message 'host_validation_profile.single_ppl_bitness is required for container-parity execution profile.'
+        }
+        if ([string]::IsNullOrWhiteSpace($parityWindowsTag)) {
+            Throw-ReleaseClientError -ReasonCode 'source_blocked' -Message 'host_validation_profile.parity_windows_tag is required for container-parity execution profile.'
+        }
+    }
+
+    return [pscustomobject]@{
+        execution_profile = $executionProfile
+        runnercli_execution_labview_year = $executionYear
+        single_ppl_bitness = $singlePplBitness
+        parity_windows_tag = $parityWindowsTag
+    }
+}
+
+function Get-HostValidationEnvironmentOverrides {
+    param($HostValidationProfile)
+
+    $overrides = @{}
+    if ($null -eq $HostValidationProfile) {
+        return $overrides
+    }
+
+    $overrides['LVIE_INSTALLER_EXECUTION_PROFILE'] = [string]$HostValidationProfile.execution_profile
+    if (-not [string]::IsNullOrWhiteSpace([string]$HostValidationProfile.runnercli_execution_labview_year)) {
+        $overrides['LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR'] = [string]$HostValidationProfile.runnercli_execution_labview_year
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$HostValidationProfile.single_ppl_bitness)) {
+        $overrides['LVIE_GATE_SINGLE_PPL_BITNESS'] = [string]$HostValidationProfile.single_ppl_bitness
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$HostValidationProfile.parity_windows_tag)) {
+        $overrides['LVIE_PARITY_WINDOWS_TAG'] = [string]$HostValidationProfile.parity_windows_tag
+    }
+
+    return $overrides
+}
+
+function Set-TemporaryEnvironmentVariables {
+    param([Parameter(Mandatory = $true)][hashtable]$Variables)
+
+    $snapshot = @{}
+    foreach ($name in $Variables.Keys) {
+        $entry = Get-Item -Path ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        $snapshot[$name] = [pscustomobject]@{
+            exists = ($null -ne $entry)
+            value = if ($null -ne $entry) { [string]$entry.Value } else { '' }
+        }
+
+        $value = [string]$Variables[$name]
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            Remove-Item -Path ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        } else {
+            Set-Item -Path ("Env:{0}" -f $name) -Value $value
+        }
+    }
+
+    return $snapshot
+}
+
+function Restore-TemporaryEnvironmentVariables {
+    param([Parameter(Mandatory = $true)][hashtable]$Snapshot)
+
+    foreach ($name in $Snapshot.Keys) {
+        $entry = $Snapshot[$name]
+        if ([bool]$entry.exists) {
+            Set-Item -Path ("Env:{0}" -f $name) -Value ([string]$entry.value)
+        } else {
+            Remove-Item -Path ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-ReasonCodeFromException {
     param([Parameter(Mandatory = $true)][string]$Message)
 
@@ -331,6 +436,8 @@ function Assert-ReleaseClientPolicy {
     [void][DateTime]::Parse([string]$Policy.signature_policy.dual_mode_start_utc)
     [void][DateTime]::Parse([string]$Policy.signature_policy.canary_enforce_utc)
     [void][DateTime]::Parse([string]$Policy.signature_policy.grace_end_utc)
+
+    [void](Resolve-HostValidationProfile -Policy $Policy)
 }
 
 $report = [ordered]@{
@@ -386,6 +493,7 @@ try {
 
     $policy = Load-EffectivePolicy -ManifestReleaseClient $manifestPolicy -PolicyPath $resolvedPolicyPath
     Assert-ReleaseClientPolicy -Policy $policy
+    $hostValidationProfile = Resolve-HostValidationProfile -Policy $policy
 
     $statePath = [string]$policy.state_path
     if ([string]::IsNullOrWhiteSpace($statePath)) {
@@ -406,6 +514,9 @@ try {
     $report.policy_path = $resolvedPolicyPath
     $report.state_path = $statePath
     $report.install_report_path = $installReportPath
+    if ($null -ne $hostValidationProfile) {
+        $report.details.host_validation_profile = $hostValidationProfile
+    }
 
     if ($Mode -eq 'ValidatePolicy') {
         $report.status = 'pass'
@@ -640,7 +751,26 @@ try {
         enforcement = $enforcement
     }
 
-    $process = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
+    $environmentOverrides = Get-HostValidationEnvironmentOverrides -HostValidationProfile $hostValidationProfile
+    $environmentSnapshot = @{}
+    try {
+        if ($environmentOverrides.Count -gt 0) {
+            $environmentSnapshot = Set-TemporaryEnvironmentVariables -Variables $environmentOverrides
+            $report.details.host_validation_environment = [ordered]@{}
+            foreach ($name in @('LVIE_INSTALLER_EXECUTION_PROFILE', 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR', 'LVIE_GATE_SINGLE_PPL_BITNESS', 'LVIE_PARITY_WINDOWS_TAG')) {
+                if ($environmentOverrides.ContainsKey($name)) {
+                    $report.details.host_validation_environment[$name] = [string]$environmentOverrides[$name]
+                }
+            }
+        }
+
+        $process = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
+    } finally {
+        if ($environmentSnapshot.Count -gt 0) {
+            Restore-TemporaryEnvironmentVariables -Snapshot $environmentSnapshot
+        }
+    }
+
     if ([int]$process.ExitCode -ne 0) {
         Throw-ReleaseClientError -ReasonCode 'installer_exit_nonzero' -Message "Installer exited with code $([int]$process.ExitCode)."
     }
