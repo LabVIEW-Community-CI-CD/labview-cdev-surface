@@ -33,6 +33,9 @@ param(
     [bool]$AutoRemediate = $true,
 
     [Parameter()]
+    [bool]$ForceControlPlaneWatchTimeout = $false,
+
+    [Parameter()]
     [string]$OutputPath = ''
 )
 
@@ -337,6 +340,7 @@ $report = [ordered]@{
     release_limit = $ReleaseLimit
     watch_timeout_minutes = $WatchTimeoutMinutes
     auto_remediate = [bool]$AutoRemediate
+    force_control_plane_watch_timeout = [bool]$ForceControlPlaneWatchTimeout
     keep_latest_canary_n = $KeepLatestCanaryN
     predicted_canary_tag = ''
     predicted_canary_core = ''
@@ -448,6 +452,9 @@ try {
         url = [string]$controlPlaneDispatch.url
         inputs = @($controlPlaneDispatch.inputs | ForEach-Object { [string]$_ })
         timestamp_utc = [string]$controlPlaneDispatch.timestamp_utc
+    }
+    if ([bool]$ForceControlPlaneWatchTimeout) {
+        throw "control_plane_watch_timeout: injected_for_drill run_id=$controlPlaneRunId timeout_minutes=$WatchTimeoutMinutes"
     }
 
     $contenderDispatchedAt = [DateTimeOffset]::MinValue
