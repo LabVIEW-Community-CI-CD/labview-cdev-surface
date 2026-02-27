@@ -279,6 +279,10 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.slo_gate.required_workflows) -contains 'release-control-plane') | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.auto_close_on_recovery | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.reopen_on_regression | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.mode | Should -Be 'dual-mode-semver-preferred'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.legacy_tag_family | Should -Be 'legacy_date_window'
+        ([DateTime]$script:manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-07-01T00:00:00Z'
+        ([DateTime]$script:manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be (([DateTime]$script:manifest.installer_contract.release_client.signature_policy.grace_end_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops SLO Gate Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue

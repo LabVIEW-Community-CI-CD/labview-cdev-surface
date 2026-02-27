@@ -276,6 +276,11 @@
             "Release Rollback Drill Alert"
           ]
         },
+        "tag_strategy": {
+          "mode": "dual-mode-semver-preferred",
+          "legacy_tag_family": "legacy_date_window",
+          "semver_only_enforce_utc": "2026-07-01T00:00:00Z"
+        },
         "self_healing": {
           "enabled": true,
           "max_attempts": 1,

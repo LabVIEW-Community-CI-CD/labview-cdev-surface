@@ -394,7 +394,8 @@ Control-plane behavior:
    - stable: `vX.Y.Z` (promoted from latest semver prerelease on Monday window)
 3. Verifies run completion and promotion source integrity (`assets + source commit == branch head`).
 4. Applies canary smoke tag hygiene with `tag_family=semver` after canary publish.
-5. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present.
+5. Reads SemVer gate policy from `installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`).
+6. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
 
