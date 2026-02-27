@@ -109,7 +109,10 @@ Describe 'Workspace installer release workflow contract' {
     }
 
     It 'enforces release notes, tag validation, and override disclosure support' {
-        $script:coreWorkflowContent | Should -Match '\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$'
+        $script:coreWorkflowContent | Should -Match 'legacyTagPattern'
+        $script:coreWorkflowContent | Should -Match 'semverTagPattern'
+        $script:coreWorkflowContent | Should -Match '\[channel_tag_mismatch\]'
+        $script:coreWorkflowContent | Should -Match '\[tag_migration_warning\]'
         $script:coreWorkflowContent | Should -Match 'SHA256'
         $script:coreWorkflowContent | Should -Match 'Release target commit'
         $script:coreWorkflowContent | Should -Match 'lvie-cdev-workspace-installer\.exe /S'
@@ -120,6 +123,7 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'release_channel'
         $script:coreWorkflowContent | Should -Match 'release-manifest\.json'
         $script:coreWorkflowContent | Should -Match 'Override Disclosure'
+        $script:coreWorkflowContent | Should -Match 'Tag Policy Notice'
         $script:coreWorkflowContent | Should -Match 'OVERRIDE_APPLIED'
     }
 }

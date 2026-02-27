@@ -250,10 +250,13 @@ Publish the Linux parity image to GHCR with deterministic tags:
 
 Use manual workflow dispatch for release publication:
 1. Run `.github/workflows/release-with-windows-gate.yml`.
-2. Provide a new `release_tag` in semantic format (for example, `v0.1.1`).
+2. Provide a new `release_tag`:
+   - Preferred SemVer: `vX.Y.Z` (stable), `vX.Y.Z-rc.N` (prerelease), `vX.Y.Z-canary.N` (canary).
+   - Legacy migration compatibility: `v0.YYYYMMDD.N`.
 3. Keep `allow_existing_tag=false` (default). Set `true` only for break-glass overwrite operations.
-4. Set `prerelease` as needed.
+4. Set `prerelease` to match the tag family (`true` for prerelease/canary tags, `false` for stable tags).
 5. Keep `allow_gate_override=false` (default).
+6. Set `release_channel` explicitly for canary tags (`canary`) to satisfy channel/tag consistency checks.
 
 Automated flow:
 1. `repo_guard` verifies release runs only in `LabVIEW-Community-CI-CD/labview-cdev-surface`.
@@ -366,7 +369,10 @@ Incident lifecycle is deterministic and shared by ops workflows via `scripts/Inv
 
 Every run uploads `ops-monitoring-report.json`.
 
-`canary-smoke-tag-hygiene.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-CanarySmokeTagHygiene.ps1` to keep latest `v0.YYYYMMDD.N` canary smoke tag(s) for a UTC date and delete older tags deterministically.
+`canary-smoke-tag-hygiene.yml` is scheduled daily and supports manual dispatch. It runs `scripts/Invoke-CanarySmokeTagHygiene.ps1` in dual-mode:
+- `legacy_date_window`: keeps latest `v0.YYYYMMDD.N` canary smoke tag(s) for the selected UTC date.
+- `semver`: keeps latest SemVer canary tags (`vX.Y.Z-canary.N`).
+- `auto` (default): applies both policies in one deterministic pass.
 
 `ops-autoremediate.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-OpsAutoRemediation.ps1` to:
 - auto-dispatch and verify cdev-cli sync-guard when sync drift is detected
@@ -382,7 +388,7 @@ Every run uploads `ops-monitoring-report.json`.
 
 Control-plane behavior:
 1. Runs ops health gate and optional auto-remediation.
-2. Dispatches release workflow with deterministic channel-specific tag windows (`canary=1-49`, `prerelease=50-79`, `stable=80-99` for `v0.YYYYMMDD.N`).
+2. Dispatches release workflow with deterministic channel-specific legacy tag windows (`canary=1-49`, `prerelease=50-79`, `stable=80-99` for `v0.YYYYMMDD.N`) and emits deterministic migration warnings.
 3. Verifies run completion.
 4. Applies canary smoke tag hygiene after canary publish.
 
