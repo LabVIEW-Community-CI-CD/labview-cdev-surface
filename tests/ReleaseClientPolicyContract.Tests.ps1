@@ -68,6 +68,9 @@ Describe 'Release client policy contract' {
         $releaseClient.ops_control_plane_policy.stable_promotion_window.allow_outside_window_with_override | Should -BeTrue
         $releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_required | Should -BeTrue
         $releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_min_length | Should -Be 12
+        ([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_pattern) | Should -Match '\?<reference>'
+        ([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_pattern) | Should -Match '\?<summary>'
+        ([string]$releaseClient.ops_control_plane_policy.stable_promotion_window.override_reason_example) | Should -Match '^CHG-'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
@@ -103,6 +106,8 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
         $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_full_cycle_weekday_monday'
+        $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_pattern_exists'
+        $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_example'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_enabled'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_rollback_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'

@@ -76,6 +76,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-report.json'
+          $overrideAuditReportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-override-audit.json'
 
           $mode = [string]'${{ inputs.mode }}'
           if ([string]::IsNullOrWhiteSpace($mode)) {
@@ -135,6 +136,7 @@ jobs:
             -ForceStablePromotionOutsideWindow:$forceStablePromotionOutsideWindow `
             -ForceStablePromotionReason $forceStablePromotionReason `
             -DryRun:$dryRun `
+            -OverrideAuditOutputPath $overrideAuditReportPath `
             -OutputPath $reportPath
 
       - name: Upload release control plane report
@@ -144,6 +146,63 @@ jobs:
           name: release-control-plane-report-${{ github.run_id }}
           path: ${{ runner.temp }}/release-control-plane-report.json
           if-no-files-found: error
+
+      - name: Upload release control plane stable override audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-control-plane-override-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-control-plane-override-audit.json
+          if-no-files-found: error
+
+      - name: Open stable override incident issue when out-of-window override is applied
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-report.json'
+          $auditPath = Join-Path $env:RUNNER_TEMP 'release-control-plane-override-audit.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            throw "Release control plane report missing: $reportPath"
+          }
+          if (-not (Test-Path -LiteralPath $auditPath -PathType Leaf)) {
+            throw "Release control plane override audit report missing: $auditPath"
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $audit = Get-Content -LiteralPath $auditPath -Raw | ConvertFrom-Json -ErrorAction Stop
+          $decisionReason = [string]$report.stable_promotion_window.decision.reason_code
+          if ($decisionReason -ne 'stable_window_override_applied') {
+            Write-Host "No out-of-window stable override applied. decision_reason_code='$decisionReason'"
+            exit 0
+          }
+
+          $allowedWeekdays = [string]::Join(',', @($report.stable_promotion_window.full_cycle_allowed_utc_weekdays))
+          $title = 'Release Control Plane Stable Override Alert'
+          $body = @"
+          Out-of-window stable override was applied.
+
+          - Run: $env:RUN_URL
+          - Mode: $($report.mode)
+          - Decision: $decisionReason
+          - Current UTC weekday: $($report.stable_promotion_window.decision.current_utc_weekday)
+          - Allowed UTC weekdays: $allowedWeekdays
+          - Override reference: $($audit.override_reference)
+          - Override reason: $($report.stable_promotion_window.override_reason)
+          - Stable target tag: $($audit.stable_target_tag)
+          - Stable release: $($audit.stable_release_url)
+          "@
+
+          & pwsh -NoProfile -File ./scripts/Invoke-OpsIncidentLifecycle.ps1 `
+            -Repository $env:REPOSITORY `
+            -IssueTitle $title `
+            -Mode Fail `
+            -RunUrl $env:RUN_URL `
+            -Body $body
 
       - name: Update release control plane incident issue on failure
         if: failure()

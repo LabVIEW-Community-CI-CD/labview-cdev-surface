@@ -131,6 +131,7 @@ try {
     }
 
     $controlPlanePath = Join-Path $resolvedOutputRoot 'release-control-plane-report.json'
+    $controlPlaneOverrideAuditPath = Join-Path $resolvedOutputRoot 'release-control-plane-override-audit.json'
     & pwsh -NoProfile -File $controlPlaneScript `
         -Repository $Repository `
         -Branch $Branch `
@@ -141,11 +142,13 @@ try {
         -ForceStablePromotionOutsideWindow:$ForceStablePromotionOutsideWindow `
         -ForceStablePromotionReason $ForceStablePromotionReason `
         -DryRun:$DryRun `
+        -OverrideAuditOutputPath $controlPlaneOverrideAuditPath `
         -OutputPath $controlPlanePath
     if ($LASTEXITCODE -ne 0) {
         throw "release_control_plane_failed: exit_code=$LASTEXITCODE"
     }
     Add-StepResult -Name 'release_control_plane' -Status 'pass' -OutputPath $controlPlanePath
+    Add-StepResult -Name 'release_control_plane_override_audit' -Status 'pass' -OutputPath $controlPlaneOverrideAuditPath
 
     $sloPath = Join-Path $resolvedOutputRoot 'weekly-ops-slo-report.json'
     & pwsh -NoProfile -File $sloScript `

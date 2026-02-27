@@ -287,6 +287,9 @@ Describe 'Workspace surface contract' {
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.allow_outside_window_with_override | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_required | Should -BeTrue
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_min_length | Should -Be 12
+        ([string]$script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_pattern) | Should -Match '\?<reference>'
+        ([string]$script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_pattern) | Should -Match '\?<summary>'
+        ([string]$script:manifest.installer_contract.release_client.ops_control_plane_policy.stable_promotion_window.override_reason_example) | Should -Match '^CHG-'
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops SLO Gate Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue
