@@ -58,6 +58,8 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'promotion_source_not_at_head'
         $script:runtimeContent | Should -Match 'release_tag_range_exhausted'
         $script:runtimeContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
+        $script:runtimeContent | Should -Match '\$dispatchInputs = @\('
+        $script:runtimeContent | Should -Match '-Inputs \$dispatchInputs'
     }
 
     It 'decouples control-plane runner health gate to release-runner labels' {

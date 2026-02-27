@@ -270,20 +270,18 @@ function Invoke-ReleaseMode {
     }
 
     $dispatchReportPath = Join-Path $ScratchRoot "$ModeName-dispatch.json"
-    & pwsh -NoProfile -File $dispatchWorkflowScript `
+    $dispatchInputs = @(
+        "release_tag=$targetTag",
+        'allow_existing_tag=false',
+        "prerelease=$([string]([bool]$modeConfig.prerelease).ToLowerInvariant())",
+        "release_channel=$([string]$modeConfig.channel)"
+    )
+    & $dispatchWorkflowScript `
         -Repository $Repository `
         -WorkflowFile $ReleaseWorkflowFile `
         -Branch $Branch `
-        -Input @(
-            "release_tag=$targetTag",
-            'allow_existing_tag=false',
-            "prerelease=$([string]([bool]$modeConfig.prerelease).ToLowerInvariant())",
-            "release_channel=$([string]$modeConfig.channel)"
-        ) `
+        -Inputs $dispatchInputs `
         -OutputPath $dispatchReportPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "release_dispatch_failed: mode=$ModeName exit_code=$LASTEXITCODE"
-    }
     $dispatchReport = Get-Content -LiteralPath $dispatchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
 
     $watchReportPath = Join-Path $ScratchRoot "$ModeName-watch.json"

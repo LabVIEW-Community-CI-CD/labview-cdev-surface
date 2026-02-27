@@ -72,10 +72,14 @@ function Get-UtcNowIso {
 }
 
 function Convert-InputPairsToGhArgs {
-    param([Parameter()][string[]]$Input = @())
+    param(
+        [Parameter()]
+        [Alias('Input')]
+        [string[]]$Inputs = @()
+    )
 
     $arguments = @()
-    foreach ($pair in @($Input)) {
+    foreach ($pair in @($Inputs)) {
         $text = ([string]$pair).Trim()
         if ([string]::IsNullOrWhiteSpace($text)) {
             continue
