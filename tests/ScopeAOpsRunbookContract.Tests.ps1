@@ -33,6 +33,7 @@ Describe 'Scope A ops runbook contract' {
         $script:runbookContent | Should -Match 'auto_self_heal=false'
         $script:runbookContent | Should -Match '20260226'
         $script:runbookContent | Should -Match 'release_verification_failed'
+        $script:runbookContent | Should -Match 'promotion_lineage_invalid'
         $script:runbookContent | Should -Match 'release-manifest\.json'
         $script:runbookContent | Should -Match 'release_dispatch_watch_failed'
     }

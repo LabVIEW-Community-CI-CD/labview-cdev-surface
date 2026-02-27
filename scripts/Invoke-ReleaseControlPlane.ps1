@@ -168,6 +168,7 @@ function Resolve-ControlPlaneFailureReasonCode {
     if ($message -match '^promotion_source_asset_missing') { return 'promotion_source_asset_missing' }
     if ($message -match '^promotion_source_commit_invalid') { return 'promotion_source_commit_invalid' }
     if ($message -match '^promotion_source_not_at_head') { return 'promotion_source_not_at_head' }
+    if ($message -match '^promotion_lineage_invalid') { return 'promotion_lineage_invalid' }
     if ($message -match '^branch_head_unresolved') { return 'branch_head_unresolved' }
     if ($message -match '^semver_prerelease_sequence_exhausted') { return 'semver_prerelease_sequence_exhausted' }
     if ($message -match '^release_watch_failed|^release_watch_not_success') { return 'release_dispatch_watch_failed' }
@@ -206,6 +207,14 @@ function Verify-DispatchedRelease {
     }
     if ([bool]$release.isPrerelease -ne $ExpectedIsPrerelease) {
         throw "release_verification_prerelease_mismatch: tag=$TargetTag expected=$ExpectedIsPrerelease actual=$([bool]$release.isPrerelease)"
+    }
+
+    $parsedTagRecord = Convert-ReleaseToRecord -Release $release
+    if ($null -eq $parsedTagRecord -or [string]$parsedTagRecord.tag_family -ne 'semver') {
+        throw "release_verification_tag_not_semver: tag=$TargetTag"
+    }
+    if ([string]$parsedTagRecord.channel -ne $ExpectedChannel) {
+        throw "release_verification_tag_channel_mismatch: tag=$TargetTag expected=$ExpectedChannel actual=$([string]$parsedTagRecord.channel)"
     }
 
     $assetNames = @($release.assets | ForEach-Object { [string]$_.name })
@@ -259,12 +268,117 @@ function Verify-DispatchedRelease {
         status = 'pass'
         tag = $TargetTag
         channel = $ExpectedChannel
+        tag_family = 'semver'
+        core = "{0}.{1}.{2}" -f [int]$parsedTagRecord.major, [int]$parsedTagRecord.minor, [int]$parsedTagRecord.patch
+        prerelease_sequence = [int]$parsedTagRecord.prerelease_sequence
         prerelease = $ExpectedIsPrerelease
+        target_commitish = [string]$release.targetCommitish
         release_url = [string]$release.url
         published_at_utc = [string]$release.publishedAt
         release_assets_checked = @($script:releaseRequiredAssets)
         manifest_path = $manifestPath
+        manifest_channel = [string]$manifest.channel
+        manifest_release_tag = [string]$manifest.release_tag
         manifest_provenance_assets_checked = @($script:releaseManifestRequiredProvenanceAssets)
+    }
+}
+
+function Verify-PromotionLineage {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModeName,
+        [Parameter()][AllowNull()]$SourceRelease,
+        [Parameter()][AllowNull()]$ReleaseVerification
+    )
+
+    if ($ModeName -ne 'PromotePrerelease' -and $ModeName -ne 'PromoteStable') {
+        return [ordered]@{
+            status = 'skipped'
+            mode = $ModeName
+            reason_code = 'not_promotion_mode'
+        }
+    }
+
+    if ($null -eq $SourceRelease) {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=source_release_missing"
+    }
+    if ($null -eq $ReleaseVerification) {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=release_verification_missing"
+    }
+
+    $sourceCore = ([string]$SourceRelease.core).Trim()
+    $targetCore = ([string]$ReleaseVerification.core).Trim()
+    if ([string]::IsNullOrWhiteSpace($sourceCore) -or [string]::IsNullOrWhiteSpace($targetCore)) {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=core_missing source_core=$sourceCore target_core=$targetCore"
+    }
+    if ($sourceCore -ne $targetCore) {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=core_mismatch source_core=$sourceCore target_core=$targetCore"
+    }
+
+    $sourceSha = ([string]$SourceRelease.source_sha).Trim().ToLowerInvariant()
+    $targetSha = ([string]$ReleaseVerification.target_commitish).Trim().ToLowerInvariant()
+    if ($sourceSha -notmatch '^[0-9a-f]{40}$') {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=source_sha_invalid source_sha=$sourceSha"
+    }
+    if ($targetSha -notmatch '^[0-9a-f]{40}$') {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=target_sha_invalid target_sha=$targetSha"
+    }
+    if ($sourceSha -ne $targetSha) {
+        throw "promotion_lineage_invalid: mode=$ModeName reason=sha_mismatch source_sha=$sourceSha target_sha=$targetSha"
+    }
+
+    $sourceChannel = [string]$SourceRelease.channel
+    $targetChannel = [string]$ReleaseVerification.channel
+    $sourcePrereleaseSequence = [int]$SourceRelease.prerelease_sequence
+    $targetPrereleaseSequence = [int]$ReleaseVerification.prerelease_sequence
+    $targetIsPrerelease = [bool]$ReleaseVerification.prerelease
+
+    if ($ModeName -eq 'PromotePrerelease') {
+        if ($sourceChannel -ne 'canary') {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=source_channel_invalid source_channel=$sourceChannel"
+        }
+        if ($targetChannel -ne 'prerelease') {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_channel_invalid target_channel=$targetChannel"
+        }
+        if (-not $targetIsPrerelease) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_prerelease_false"
+        }
+        if ($sourcePrereleaseSequence -lt 1) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=source_sequence_invalid source_sequence=$sourcePrereleaseSequence"
+        }
+        if ($targetPrereleaseSequence -lt 1) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_sequence_invalid target_sequence=$targetPrereleaseSequence"
+        }
+    }
+
+    if ($ModeName -eq 'PromoteStable') {
+        if ($sourceChannel -ne 'prerelease') {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=source_channel_invalid source_channel=$sourceChannel"
+        }
+        if ($targetChannel -ne 'stable') {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_channel_invalid target_channel=$targetChannel"
+        }
+        if ($targetIsPrerelease) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_prerelease_true"
+        }
+        if ($sourcePrereleaseSequence -lt 1) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=source_sequence_invalid source_sequence=$sourcePrereleaseSequence"
+        }
+        if ($targetPrereleaseSequence -ne 0) {
+            throw "promotion_lineage_invalid: mode=$ModeName reason=target_sequence_invalid target_sequence=$targetPrereleaseSequence"
+        }
+    }
+
+    return [ordered]@{
+        status = 'pass'
+        mode = $ModeName
+        source_tag = [string]$SourceRelease.tag
+        source_channel = $sourceChannel
+        source_core = $sourceCore
+        source_sha = $sourceSha
+        target_tag = [string]$ReleaseVerification.tag
+        target_channel = $targetChannel
+        target_core = $targetCore
+        target_sha = $targetSha
     }
 }
 
@@ -631,6 +745,7 @@ function Invoke-ReleaseMode {
         target_release = $null
         dispatch = $null
         release_verification = $null
+        promotion_lineage = $null
         hygiene = $null
     }
 
@@ -698,6 +813,7 @@ function Invoke-ReleaseMode {
             tag_family = 'semver'
             core = Format-CoreVersion -Core $sourceCore
             prerelease_sequence = [int]$sourceRecord.prerelease_sequence
+            prerelease = [bool]$sourceRelease.isPrerelease
             source_sha = $sourceCommit
             head_sha = $headSha
             url = [string]$sourceRelease.url
@@ -798,6 +914,11 @@ function Invoke-ReleaseMode {
         -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
         -ModeName $ModeName `
         -ScratchRoot $ScratchRoot
+
+    $executionReport.promotion_lineage = Verify-PromotionLineage `
+        -ModeName $ModeName `
+        -SourceRelease $executionReport.source_release `
+        -ReleaseVerification $executionReport.release_verification
 
     if ($ModeName -eq 'CanaryCycle') {
         $hygienePath = Join-Path $ScratchRoot 'canary-hygiene.json'
