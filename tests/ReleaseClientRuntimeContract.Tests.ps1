@@ -32,6 +32,17 @@ Describe 'Release client runtime contract' {
         $script:scriptContent | Should -Match 'workspace-release-client-latest\.json'
     }
 
+    It 'supports policy-driven host-validation profile environment overrides' {
+        $script:scriptContent | Should -Match 'Resolve-HostValidationProfile'
+        $script:scriptContent | Should -Match 'Get-HostValidationEnvironmentOverrides'
+        $script:scriptContent | Should -Match 'Set-TemporaryEnvironmentVariables'
+        $script:scriptContent | Should -Match 'Restore-TemporaryEnvironmentVariables'
+        $script:scriptContent | Should -Match 'LVIE_INSTALLER_EXECUTION_PROFILE'
+        $script:scriptContent | Should -Match 'LVIE_RUNNERCLI_EXECUTION_LABVIEW_YEAR'
+        $script:scriptContent | Should -Match 'LVIE_GATE_SINGLE_PPL_BITNESS'
+        $script:scriptContent | Should -Match 'LVIE_PARITY_WINDOWS_TAG'
+    }
+
     It 'defines deterministic failure reason codes' {
         foreach ($reason in @('source_blocked', 'asset_missing', 'hash_mismatch', 'signature_missing', 'signature_invalid', 'provenance_invalid', 'installer_exit_nonzero', 'install_report_missing')) {
             $script:scriptContent | Should -Match $reason

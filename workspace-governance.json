@@ -240,6 +240,12 @@
       "state_path": "C:\\dev\\artifacts\\workspace-release-state.json",
       "latest_report_path": "C:\\dev\\artifacts\\workspace-release-client-latest.json",
       "policy_path": "C:\\dev\\workspace-governance\\release-policy.json",
+      "host_validation_profile": {
+        "execution_profile": "container-parity",
+        "runnercli_execution_labview_year": "2026",
+        "single_ppl_bitness": "64",
+        "parity_windows_tag": "2026q1-windows"
+      },
       "runtime_images": {
         "cdev_cli_runtime": {
           "canonical_repository": "ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime",

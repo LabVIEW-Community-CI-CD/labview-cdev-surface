@@ -79,6 +79,11 @@ if ($null -ne $releaseClient) {
     Add-Check -Name 'state_path' -Passed ([string]$releaseClient.state_path -eq 'C:\dev\artifacts\workspace-release-state.json') -Detail ([string]$releaseClient.state_path)
     Add-Check -Name 'latest_report_path' -Passed ([string]$releaseClient.latest_report_path -eq 'C:\dev\artifacts\workspace-release-client-latest.json') -Detail ([string]$releaseClient.latest_report_path)
     Add-Check -Name 'policy_path' -Passed ([string]$releaseClient.policy_path -eq 'C:\dev\workspace-governance\release-policy.json') -Detail ([string]$releaseClient.policy_path)
+    Add-Check -Name 'host_validation_profile_exists' -Passed ($null -ne $releaseClient.host_validation_profile) -Detail 'installer_contract.release_client.host_validation_profile'
+    Add-Check -Name 'host_validation_profile_execution_profile' -Passed ([string]$releaseClient.host_validation_profile.execution_profile -eq 'container-parity') -Detail ([string]$releaseClient.host_validation_profile.execution_profile)
+    Add-Check -Name 'host_validation_profile_runnercli_execution_labview_year' -Passed ([string]$releaseClient.host_validation_profile.runnercli_execution_labview_year -eq '2026') -Detail ([string]$releaseClient.host_validation_profile.runnercli_execution_labview_year)
+    Add-Check -Name 'host_validation_profile_single_ppl_bitness' -Passed ([string]$releaseClient.host_validation_profile.single_ppl_bitness -eq '64') -Detail ([string]$releaseClient.host_validation_profile.single_ppl_bitness)
+    Add-Check -Name 'host_validation_profile_parity_windows_tag' -Passed ([string]$releaseClient.host_validation_profile.parity_windows_tag -eq '2026q1-windows') -Detail ([string]$releaseClient.host_validation_profile.parity_windows_tag)
 
     Add-Check -Name 'cdev_cli_sync_primary_repo' -Passed ([string]$releaseClient.cdev_cli_sync.primary_repo -eq 'svelderrainruiz/labview-cdev-cli') -Detail ([string]$releaseClient.cdev_cli_sync.primary_repo)
     Add-Check -Name 'cdev_cli_sync_mirror_repo' -Passed ([string]$releaseClient.cdev_cli_sync.mirror_repo -eq 'LabVIEW-Community-CI-CD/labview-cdev-cli') -Detail ([string]$releaseClient.cdev_cli_sync.mirror_repo)
