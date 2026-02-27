@@ -20,6 +20,21 @@ on:
         required: false
         default: '12'
         type: string
+      error_budget_window_days:
+        description: Error-budget window in days.
+        required: false
+        default: '7'
+        type: string
+      error_budget_max_failed_runs:
+        description: Maximum failed runs allowed in the error-budget window.
+        required: false
+        default: '0'
+        type: string
+      error_budget_max_failure_rate_pct:
+        description: Maximum failure-rate percentage allowed in the error-budget window.
+        required: false
+        default: '0'
+        type: string
       auto_self_heal:
         description: Enable bounded self-healing when SLO gate fails.
         required: false
@@ -97,6 +112,36 @@ jobs:
             $syncGuardMaxAgeHours = $parsedMaxAge
           }
 
+          $errorBudgetWindowDaysText = [string]'${{ inputs.error_budget_window_days }}'
+          $errorBudgetWindowDays = 7
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetWindowDaysText)) {
+            $parsedErrorBudgetWindowDays = 0
+            if (-not [int]::TryParse($errorBudgetWindowDaysText, [ref]$parsedErrorBudgetWindowDays)) {
+              throw "error_budget_window_days must be an integer. actual='$errorBudgetWindowDaysText'"
+            }
+            $errorBudgetWindowDays = $parsedErrorBudgetWindowDays
+          }
+
+          $errorBudgetMaxFailedRunsText = [string]'${{ inputs.error_budget_max_failed_runs }}'
+          $errorBudgetMaxFailedRuns = 0
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetMaxFailedRunsText)) {
+            $parsedErrorBudgetMaxFailedRuns = 0
+            if (-not [int]::TryParse($errorBudgetMaxFailedRunsText, [ref]$parsedErrorBudgetMaxFailedRuns)) {
+              throw "error_budget_max_failed_runs must be an integer. actual='$errorBudgetMaxFailedRunsText'"
+            }
+            $errorBudgetMaxFailedRuns = $parsedErrorBudgetMaxFailedRuns
+          }
+
+          $errorBudgetMaxFailureRatePctText = [string]'${{ inputs.error_budget_max_failure_rate_pct }}'
+          $errorBudgetMaxFailureRatePct = 0.0
+          if (-not [string]::IsNullOrWhiteSpace($errorBudgetMaxFailureRatePctText)) {
+            $parsedErrorBudgetMaxFailureRatePct = 0.0
+            if (-not [double]::TryParse($errorBudgetMaxFailureRatePctText, [ref]$parsedErrorBudgetMaxFailureRatePct)) {
+              throw "error_budget_max_failure_rate_pct must be a number. actual='$errorBudgetMaxFailureRatePctText'"
+            }
+            $errorBudgetMaxFailureRatePct = $parsedErrorBudgetMaxFailureRatePct
+          }
+
           $autoSelfHealText = [string]'${{ inputs.auto_self_heal }}'
           $autoSelfHeal = $true
           if (-not [string]::IsNullOrWhiteSpace($autoSelfHealText)) {
@@ -148,6 +193,9 @@ jobs:
             -LookbackDays $lookbackDays `
             -MinSuccessRatePct $minSuccessRatePct `
             -SyncGuardMaxAgeHours $syncGuardMaxAgeHours `
+            -ErrorBudgetWindowDays $errorBudgetWindowDays `
+            -ErrorBudgetMaxFailedRuns $errorBudgetMaxFailedRuns `
+            -ErrorBudgetMaxFailureRatePct $errorBudgetMaxFailureRatePct `
             -AutoRemediate:$autoSelfHeal `
             -MaxAttempts $selfHealMaxAttempts `
             -WatchTimeoutMinutes $selfHealWatchTimeout `

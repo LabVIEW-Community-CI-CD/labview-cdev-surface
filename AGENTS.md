@@ -213,6 +213,9 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `no_automatable_action`
   - `remediation_failed`
 - `.github/workflows/release-control-plane.yml` is the autonomous release orchestrator and must run `scripts/Invoke-ReleaseControlPlane.ps1`.
+- `ops_control_plane_policy.schema_version` is required and currently pinned to `2.0`.
+- `ops_control_plane_policy.state_machine` is required and must emit runtime transition evidence in `release-control-plane-report.json`.
+- `ops_control_plane_policy.rollback_orchestration` is required and controls deterministic rollback self-healing trigger behavior.
 - Control-plane mode contract:
   - `Validate`
   - `CanaryCycle`
@@ -268,6 +271,11 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `critical_min_success_rate_pct`
   - `warning_reason_codes`
   - `critical_reason_codes`
+- SLO gate error budget must remain explicit under `ops_control_plane_policy.error_budget`:
+  - `window_days`
+  - `max_failed_runs`
+  - `max_failure_rate_pct`
+  - `critical_burn_rate_pct`
 - SLO self-healing reason codes must remain explicit:
   - `already_healthy`
   - `remediated`
@@ -281,6 +289,8 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `workflow_success_rate_below_threshold`
   - `sync_guard_missing`
   - `sync_guard_stale`
+  - `error_budget_exhausted`
+  - `error_budget_failure_rate_exceeded`
   - `slo_gate_runtime_error`
 - `.github/workflows/ops-policy-drift-check.yml` must run `scripts/Test-ReleaseControlPlanePolicyDrift.ps1`.
 - Policy drift reason codes must remain explicit:
@@ -290,6 +300,12 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `release_client_drift`
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
+  - `ops_control_plane_schema_version_invalid`
+  - `ops_control_plane_state_machine_missing`
+  - `ops_control_plane_state_machine_version_missing`
+  - `ops_control_plane_rollback_orchestration_missing`
+  - `ops_control_plane_error_budget_missing`
+  - `ops_control_plane_error_budget_window_days_invalid`
   - `ops_control_plane_slo_alert_thresholds_missing`
   - `ops_control_plane_self_healing_missing`
   - `ops_control_plane_guardrails_missing`

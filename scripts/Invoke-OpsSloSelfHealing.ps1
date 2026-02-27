@@ -18,6 +18,18 @@ param(
     [int]$SyncGuardMaxAgeHours = 12,
 
     [Parameter()]
+    [ValidateRange(1, 90)]
+    [int]$ErrorBudgetWindowDays = 7,
+
+    [Parameter()]
+    [ValidateRange(0, 10000)]
+    [int]$ErrorBudgetMaxFailedRuns = 0,
+
+    [Parameter()]
+    [ValidateRange(0, 100)]
+    [double]$ErrorBudgetMaxFailureRatePct = 0,
+
+    [Parameter()]
     [bool]$AutoRemediate = $true,
 
     [Parameter()]
@@ -57,7 +69,9 @@ param(
         'workflow_failure_detected',
         'sync_guard_missing',
         'sync_guard_stale',
-        'slo_gate_runtime_error'
+        'slo_gate_runtime_error',
+        'error_budget_exhausted',
+        'error_budget_failure_rate_exceeded'
     ),
 
     [Parameter()]
@@ -196,6 +210,9 @@ function Invoke-SloGateAssessment {
         [Parameter(Mandatory = $true)][int]$WindowDays,
         [Parameter(Mandatory = $true)][double]$SuccessThreshold,
         [Parameter(Mandatory = $true)][int]$SyncGuardHours,
+        [Parameter(Mandatory = $true)][int]$BudgetWindowDays,
+        [Parameter(Mandatory = $true)][int]$BudgetMaxFailedRuns,
+        [Parameter(Mandatory = $true)][double]$BudgetMaxFailureRatePct,
         [Parameter(Mandatory = $true)][string]$ReportPath
     )
 
@@ -207,6 +224,9 @@ function Invoke-SloGateAssessment {
             -LookbackDays $WindowDays `
             -MinSuccessRatePct $SuccessThreshold `
             -SyncGuardMaxAgeHours $SyncGuardHours `
+            -ErrorBudgetWindowDays $BudgetWindowDays `
+            -ErrorBudgetMaxFailedRuns $BudgetMaxFailedRuns `
+            -ErrorBudgetMaxFailureRatePct $BudgetMaxFailureRatePct `
             -OutputPath $ReportPath | Out-Null
         $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
     } catch {
@@ -252,6 +272,11 @@ $report = [ordered]@{
     lookback_days = $LookbackDays
     min_success_rate_pct = $MinSuccessRatePct
     sync_guard_max_age_hours = $SyncGuardMaxAgeHours
+    error_budget = [ordered]@{
+        lookback_days = $ErrorBudgetWindowDays
+        max_failed_runs = $ErrorBudgetMaxFailedRuns
+        max_failure_rate_pct = $ErrorBudgetMaxFailureRatePct
+    }
     auto_remediate = [bool]$AutoRemediate
     remediation_workflow = $RemediationWorkflow
     remediation_branch = $RemediationBranch
@@ -280,6 +305,9 @@ try {
         -WindowDays $LookbackDays `
         -SuccessThreshold $MinSuccessRatePct `
         -SyncGuardHours $SyncGuardMaxAgeHours `
+        -BudgetWindowDays $ErrorBudgetWindowDays `
+        -BudgetMaxFailedRuns $ErrorBudgetMaxFailedRuns `
+        -BudgetMaxFailureRatePct $ErrorBudgetMaxFailureRatePct `
         -ReportPath $initialPath
     $initialReport = $initialAssessment.report
     $report.initial_report = $initialReport
@@ -358,6 +386,9 @@ try {
                 -WindowDays $LookbackDays `
                 -SuccessThreshold $MinSuccessRatePct `
                 -SyncGuardHours $SyncGuardMaxAgeHours `
+                -BudgetWindowDays $ErrorBudgetWindowDays `
+                -BudgetMaxFailedRuns $ErrorBudgetMaxFailedRuns `
+                -BudgetMaxFailureRatePct $ErrorBudgetMaxFailureRatePct `
                 -ReportPath $verifyPath
 
             $verifyReport = $verifyAssessment.report

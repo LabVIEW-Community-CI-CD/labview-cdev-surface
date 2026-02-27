@@ -58,10 +58,11 @@ $opsRemediateScript = Join-Path $PSScriptRoot 'Invoke-OpsAutoRemediation.ps1'
 $dispatchWorkflowScript = Join-Path $PSScriptRoot 'Dispatch-WorkflowAtRemoteHead.ps1'
 $watchWorkflowScript = Join-Path $PSScriptRoot 'Watch-WorkflowRun.ps1'
 $canaryHygieneScript = Join-Path $PSScriptRoot 'Invoke-CanarySmokeTagHygiene.ps1'
+$rollbackSelfHealingScript = Join-Path $PSScriptRoot 'Invoke-RollbackDrillSelfHealing.ps1'
 $releaseRunnerLabels = @('self-hosted', 'windows', 'self-hosted-windows-lv')
 $releaseRunnerLabelsCsv = [string]::Join(',', $releaseRunnerLabels)
 
-foreach ($requiredScript in @($opsSnapshotScript, $opsRemediateScript, $dispatchWorkflowScript, $watchWorkflowScript, $canaryHygieneScript)) {
+foreach ($requiredScript in @($opsSnapshotScript, $opsRemediateScript, $dispatchWorkflowScript, $watchWorkflowScript, $canaryHygieneScript, $rollbackSelfHealingScript)) {
     if (-not (Test-Path -LiteralPath $requiredScript -PathType Leaf)) {
         throw "required_script_missing: $requiredScript"
     }
@@ -283,8 +284,339 @@ function Resolve-StablePromotionWindowPolicy {
     return $policy
 }
 
+function Resolve-ControlPlaneGaPolicy {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManifestPath
+    )
+
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    $policy = [ordered]@{
+        schema_version = '2.0'
+        source = 'default'
+        warnings = @()
+        state_machine = [ordered]@{
+            version = '1.0'
+            initial_state = 'ops_health_preflight'
+            terminal_states = @('completed', 'failed')
+        }
+        rollback_orchestration = [ordered]@{
+            enabled = $true
+            run_on_dry_run = $false
+            trigger_reason_codes = @(
+                'ops_health_gate_failed',
+                'ops_unhealthy',
+                'release_dispatch_watch_timeout',
+                'release_dispatch_watch_failed',
+                'release_dispatch_attempts_exhausted',
+                'release_verification_failed'
+            )
+        }
+        rollback_drill = [ordered]@{
+            channel = 'canary'
+            required_history_count = 2
+            release_limit = 100
+            release_workflow = 'release-workspace-installer.yml'
+            release_branch = 'main'
+            watch_timeout_minutes = 120
+            canary_sequence_min = 1
+            canary_sequence_max = 49
+            max_attempts = 1
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        [void]$warnings.Add("workspace_governance_missing: path=$ManifestPath")
+        $policy.warnings = @($warnings)
+        return $policy
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -Depth 100
+        $candidatePolicy = $manifest.installer_contract.release_client.ops_control_plane_policy
+        if ($null -eq $candidatePolicy) {
+            [void]$warnings.Add("ops_control_plane_policy_missing: path=$ManifestPath")
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        $policy.source = 'workspace_governance'
+
+        $candidateSchema = [string]$candidatePolicy.schema_version
+        if (-not [string]::IsNullOrWhiteSpace($candidateSchema)) {
+            $policy.schema_version = $candidateSchema.Trim()
+        } else {
+            [void]$warnings.Add('ops_control_plane_policy_schema_version_missing')
+        }
+
+        $candidateStateMachine = $candidatePolicy.state_machine
+        if ($null -eq $candidateStateMachine) {
+            [void]$warnings.Add('ops_control_plane_policy_state_machine_missing')
+        } else {
+            $candidateStateMachineVersion = [string]$candidateStateMachine.version
+            if (-not [string]::IsNullOrWhiteSpace($candidateStateMachineVersion)) {
+                $policy.state_machine.version = $candidateStateMachineVersion.Trim()
+            } else {
+                [void]$warnings.Add('ops_control_plane_policy_state_machine_version_missing')
+            }
+
+            $candidateInitialState = [string]$candidateStateMachine.initial_state
+            if (-not [string]::IsNullOrWhiteSpace($candidateInitialState)) {
+                $policy.state_machine.initial_state = $candidateInitialState.Trim()
+            } else {
+                [void]$warnings.Add('ops_control_plane_policy_state_machine_initial_state_missing')
+            }
+
+            $candidateTerminalStates = @($candidateStateMachine.terminal_states)
+            if (@($candidateTerminalStates).Count -gt 0) {
+                $policy.state_machine.terminal_states = @(
+                    $candidateTerminalStates |
+                        ForEach-Object { ([string]$_).Trim() } |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                        Select-Object -Unique
+                )
+            } else {
+                [void]$warnings.Add('ops_control_plane_policy_state_machine_terminal_states_missing')
+            }
+        }
+
+        $candidateRollbackOrchestration = $candidatePolicy.rollback_orchestration
+        if ($null -eq $candidateRollbackOrchestration) {
+            [void]$warnings.Add('ops_control_plane_policy_rollback_orchestration_missing')
+        } else {
+            if ($candidateRollbackOrchestration.enabled -is [bool]) {
+                $policy.rollback_orchestration.enabled = [bool]$candidateRollbackOrchestration.enabled
+            }
+            if ($candidateRollbackOrchestration.run_on_dry_run -is [bool]) {
+                $policy.rollback_orchestration.run_on_dry_run = [bool]$candidateRollbackOrchestration.run_on_dry_run
+            }
+
+            $candidateTriggerReasonCodes = @($candidateRollbackOrchestration.trigger_reason_codes)
+            if (@($candidateTriggerReasonCodes).Count -gt 0) {
+                $policy.rollback_orchestration.trigger_reason_codes = @(
+                    $candidateTriggerReasonCodes |
+                        ForEach-Object { ([string]$_).Trim() } |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                        Select-Object -Unique
+                )
+            } else {
+                [void]$warnings.Add('ops_control_plane_policy_rollback_orchestration_trigger_reason_codes_missing')
+            }
+        }
+
+        $candidateRollbackDrill = $candidatePolicy.rollback_drill
+        if ($null -ne $candidateRollbackDrill) {
+            $candidateRollbackChannel = [string]$candidateRollbackDrill.channel
+            if (-not [string]::IsNullOrWhiteSpace($candidateRollbackChannel)) {
+                $policy.rollback_drill.channel = $candidateRollbackChannel.Trim()
+            }
+
+            $candidateRequiredHistoryCount = 0
+            if ([int]::TryParse([string]$candidateRollbackDrill.required_history_count, [ref]$candidateRequiredHistoryCount) -and $candidateRequiredHistoryCount -ge 2 -and $candidateRequiredHistoryCount -le 100) {
+                $policy.rollback_drill.required_history_count = $candidateRequiredHistoryCount
+            }
+
+            $candidateReleaseLimit = 0
+            if ([int]::TryParse([string]$candidateRollbackDrill.release_limit, [ref]$candidateReleaseLimit) -and $candidateReleaseLimit -ge 10 -and $candidateReleaseLimit -le 200) {
+                $policy.rollback_drill.release_limit = $candidateReleaseLimit
+            }
+        }
+
+        $candidateSelfHealing = $candidatePolicy.self_healing
+        if ($null -ne $candidateSelfHealing) {
+            $candidateMaxAttempts = 0
+            if ([int]::TryParse([string]$candidateSelfHealing.max_attempts, [ref]$candidateMaxAttempts) -and $candidateMaxAttempts -ge 1 -and $candidateMaxAttempts -le 5) {
+                $policy.rollback_drill.max_attempts = $candidateMaxAttempts
+            }
+
+            $candidateSelfHealingRollback = $candidateSelfHealing.rollback_drill
+            if ($null -ne $candidateSelfHealingRollback) {
+                $candidateReleaseWorkflow = [string]$candidateSelfHealingRollback.release_workflow
+                if (-not [string]::IsNullOrWhiteSpace($candidateReleaseWorkflow)) {
+                    $policy.rollback_drill.release_workflow = $candidateReleaseWorkflow.Trim()
+                }
+
+                $candidateReleaseBranch = [string]$candidateSelfHealingRollback.release_branch
+                if (-not [string]::IsNullOrWhiteSpace($candidateReleaseBranch)) {
+                    $policy.rollback_drill.release_branch = $candidateReleaseBranch.Trim()
+                }
+
+                $candidateWatchTimeout = 0
+                if ([int]::TryParse([string]$candidateSelfHealingRollback.watch_timeout_minutes, [ref]$candidateWatchTimeout) -and $candidateWatchTimeout -ge 5 -and $candidateWatchTimeout -le 240) {
+                    $policy.rollback_drill.watch_timeout_minutes = $candidateWatchTimeout
+                }
+
+                $candidateCanarySequenceMin = 0
+                if ([int]::TryParse([string]$candidateSelfHealingRollback.canary_sequence_min, [ref]$candidateCanarySequenceMin) -and $candidateCanarySequenceMin -ge 1 -and $candidateCanarySequenceMin -le 49) {
+                    $policy.rollback_drill.canary_sequence_min = $candidateCanarySequenceMin
+                }
+
+                $candidateCanarySequenceMax = 0
+                if ([int]::TryParse([string]$candidateSelfHealingRollback.canary_sequence_max, [ref]$candidateCanarySequenceMax) -and $candidateCanarySequenceMax -ge $policy.rollback_drill.canary_sequence_min -and $candidateCanarySequenceMax -le 99) {
+                    $policy.rollback_drill.canary_sequence_max = $candidateCanarySequenceMax
+                }
+            }
+        }
+    } catch {
+        [void]$warnings.Add("ops_control_plane_policy_load_failed: $([string]$_.Exception.Message)")
+    }
+
+    $policy.warnings = @($warnings)
+    return $policy
+}
+
+function Add-ControlPlaneStateTransition {
+    param(
+        [Parameter(Mandatory = $true)]$StateMachine,
+        [Parameter(Mandatory = $true)][string]$FromState,
+        [Parameter(Mandatory = $true)][string]$Result,
+        [Parameter(Mandatory = $true)][string]$ToState,
+        [Parameter()][string]$ReasonCode = '',
+        [Parameter()][string]$Detail = ''
+    )
+
+    if ($null -eq $StateMachine) {
+        return
+    }
+
+    $transitions = [System.Collections.Generic.List[object]]::new()
+    foreach ($existing in @($StateMachine.transitions_executed)) {
+        [void]$transitions.Add($existing)
+    }
+
+    [void]$transitions.Add([ordered]@{
+            timestamp_utc = Get-UtcNowIso
+            from_state = $FromState
+            result = $Result
+            to_state = $ToState
+            reason_code = $ReasonCode
+            detail = $Detail
+        })
+
+    $StateMachine.transitions_executed = @($transitions)
+    $StateMachine.current_state = $ToState
+}
+
+function Should-AttemptRollbackOrchestration {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReasonCode,
+        [Parameter(Mandatory = $true)]$Policy,
+        [Parameter(Mandatory = $true)][bool]$DryRunEnabled,
+        [Parameter(Mandatory = $true)][bool]$AutoRemediateEnabled
+    )
+
+    if ($null -eq $Policy) {
+        return [ordered]@{
+            should_attempt = $false
+            decision_reason = 'rollback_policy_missing'
+        }
+    }
+
+    if (-not [bool]$AutoRemediateEnabled) {
+        return [ordered]@{
+            should_attempt = $false
+            decision_reason = 'auto_remediate_disabled'
+        }
+    }
+
+    if (-not [bool]$Policy.enabled) {
+        return [ordered]@{
+            should_attempt = $false
+            decision_reason = 'rollback_policy_disabled'
+        }
+    }
+
+    if ([bool]$DryRunEnabled -and -not [bool]$Policy.run_on_dry_run) {
+        return [ordered]@{
+            should_attempt = $false
+            decision_reason = 'rollback_dry_run_blocked'
+        }
+    }
+
+    if (@($Policy.trigger_reason_codes) -notcontains [string]$ReasonCode) {
+        return [ordered]@{
+            should_attempt = $false
+            decision_reason = 'rollback_reason_not_allowed'
+        }
+    }
+
+    return [ordered]@{
+        should_attempt = $true
+        decision_reason = 'rollback_triggered'
+    }
+}
+
+function Invoke-ControlPlaneRollbackOrchestration {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetRepository,
+        [Parameter(Mandatory = $true)][string]$TargetBranch,
+        [Parameter(Mandatory = $true)]$RollbackPolicy,
+        [Parameter(Mandatory = $true)][string]$ScratchRoot
+    )
+
+    $rollbackReportPath = Join-Path $ScratchRoot 'rollback-orchestration-report.json'
+    $executionError = ''
+    $exitCode = 1
+
+    try {
+        & pwsh -NoProfile -File $rollbackSelfHealingScript `
+            -Repository $TargetRepository `
+            -Branch $TargetBranch `
+            -Channel ([string]$RollbackPolicy.channel) `
+            -RequiredHistoryCount ([int]$RollbackPolicy.required_history_count) `
+            -ReleaseLimit ([int]$RollbackPolicy.release_limit) `
+            -AutoRemediate:$true `
+            -ReleaseWorkflowFile ([string]$RollbackPolicy.release_workflow) `
+            -MaxAttempts ([int]$RollbackPolicy.max_attempts) `
+            -WatchTimeoutMinutes ([int]$RollbackPolicy.watch_timeout_minutes) `
+            -CanarySequenceMin ([int]$RollbackPolicy.canary_sequence_min) `
+            -CanarySequenceMax ([int]$RollbackPolicy.canary_sequence_max) `
+            -CanaryTagFamily 'semver' `
+            -OutputPath $rollbackReportPath | Out-Null
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    } catch {
+        $executionError = [string]$_.Exception.Message
+        $exitCode = 1
+    }
+
+    $rollbackReport = $null
+    if (Test-Path -LiteralPath $rollbackReportPath -PathType Leaf) {
+        $rollbackReport = Get-Content -LiteralPath $rollbackReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    }
+
+    if ($null -eq $rollbackReport) {
+        $rollbackReport = [ordered]@{
+            status = 'fail'
+            reason_code = 'rollback_orchestration_report_missing'
+            message = if ([string]::IsNullOrWhiteSpace($executionError)) { 'rollback orchestration report missing.' } else { $executionError }
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($executionError)) {
+        $rollbackReport.status = 'fail'
+        $rollbackReport.reason_code = 'rollback_orchestration_runtime_error'
+        $rollbackReport.message = $executionError
+    }
+
+    return [ordered]@{
+        status = if ($exitCode -eq 0 -and [string]$rollbackReport.status -eq 'pass') { 'pass' } else { 'fail' }
+        exit_code = $exitCode
+        report_path = $rollbackReportPath
+        report = $rollbackReport
+    }
+}
+
 $defaultSemverOnlyEnforceUtc = [DateTimeOffset]::Parse('2026-07-01T00:00:00Z')
 $workspaceGovernancePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'workspace-governance.json'
+$gaPolicy = Resolve-ControlPlaneGaPolicy -ManifestPath $workspaceGovernancePath
+$script:opsControlPlanePolicySchemaVersion = [string]$gaPolicy.schema_version
+$script:opsControlPlanePolicySource = [string]$gaPolicy.source
+$script:controlPlaneStateMachinePolicy = $gaPolicy.state_machine
+$script:rollbackOrchestrationPolicy = $gaPolicy.rollback_orchestration
+$script:rollbackDrillPolicy = $gaPolicy.rollback_drill
+foreach ($warning in @($gaPolicy.warnings)) {
+    Write-Warning "[control_plane_policy_warning] $warning"
+}
+
 $semverPolicy = Resolve-SemVerEnforcementPolicy -ManifestPath $workspaceGovernancePath -FallbackEnforceUtc $defaultSemverOnlyEnforceUtc
 $script:semverOnlyEnforceUtc = [DateTimeOffset]$semverPolicy.semver_only_enforce_utc
 $script:semverPolicySource = [string]$semverPolicy.source
@@ -1594,6 +1926,30 @@ $report = [ordered]@{
     keep_latest_canary_n = $KeepLatestCanaryN
     tag_strategy = 'semver'
     migration_mode = 'dual_mode_publish_semver_control_plane'
+    control_plane_policy_schema_version = [string]$script:opsControlPlanePolicySchemaVersion
+    control_plane_policy_source = [string]$script:opsControlPlanePolicySource
+    state_machine = [ordered]@{
+        version = [string]$script:controlPlaneStateMachinePolicy.version
+        initial_state = [string]$script:controlPlaneStateMachinePolicy.initial_state
+        current_state = [string]$script:controlPlaneStateMachinePolicy.initial_state
+        terminal_states = @($script:controlPlaneStateMachinePolicy.terminal_states)
+        transitions_executed = @()
+    }
+    rollback_orchestration = [ordered]@{
+        policy_enabled = [bool]$script:rollbackOrchestrationPolicy.enabled
+        policy_run_on_dry_run = [bool]$script:rollbackOrchestrationPolicy.run_on_dry_run
+        trigger_reason_codes = @($script:rollbackOrchestrationPolicy.trigger_reason_codes)
+        attempted = $false
+        status = 'not_run'
+        reason_code = ''
+        message = ''
+        report_path = ''
+        report = $null
+        decision = [ordered]@{
+            should_attempt = $false
+            decision_reason = 'not_evaluated'
+        }
+    }
     semver_policy_source = $script:semverPolicySource
     semver_only_enforce_utc = $script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
     semver_only_enforced = [bool]$script:semverOnlyEnforced
@@ -1622,6 +1978,13 @@ $report = [ordered]@{
 }
 
 try {
+    Add-ControlPlaneStateTransition `
+        -StateMachine $report.state_machine `
+        -FromState 'start' `
+        -Result 'enter' `
+        -ToState ([string]$report.state_machine.initial_state) `
+        -ReasonCode 'control_plane_start'
+
     $preHealthPath = Join-Path $scratchRoot 'pre-health.json'
     $healthy = $false
     try {
@@ -1641,6 +2004,22 @@ try {
         $report.pre_health = Get-Content -LiteralPath $preHealthPath -Raw | ConvertFrom-Json -ErrorAction Stop
     }
 
+    if ($healthy) {
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState 'ops_health_preflight' `
+            -Result 'pass' `
+            -ToState 'ops_health_verify' `
+            -ReasonCode 'pre_health_pass'
+    } else {
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState 'ops_health_preflight' `
+            -Result 'fail' `
+            -ToState (if ($AutoRemediate) { 'auto_remediation' } else { 'ops_health_verify' }) `
+            -ReasonCode 'pre_health_fail'
+    }
+
     if (-not $healthy -and $AutoRemediate) {
         $remediationPath = Join-Path $scratchRoot 'remediation.json'
         & pwsh -NoProfile -File $opsRemediateScript `
@@ -1651,6 +2030,12 @@ try {
         if (Test-Path -LiteralPath $remediationPath -PathType Leaf) {
             $report.remediation = Get-Content -LiteralPath $remediationPath -Raw | ConvertFrom-Json -ErrorAction Stop
         }
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState 'auto_remediation' `
+            -Result (if ($null -ne $report.remediation -and [string]$report.remediation.status -eq 'pass') { 'pass' } else { 'fail' }) `
+            -ToState 'ops_health_verify' `
+            -ReasonCode (if ($null -ne $report.remediation) { [string]$report.remediation.reason_code } else { 'remediation_report_missing' })
     }
 
     $postHealthPath = Join-Path $scratchRoot 'post-health.json'
@@ -1667,11 +2052,23 @@ try {
     if ([string]$report.post_health.status -ne 'pass') {
         throw "ops_unhealthy: reason_codes=$([string]::Join(',', @($report.post_health.reason_codes)))"
     }
+    Add-ControlPlaneStateTransition `
+        -StateMachine $report.state_machine `
+        -FromState 'ops_health_verify' `
+        -Result 'pass' `
+        -ToState 'release_dispatch' `
+        -ReasonCode 'post_health_pass'
 
     if ($Mode -eq 'Validate') {
         $report.status = 'pass'
         $report.reason_code = if ($DryRun) { 'validate_dry_run' } else { 'validated' }
         $report.message = 'Release control plane validation completed without dispatch.'
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState ([string]$report.state_machine.current_state) `
+            -Result 'pass' `
+            -ToState 'completed' `
+            -ReasonCode ([string]$report.reason_code)
     } else {
         $dateKey = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
         $executionList = [System.Collections.Generic.List[object]]::new()
@@ -1712,6 +2109,12 @@ try {
         $report.status = 'pass'
         $report.reason_code = if ($DryRun) { 'dry_run' } else { 'completed' }
         $report.message = 'Release control plane completed.'
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState 'release_dispatch' `
+            -Result 'pass' `
+            -ToState 'completed' `
+            -ReasonCode ([string]$report.reason_code)
     }
 }
 catch {
@@ -1719,6 +2122,77 @@ catch {
     $report.status = 'fail'
     $report.reason_code = Resolve-ControlPlaneFailureReasonCode -MessageText $failureMessage
     $report.message = $failureMessage
+
+    Add-ControlPlaneStateTransition `
+        -StateMachine $report.state_machine `
+        -FromState ([string]$report.state_machine.current_state) `
+        -Result 'fail' `
+        -ToState 'rollback_orchestration' `
+        -ReasonCode ([string]$report.reason_code) `
+        -Detail $failureMessage
+
+    $rollbackDecision = Should-AttemptRollbackOrchestration `
+        -ReasonCode ([string]$report.reason_code) `
+        -Policy $script:rollbackOrchestrationPolicy `
+        -DryRunEnabled ([bool]$DryRun) `
+        -AutoRemediateEnabled ([bool]$AutoRemediate)
+    $report.rollback_orchestration.decision = $rollbackDecision
+
+    if ([bool]$rollbackDecision.should_attempt) {
+        $report.rollback_orchestration.attempted = $true
+
+        try {
+            $rollbackResult = Invoke-ControlPlaneRollbackOrchestration `
+                -TargetRepository $Repository `
+                -TargetBranch ([string]$script:rollbackDrillPolicy.release_branch) `
+                -RollbackPolicy $script:rollbackDrillPolicy `
+                -ScratchRoot $scratchRoot
+
+            $report.rollback_orchestration.status = [string]$rollbackResult.status
+            $report.rollback_orchestration.report_path = [string]$rollbackResult.report_path
+            $report.rollback_orchestration.report = $rollbackResult.report
+            $report.rollback_orchestration.reason_code = [string]$rollbackResult.report.reason_code
+            $report.rollback_orchestration.message = [string]$rollbackResult.report.message
+
+            if ([string]$rollbackResult.status -eq 'pass') {
+                Add-ControlPlaneStateTransition `
+                    -StateMachine $report.state_machine `
+                    -FromState 'rollback_orchestration' `
+                    -Result 'pass' `
+                    -ToState 'failed_recovered' `
+                    -ReasonCode 'rollback_orchestration_recovered'
+            } else {
+                Add-ControlPlaneStateTransition `
+                    -StateMachine $report.state_machine `
+                    -FromState 'rollback_orchestration' `
+                    -Result 'fail' `
+                    -ToState 'failed' `
+                    -ReasonCode ([string]$report.rollback_orchestration.reason_code)
+            }
+        } catch {
+            $report.rollback_orchestration.status = 'fail'
+            $report.rollback_orchestration.reason_code = 'rollback_orchestration_runtime_error'
+            $report.rollback_orchestration.message = [string]$_.Exception.Message
+            Add-ControlPlaneStateTransition `
+                -StateMachine $report.state_machine `
+                -FromState 'rollback_orchestration' `
+                -Result 'fail' `
+                -ToState 'failed' `
+                -ReasonCode 'rollback_orchestration_runtime_error' `
+                -Detail ([string]$_.Exception.Message)
+        }
+    } else {
+        $report.rollback_orchestration.attempted = $false
+        $report.rollback_orchestration.status = 'skipped'
+        $report.rollback_orchestration.reason_code = [string]$rollbackDecision.decision_reason
+        $report.rollback_orchestration.message = 'Rollback orchestration skipped by policy decision.'
+        Add-ControlPlaneStateTransition `
+            -StateMachine $report.state_machine `
+            -FromState 'rollback_orchestration' `
+            -Result 'fail' `
+            -ToState 'failed' `
+            -ReasonCode ([string]$rollbackDecision.decision_reason)
+    }
 }
 finally {
     Write-WorkflowOpsReport -Report $report -OutputPath $OutputPath | Out-Null

@@ -92,6 +92,60 @@ try {
             if (-not $opsPolicyPresent) {
                 Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_policy_missing'
             } else {
+                $policySchemaVersionValid = ([string]$releaseClient.ops_control_plane_policy.schema_version -eq '2.0')
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_schema_version_valid'
+                        passed = $policySchemaVersionValid
+                    }) | Out-Null
+                if (-not $policySchemaVersionValid) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_schema_version_invalid'
+                }
+
+                $stateMachinePresent = ($null -ne $releaseClient.ops_control_plane_policy.state_machine)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_state_machine_present'
+                        passed = $stateMachinePresent
+                    }) | Out-Null
+                if (-not $stateMachinePresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_state_machine_missing'
+                } else {
+                    $stateMachineVersionPresent = (-not [string]::IsNullOrWhiteSpace([string]$releaseClient.ops_control_plane_policy.state_machine.version))
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_state_machine_version_present'
+                            passed = $stateMachineVersionPresent
+                        }) | Out-Null
+                    if (-not $stateMachineVersionPresent) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_state_machine_version_missing'
+                    }
+                }
+
+                $rollbackOrchestrationPresent = ($null -ne $releaseClient.ops_control_plane_policy.rollback_orchestration)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_rollback_orchestration_present'
+                        passed = $rollbackOrchestrationPresent
+                    }) | Out-Null
+                if (-not $rollbackOrchestrationPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_rollback_orchestration_missing'
+                }
+
+                $errorBudgetPresent = ($null -ne $releaseClient.ops_control_plane_policy.error_budget)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_error_budget_present'
+                        passed = $errorBudgetPresent
+                    }) | Out-Null
+                if (-not $errorBudgetPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_error_budget_missing'
+                } else {
+                    $errorBudgetWindowValid = ([int]$releaseClient.ops_control_plane_policy.error_budget.window_days -ge 1)
+                    $checks.Add([ordered]@{
+                            check = 'release_client_ops_control_plane_policy_error_budget_window_days_valid'
+                            passed = $errorBudgetWindowValid
+                        }) | Out-Null
+                    if (-not $errorBudgetWindowValid) {
+                        Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_error_budget_window_days_invalid'
+                    }
+                }
+
                 $sloAlertThresholdsPresent = ($null -ne $releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds)
                 $checks.Add([ordered]@{
                         check = 'release_client_ops_control_plane_policy_slo_alert_thresholds_present'

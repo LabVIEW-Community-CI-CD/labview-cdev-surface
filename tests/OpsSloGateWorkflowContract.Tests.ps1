@@ -27,6 +27,9 @@ Describe 'Ops SLO gate workflow contract' {
         $script:workflowContent | Should -Match 'lookback_days'
         $script:workflowContent | Should -Match 'min_success_rate_pct'
         $script:workflowContent | Should -Match 'sync_guard_max_age_hours'
+        $script:workflowContent | Should -Match 'error_budget_window_days'
+        $script:workflowContent | Should -Match 'error_budget_max_failed_runs'
+        $script:workflowContent | Should -Match 'error_budget_max_failure_rate_pct'
         $script:workflowContent | Should -Match 'auto_self_heal'
         $script:workflowContent | Should -Match 'self_heal_max_attempts'
         $script:workflowContent | Should -Match 'self_heal_watch_timeout_minutes'
@@ -55,6 +58,9 @@ Describe 'Ops SLO gate workflow contract' {
         $script:runtimeContent | Should -Match 'workflow_success_rate_below_threshold'
         $script:runtimeContent | Should -Match 'sync_guard_stale'
         $script:runtimeContent | Should -Match 'sync_guard_missing'
+        $script:runtimeContent | Should -Match 'error_budget_exhausted'
+        $script:runtimeContent | Should -Match 'error_budget_failure_rate_exceeded'
+        $script:runtimeContent | Should -Match 'error_budget'
     }
 
     It 'runs bounded SLO self-healing playbook with deterministic outcomes' {
@@ -64,6 +70,9 @@ Describe 'Ops SLO gate workflow contract' {
         $script:selfHealingContent | Should -Match '\$dispatchInputs = @\('
         $script:selfHealingContent | Should -Match '-Inputs \$dispatchInputs'
         $script:selfHealingContent | Should -Match 'sync_guard_max_age_hours'
+        $script:selfHealingContent | Should -Match 'ErrorBudgetWindowDays'
+        $script:selfHealingContent | Should -Match 'ErrorBudgetMaxFailedRuns'
+        $script:selfHealingContent | Should -Match 'ErrorBudgetMaxFailureRatePct'
         $script:selfHealingContent | Should -Match 'warning_min_success_rate_pct'
         $script:selfHealingContent | Should -Match 'critical_min_success_rate_pct'
         $script:selfHealingContent | Should -Match 'alert_severity'

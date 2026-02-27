@@ -254,6 +254,7 @@
         }
       },
       "ops_control_plane_policy": {
+        "schema_version": "2.0",
         "slo_gate": {
           "lookback_days": 7,
           "min_success_rate_pct": 100,
@@ -277,6 +278,54 @@
             "ops-autoremediate",
             "release-control-plane"
           ]
+        },
+        "error_budget": {
+          "window_days": 7,
+          "max_failed_runs": 0,
+          "max_failure_rate_pct": 0,
+          "critical_burn_rate_pct": 100
+        },
+        "state_machine": {
+          "version": "1.0",
+          "initial_state": "ops_health_preflight",
+          "terminal_states": [
+            "completed",
+            "failed"
+          ],
+          "transitions": {
+            "ops_health_preflight": {
+              "on_pass": "release_dispatch",
+              "on_fail": "auto_remediation"
+            },
+            "auto_remediation": {
+              "on_pass": "ops_health_verify",
+              "on_fail": "rollback_orchestration"
+            },
+            "ops_health_verify": {
+              "on_pass": "release_dispatch",
+              "on_fail": "rollback_orchestration"
+            },
+            "release_dispatch": {
+              "on_pass": "completed",
+              "on_fail": "rollback_orchestration"
+            },
+            "rollback_orchestration": {
+              "on_pass": "failed_recovered",
+              "on_fail": "failed"
+            }
+          }
+        },
+        "rollback_orchestration": {
+          "enabled": true,
+          "trigger_reason_codes": [
+            "ops_health_gate_failed",
+            "ops_unhealthy",
+            "release_dispatch_watch_timeout",
+            "release_dispatch_watch_failed",
+            "release_dispatch_attempts_exhausted",
+            "release_verification_failed"
+          ],
+          "run_on_dry_run": false
         },
         "incident_lifecycle": {
           "auto_close_on_recovery": true,

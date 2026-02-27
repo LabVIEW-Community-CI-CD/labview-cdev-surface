@@ -409,6 +409,8 @@ Control-plane behavior:
 10. Emits explicit override audit artifact `release-control-plane-override-audit.json` for every run.
 11. Auto-opens incident title `Release Control Plane Stable Override Alert` whenever decision code is `stable_window_override_applied`.
 12. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
+13. Loads GA policy contract `installer_contract.release_client.ops_control_plane_policy.schema_version=2.0` and emits state-machine execution evidence (`state_machine.transitions_executed`) in every report.
+14. Executes deterministic rollback orchestration (`Invoke-RollbackDrillSelfHealing.ps1`) when configured trigger reason codes are hit.
 
 Top-level release-control-plane deterministic failure reason codes include:
 - `ops_health_gate_failed`
@@ -433,11 +435,15 @@ Top-level release-control-plane deterministic failure reason codes include:
 - 7-day lookback by default
 - 100% success-rate target for `ops-monitoring`, `ops-autoremediate`, and `release-control-plane`
 - max sync-guard success age of 12 hours
+- hard error-budget defaults:
+  - 7-day budget window
+  - max failed runs: `0`
+  - max failure-rate percent: `0`
 - alert thresholds for severity classification:
   - warning minimum workflow success rate: `99.5`
   - critical minimum workflow success rate: `99`
   - warning reason codes: `workflow_missing_runs`, `workflow_success_rate_below_threshold`
-  - critical reason codes: `workflow_failure_detected`, `sync_guard_missing`, `sync_guard_stale`, `slo_gate_runtime_error`
+  - critical reason codes: `workflow_failure_detected`, `sync_guard_missing`, `sync_guard_stale`, `slo_gate_runtime_error`, `error_budget_exhausted`, `error_budget_failure_rate_exceeded`
 - bounded self-healing by dispatching `ops-autoremediate.yml` and re-verifying SLO status
 - deterministic reason codes on failure:
   - `auto_remediation_disabled`
@@ -450,6 +456,8 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
 - `workflow_success_rate_below_threshold`
 - `sync_guard_missing`
 - `sync_guard_stale`
+- `error_budget_exhausted`
+- `error_budget_failure_rate_exceeded`
 
 `ops-policy-drift-check.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Test-ReleaseControlPlanePolicyDrift.ps1` and fails on:
 - root/payload release-client policy drift
@@ -459,6 +467,12 @@ Underlying SLO evaluator `scripts/Test-OpsSloGate.ps1` still emits deterministic
   - `release_client_drift`
   - `runtime_images_missing`
   - `ops_control_plane_policy_missing`
+  - `ops_control_plane_schema_version_invalid`
+  - `ops_control_plane_state_machine_missing`
+  - `ops_control_plane_state_machine_version_missing`
+  - `ops_control_plane_rollback_orchestration_missing`
+  - `ops_control_plane_error_budget_missing`
+  - `ops_control_plane_error_budget_window_days_invalid`
   - `ops_control_plane_slo_alert_thresholds_missing`
   - `ops_control_plane_self_healing_missing`
   - `ops_control_plane_guardrails_missing`

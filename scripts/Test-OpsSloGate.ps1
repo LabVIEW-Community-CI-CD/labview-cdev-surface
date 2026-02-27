@@ -22,6 +22,18 @@ param(
     [int]$SyncGuardMaxAgeHours = 12,
 
     [Parameter()]
+    [ValidateRange(1, 90)]
+    [int]$ErrorBudgetWindowDays = 7,
+
+    [Parameter()]
+    [ValidateRange(0, 10000)]
+    [int]$ErrorBudgetMaxFailedRuns = 0,
+
+    [Parameter()]
+    [ValidateRange(0, 100)]
+    [double]$ErrorBudgetMaxFailureRatePct = 0,
+
+    [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string[]]$RequiredWorkflows = @(
         'ops-monitoring',
@@ -57,6 +69,16 @@ $report = [ordered]@{
     lookback_days = $LookbackDays
     min_success_rate_pct = $MinSuccessRatePct
     sync_guard_max_age_hours = $SyncGuardMaxAgeHours
+    error_budget = [ordered]@{
+        lookback_days = $ErrorBudgetWindowDays
+        max_failed_runs = $ErrorBudgetMaxFailedRuns
+        max_failure_rate_pct = $ErrorBudgetMaxFailureRatePct
+        total_completed_runs = 0
+        total_failed_runs = 0
+        failure_rate_pct = 0
+        status = 'unknown'
+        reason_codes = @()
+    }
     required_workflows = @($RequiredWorkflows)
     status = 'fail'
     reason_codes = @()
@@ -90,6 +112,20 @@ try {
 
         $sloReport = Get-Content -LiteralPath $sloPath -Raw | ConvertFrom-Json -ErrorAction Stop
         $report.source_slo_report = $sloReport
+
+        $errorBudgetSloReport = $sloReport
+        if ($ErrorBudgetWindowDays -ne $LookbackDays) {
+            $errorBudgetPath = Join-Path $scratchRoot 'error-budget-ops-slo-report.json'
+            & pwsh -NoProfile -File $sloScript `
+                -SurfaceRepository $SurfaceRepository `
+                -SyncGuardRepository $SyncGuardRepository `
+                -LookbackDays $ErrorBudgetWindowDays `
+                -OutputPath $errorBudgetPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "error_budget_report_generation_failed: exit_code=$LASTEXITCODE"
+            }
+            $errorBudgetSloReport = Get-Content -LiteralPath $errorBudgetPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        }
 
         $workflowEvaluations = [System.Collections.Generic.List[object]]::new()
         foreach ($workflowName in @($RequiredWorkflows)) {
@@ -157,6 +193,39 @@ try {
             $syncGuardEvaluation.reason_codes = @($syncGuardReasons)
         }
         $report.sync_guard_evaluation = $syncGuardEvaluation
+
+        $errorBudgetReasons = [System.Collections.Generic.List[string]]::new()
+        $totalCompletedRuns = 0
+        $totalFailedRuns = 0
+        foreach ($workflowName in @($RequiredWorkflows)) {
+            $errorBudgetRecord = @($errorBudgetSloReport.workflows | Where-Object { [string]$_.workflow -eq [string]$workflowName } | Select-Object -First 1)
+            if (@($errorBudgetRecord).Count -ne 1) {
+                continue
+            }
+            $totalCompletedRuns += [int]$errorBudgetRecord[0].completed_runs
+            $totalFailedRuns += [int]$errorBudgetRecord[0].failure_runs
+        }
+
+        $failureRatePct = if ($totalCompletedRuns -le 0) { 0.0 } else { [Math]::Round((($totalFailedRuns / $totalCompletedRuns) * 100), 2) }
+        if ($totalFailedRuns -gt $ErrorBudgetMaxFailedRuns) {
+            Add-ReasonCode -Target $reasonCodes -ReasonCode 'error_budget_exhausted'
+            [void]$errorBudgetReasons.Add('max_failed_runs_exceeded')
+        }
+        if ($failureRatePct -gt $ErrorBudgetMaxFailureRatePct) {
+            Add-ReasonCode -Target $reasonCodes -ReasonCode 'error_budget_failure_rate_exceeded'
+            [void]$errorBudgetReasons.Add('max_failure_rate_pct_exceeded')
+        }
+
+        $report.error_budget = [ordered]@{
+            lookback_days = $ErrorBudgetWindowDays
+            max_failed_runs = $ErrorBudgetMaxFailedRuns
+            max_failure_rate_pct = $ErrorBudgetMaxFailureRatePct
+            total_completed_runs = $totalCompletedRuns
+            total_failed_runs = $totalFailedRuns
+            failure_rate_pct = $failureRatePct
+            status = if (@($errorBudgetReasons).Count -eq 0) { 'pass' } else { 'fail' }
+            reason_codes = @($errorBudgetReasons)
+        }
 
         if ($reasonCodes.Count -eq 0) {
             $report.status = 'pass'

@@ -52,6 +52,7 @@ Describe 'Release client policy contract' {
         $releaseClient.runtime_images.ops_runtime.repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops'
         $releaseClient.runtime_images.ops_runtime.base_repository | Should -Be 'ghcr.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $releaseClient.runtime_images.ops_runtime.base_digest | Should -Be 'sha256:0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
+        $releaseClient.ops_control_plane_policy.schema_version | Should -Be '2.0'
         $releaseClient.ops_control_plane_policy.slo_gate.lookback_days | Should -Be 7
         $releaseClient.ops_control_plane_policy.slo_gate.min_success_rate_pct | Should -Be 100
         $releaseClient.ops_control_plane_policy.slo_gate.max_sync_guard_age_hours | Should -Be 12
@@ -63,6 +64,19 @@ Describe 'Release client policy contract' {
         @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'sync_guard_missing'
         @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'sync_guard_stale'
         @($releaseClient.ops_control_plane_policy.slo_gate.alert_thresholds.critical_reason_codes) | Should -Contain 'slo_gate_runtime_error'
+        $releaseClient.ops_control_plane_policy.error_budget.window_days | Should -Be 7
+        $releaseClient.ops_control_plane_policy.error_budget.max_failed_runs | Should -Be 0
+        $releaseClient.ops_control_plane_policy.error_budget.max_failure_rate_pct | Should -Be 0
+        $releaseClient.ops_control_plane_policy.error_budget.critical_burn_rate_pct | Should -Be 100
+        $releaseClient.ops_control_plane_policy.state_machine.version | Should -Be '1.0'
+        $releaseClient.ops_control_plane_policy.state_machine.initial_state | Should -Be 'ops_health_preflight'
+        @($releaseClient.ops_control_plane_policy.state_machine.terminal_states) | Should -Contain 'completed'
+        @($releaseClient.ops_control_plane_policy.state_machine.terminal_states) | Should -Contain 'failed'
+        $releaseClient.ops_control_plane_policy.state_machine.transitions.ops_health_preflight.on_pass | Should -Be 'release_dispatch'
+        $releaseClient.ops_control_plane_policy.state_machine.transitions.ops_health_preflight.on_fail | Should -Be 'auto_remediation'
+        $releaseClient.ops_control_plane_policy.rollback_orchestration.enabled | Should -BeTrue
+        @($releaseClient.ops_control_plane_policy.rollback_orchestration.trigger_reason_codes) | Should -Contain 'release_dispatch_watch_timeout'
+        @($releaseClient.ops_control_plane_policy.rollback_orchestration.trigger_reason_codes) | Should -Contain 'release_verification_failed'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-monitoring'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'ops-autoremediate'
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'release-control-plane'
@@ -118,9 +132,13 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'runtime_images_cdev_cli_runtime_canonical_repository'
         $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
         $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
+        $script:policyScriptContent | Should -Match 'ops_policy_schema_version'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_alert_thresholds_warning_min_success_rate_pct'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_alert_thresholds_critical_reason_slo_gate_runtime_error'
+        $script:policyScriptContent | Should -Match 'ops_policy_error_budget_window_days'
+        $script:policyScriptContent | Should -Match 'ops_policy_state_machine_version'
+        $script:policyScriptContent | Should -Match 'ops_policy_rollback_orchestration_enabled'
         $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_full_cycle_weekday_monday'
         $script:policyScriptContent | Should -Match 'ops_policy_stable_window_reason_pattern_exists'
