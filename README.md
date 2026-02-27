@@ -341,9 +341,28 @@ pwsh -NoProfile -File .\scripts\Invoke-ReleaseControlPlaneLocalDocker.ps1 `
 
 This executes `scripts/Exercise-ReleaseControlPlaneLocal.ps1` in the portable ops container image and writes artifacts under:
 - `artifacts\release-control-plane-local`
+- Default container image: `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops:v1`
 
 For offline or container runtime fallback on the host:
 - add `-HostFallback`
+
+## Publish Ops Runtime Image
+
+`publish-ops-runtime-image.yml` publishes the portable ops runtime container to:
+- `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops`
+
+Deterministic tags:
+- `sha-<12-char-commit>`
+- `v1-YYYYMMDD`
+- `v1` (when `promote_v1=true`)
+
+Manual publish:
+
+```powershell
+gh workflow run publish-ops-runtime-image.yml `
+  -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f promote_v1=true
+```
 
 Runbook for incidents:
 - `docs/runbooks/release-ops-incident-response.md`

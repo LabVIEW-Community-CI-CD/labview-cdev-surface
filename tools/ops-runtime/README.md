@@ -3,7 +3,7 @@
 This container is the portable Docker package for local ops exercises.
 
 Default image:
-- `ghcr.io/svelderrainruiz/labview-cdev-surface-ops:v1`
+- `ghcr.io/labview-community-ci-cd/labview-cdev-surface-ops:v1`
 
 Build locally:
 
