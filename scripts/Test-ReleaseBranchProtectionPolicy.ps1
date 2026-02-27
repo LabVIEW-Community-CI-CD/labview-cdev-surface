@@ -128,6 +128,54 @@ function Test-RuleContract {
     }
 }
 
+function Resolve-QueryFailureReasonCodes {
+    param(
+        [Parameter()][string]$MessageText = '',
+        [Parameter()][bool]$GhTokenPresent = $false
+    )
+
+    $resolved = [System.Collections.Generic.List[string]]::new()
+    [void]$resolved.Add('branch_protection_query_failed')
+
+    if (-not $GhTokenPresent) {
+        [void]$resolved.Add('branch_protection_authentication_missing')
+        return @($resolved)
+    }
+
+    $normalized = ([string]$MessageText).ToLowerInvariant()
+    $authnTokens = @(
+        'authentication required',
+        'requires authentication',
+        'http 401',
+        'gh auth login',
+        'not logged into any hosts',
+        'bad credentials'
+    )
+    $authzTokens = @(
+        'resource not accessible by integration',
+        'must have admin rights',
+        'requires admin access',
+        'repository administration',
+        'insufficient permissions'
+    )
+
+    foreach ($token in $authnTokens) {
+        if ($normalized.Contains([string]$token)) {
+            [void]$resolved.Add('branch_protection_authentication_missing')
+            break
+        }
+    }
+
+    foreach ($token in $authzTokens) {
+        if ($normalized.Contains([string]$token)) {
+            [void]$resolved.Add('branch_protection_authz_denied')
+            break
+        }
+    }
+
+    return @($resolved)
+}
+
 $reasonCodes = [System.Collections.Generic.List[string]]::new()
 
 $MainRequiredContexts = Normalize-RequiredContexts -Values @($MainRequiredContexts)
@@ -149,6 +197,9 @@ $report = [ordered]@{
     actual = [ordered]@{
         main_rule = $null
         integration_rule = $null
+    }
+    auth_context = [ordered]@{
+        gh_token_present = -not [string]::IsNullOrWhiteSpace([string]$env:GH_TOKEN)
     }
 }
 
@@ -228,7 +279,12 @@ query($owner:String!, $name:String!) {
 }
 catch {
     if ($reasonCodes.Count -eq 0) {
-        Add-ReasonCode -Target $reasonCodes -ReasonCode 'branch_protection_query_failed'
+        $queryFailureReasons = Resolve-QueryFailureReasonCodes `
+            -MessageText ([string]$_.Exception.Message) `
+            -GhTokenPresent ([bool]$report.auth_context.gh_token_present)
+        foreach ($reasonCode in @($queryFailureReasons)) {
+            Add-ReasonCode -Target $reasonCodes -ReasonCode ([string]$reasonCode)
+        }
     }
     $report.status = 'fail'
     $report.reason_codes = @($reasonCodes)

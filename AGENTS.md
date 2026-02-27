@@ -313,8 +313,12 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Race-hardening gate must fail when latest successful drill evidence is missing/stale, `reason_code != drill_passed`, or collision evidence is absent.
 - `.github/workflows/branch-protection-drift-check.yml` must run `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and maintain incident lifecycle title `Branch Protection Drift Alert`.
 - `.github/workflows/release-guardrails-autoremediate.yml` must run `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` and maintain incident lifecycle title `Release Guardrails Auto-Remediation Alert`.
-- Branch-protection query/apply workflows must use `WORKFLOW_BOT_TOKEN` when available, with deterministic fallback to `github.token`.
+- Branch-protection query/apply workflows must require repository secret `WORKFLOW_BOT_TOKEN` and fail fast with deterministic `workflow_bot_token_missing` when the secret is not configured.
 - `scripts/Set-ReleaseBranchProtectionPolicy.ps1` is the deterministic apply path for required-check drift repair.
+- Branch-protection query classifier reason codes must remain explicit:
+  - `branch_protection_query_failed`
+  - `branch_protection_authentication_missing`
+  - `branch_protection_authz_denied`
 - Guardrails self-healing policy must remain explicit under `ops_control_plane_policy.self_healing.guardrails`:
   - `remediation_workflow`
   - `race_drill_workflow`
@@ -329,6 +333,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `remediation_execution_failed`
   - `remediation_verify_failed`
   - `guardrails_self_heal_runtime_error`
+- Guardrails report must include `remediation_hints` when status is fail and auto-remediation cannot fully recover.
 - Race-hardening drill reason codes must remain explicit:
   - `drill_passed`
   - `control_plane_collision_not_observed`
