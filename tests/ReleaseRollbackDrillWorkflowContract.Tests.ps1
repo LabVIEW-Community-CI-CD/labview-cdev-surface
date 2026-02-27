@@ -63,6 +63,7 @@ Describe 'Release rollback drill workflow contract' {
         $script:selfHealingContent | Should -Match 'release_channel=canary'
         $script:selfHealingContent | Should -Match 'allow_existing_tag=false'
         $script:selfHealingContent | Should -Match 'rollback_candidate_missing'
+        $script:selfHealingContent | Should -Match 'rollback_assets_missing'
         $script:selfHealingContent | Should -Match 'already_ready'
         $script:selfHealingContent | Should -Match 'remediated'
         $script:selfHealingContent | Should -Match 'no_automatable_action'
