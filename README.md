@@ -507,7 +507,11 @@ It runs `scripts/Test-ReleaseRaceHardeningGate.ps1` and fails when:
 - `integration/*`
 
 Use `scripts/Set-ReleaseBranchProtectionPolicy.ps1` to deterministically apply/repair required check contracts.
-Branch-protection workflows prefer `WORKFLOW_BOT_TOKEN` when available and deterministically fall back to `github.token`.
+Branch-protection workflows require repository secret `WORKFLOW_BOT_TOKEN` and fail fast with `workflow_bot_token_missing` when absent.
+Branch-protection query failures remain deterministic with classified reason codes:
+- `branch_protection_query_failed`
+- `branch_protection_authentication_missing`
+- `branch_protection_authz_denied`
 
 `release-guardrails-autoremediate.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` to:
 - evaluate branch-protection drift and release race-hardening freshness in one pass
@@ -521,6 +525,7 @@ Branch-protection workflows prefer `WORKFLOW_BOT_TOKEN` when available and deter
   - `remediation_execution_failed`
   - `remediation_verify_failed`
   - `guardrails_self_heal_runtime_error`
+- include `remediation_hints` in the report when guardrails cannot self-heal (for token/authz and stale drill guidance)
 
 Guardrails policy is codified in `installer_contract.release_client.ops_control_plane_policy.self_healing.guardrails`:
 - `remediation_workflow`

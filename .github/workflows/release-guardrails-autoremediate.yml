@@ -39,10 +39,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate workflow bot token
+        shell: pwsh
+        env:
+          WORKFLOW_BOT_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_BOT_TOKEN)) {
+            throw "workflow_bot_token_missing: Required secret WORKFLOW_BOT_TOKEN is not configured. Add a token with repository administration read/write and actions write scopes."
+          }
+
       - name: Execute release guardrails auto-remediation
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'release-guardrails-autoremediate-report.json'
@@ -104,7 +114,7 @@ jobs:
         if: failure()
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -137,7 +147,7 @@ jobs:
         if: success()
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

@@ -320,8 +320,14 @@ gh workflow run branch-protection-drift-check.yml -R LabVIEW-Community-CI-CD/lab
 ```
 
 Token policy for branch-protection workflows:
-- prefer repository secret `WORKFLOW_BOT_TOKEN`
-- deterministic fallback to `github.token` when the secret is unavailable
+- require repository secret `WORKFLOW_BOT_TOKEN`
+- workflows fail fast with `workflow_bot_token_missing` when the secret is unavailable
+- token must include repository administration permissions for branch-protection GraphQL read/apply operations
+
+Branch-protection query failure reason codes:
+- `branch_protection_query_failed`
+- `branch_protection_authentication_missing`
+- `branch_protection_authz_denied`
 
 Local policy verify:
 
@@ -372,6 +378,8 @@ Deterministic guardrails reason codes:
 - `remediation_execution_failed`
 - `remediation_verify_failed`
 - `guardrails_self_heal_runtime_error`
+
+When `reason_code=no_automatable_action` or `reason_code=remediation_verify_failed`, inspect `remediation_hints` in `release-guardrails-autoremediate-report.json` for deterministic next actions.
 
 Guardrails incident title:
 - `Release Guardrails Auto-Remediation Alert`

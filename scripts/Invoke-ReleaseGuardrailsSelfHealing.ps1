@@ -115,6 +115,32 @@ function Format-ReasonCodeSet {
     return [string]::Join(',', @($normalized))
 }
 
+function Get-GuardrailsRemediationHints {
+    param(
+        [Parameter()][string[]]$BranchReasonCodes = @(),
+        [Parameter()][string[]]$RaceReasonCodes = @()
+    )
+
+    $hints = [System.Collections.Generic.List[string]]::new()
+    $normalizedBranchReasons = ConvertTo-StringArray -Value $BranchReasonCodes
+    $normalizedRaceReasons = ConvertTo-StringArray -Value $RaceReasonCodes
+
+    if (@($normalizedBranchReasons) -contains 'branch_protection_authentication_missing') {
+        [void]$hints.Add('Configure WORKFLOW_BOT_TOKEN (or GH_TOKEN) with repository administration read/write permissions before rerunning guardrails remediation.')
+    }
+    if (@($normalizedBranchReasons) -contains 'branch_protection_authz_denied') {
+        [void]$hints.Add('Token lacks sufficient repository administration permissions for branch-protection GraphQL operations; rotate/replace WORKFLOW_BOT_TOKEN and rerun.')
+    }
+    if (@($normalizedBranchReasons) -contains 'branch_protection_query_failed' -and @($hints).Count -eq 0) {
+        [void]$hints.Add('Review branch-protection query connectivity/authentication in GitHub Actions logs, then rerun guardrails remediation.')
+    }
+    if (@($normalizedRaceReasons) -contains 'drill_run_stale') {
+        [void]$hints.Add('Dispatch release-race-hardening-drill.yml and confirm a fresh successful run is available before re-evaluating guardrails.')
+    }
+
+    return @($hints)
+}
+
 function Test-ContainsAnyReasonCode {
     param(
         [Parameter()][string[]]$Source = @(),
@@ -255,6 +281,7 @@ $report = [ordered]@{
     status = 'fail'
     reason_code = ''
     message = ''
+    remediation_hints = @()
     initial_assessment = $null
     remediation_attempts = @()
     final_assessment = $null
@@ -468,7 +495,14 @@ try {
             $report.reason_code = 'no_automatable_action'
             $finalBranchReasons = Get-ReasonCodesFromReport -Report $currentBranchAssessment.report
             $finalRaceReasons = Get-ReasonCodesFromReport -Report $currentRaceAssessment.report
+            $report.remediation_hints = @(
+                Get-GuardrailsRemediationHints -BranchReasonCodes @($finalBranchReasons) -RaceReasonCodes @($finalRaceReasons)
+            )
+            $hintText = if (@($report.remediation_hints).Count -gt 0) { " remediation_hints=$([string]::Join(' | ', @($report.remediation_hints)))" } else { '' }
             $report.message = "No automatable remediation path. branch_reason_codes=$(Format-ReasonCodeSet -ReasonCodes $finalBranchReasons) race_reason_codes=$(Format-ReasonCodeSet -ReasonCodes $finalRaceReasons)"
+            if (-not [string]::IsNullOrWhiteSpace($hintText)) {
+                $report.message = "$($report.message)$hintText"
+            }
         } elseif ($executionFailureCount -gt 0) {
             $report.status = 'fail'
             $report.reason_code = 'remediation_execution_failed'
@@ -478,7 +512,14 @@ try {
             $report.reason_code = 'remediation_verify_failed'
             $finalBranchReasons = Get-ReasonCodesFromReport -Report $currentBranchAssessment.report
             $finalRaceReasons = Get-ReasonCodesFromReport -Report $currentRaceAssessment.report
+            $report.remediation_hints = @(
+                Get-GuardrailsRemediationHints -BranchReasonCodes @($finalBranchReasons) -RaceReasonCodes @($finalRaceReasons)
+            )
+            $hintText = if (@($report.remediation_hints).Count -gt 0) { " remediation_hints=$([string]::Join(' | ', @($report.remediation_hints)))" } else { '' }
             $report.message = "Guardrails remain failing after bounded remediation. branch_reason_codes=$(Format-ReasonCodeSet -ReasonCodes $finalBranchReasons) race_reason_codes=$(Format-ReasonCodeSet -ReasonCodes $finalRaceReasons)"
+            if (-not [string]::IsNullOrWhiteSpace($hintText)) {
+                $report.message = "$($report.message)$hintText"
+            }
         }
     }
 }

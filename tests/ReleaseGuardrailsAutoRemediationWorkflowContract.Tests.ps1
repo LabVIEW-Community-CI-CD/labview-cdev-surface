@@ -31,11 +31,15 @@ Describe 'Release guardrails auto-remediation workflow contract' {
     }
 
     It 'executes guardrail runtime and incident lifecycle management' {
+        $script:workflowContent | Should -Match 'Validate workflow bot token'
         $script:workflowContent | Should -Match 'Invoke-ReleaseGuardrailsSelfHealing\.ps1'
         $script:workflowContent | Should -Match 'release-guardrails-autoremediate-report\.json'
         $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:workflowContent | Should -Match 'Release Guardrails Auto-Remediation Alert'
         $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN'
+        $script:workflowContent | Should -Match 'workflow_bot_token_missing'
+        $script:workflowContent | Should -Match 'GH_TOKEN:\s*\${{\s*secrets\.WORKFLOW_BOT_TOKEN\s*}}'
+        $script:workflowContent | Should -Not -Match 'github\.token'
         $script:workflowContent | Should -Match '-Mode Fail'
         $script:workflowContent | Should -Match '-Mode Recover'
     }
@@ -50,6 +54,9 @@ Describe 'Release guardrails auto-remediation workflow contract' {
         $script:runtimeContent | Should -Match 'drill_run_stale'
         $script:runtimeContent | Should -Match 'apply_branch_protection_policy'
         $script:runtimeContent | Should -Match 'dispatch_release_race_hardening_drill'
+        $script:runtimeContent | Should -Match 'remediation_hints'
+        $script:runtimeContent | Should -Match 'branch_protection_authentication_missing'
+        $script:runtimeContent | Should -Match 'branch_protection_authz_denied'
     }
 
     It 'keeps deterministic self-healing reason codes explicit' {

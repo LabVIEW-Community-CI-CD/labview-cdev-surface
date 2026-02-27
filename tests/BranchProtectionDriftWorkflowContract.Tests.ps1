@@ -29,10 +29,14 @@ Describe 'Branch protection drift workflow contract' {
     }
 
     It 'verifies policy and publishes a machine-readable drift report' {
+        $script:workflowContent | Should -Match 'Validate workflow bot token'
         $script:workflowContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:workflowContent | Should -Match 'branch-protection-drift-report\.json'
         $script:workflowContent | Should -Match 'Branch Protection Drift Check'
         $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN'
+        $script:workflowContent | Should -Match 'workflow_bot_token_missing'
+        $script:workflowContent | Should -Match 'GH_TOKEN:\s*\${{\s*secrets\.WORKFLOW_BOT_TOKEN\s*}}'
+        $script:workflowContent | Should -Not -Match 'github\.token'
     }
 
     It 'manages failure and recovery incidents for branch-protection drift' {
@@ -52,6 +56,9 @@ Describe 'Branch protection drift workflow contract' {
         $script:verifyContent | Should -Match 'main_rule_missing'
         $script:verifyContent | Should -Match 'integration_rule_missing'
         $script:verifyContent | Should -Match 'branch_protection_query_failed'
+        $script:verifyContent | Should -Match 'branch_protection_authentication_missing'
+        $script:verifyContent | Should -Match 'branch_protection_authz_denied'
+        $script:verifyContent | Should -Match 'auth_context'
     }
 
     It 'supports deterministic apply and verification of branch-protection policy' {
