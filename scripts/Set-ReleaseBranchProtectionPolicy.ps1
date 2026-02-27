@@ -66,18 +66,32 @@ function Invoke-GraphQl {
     return (Invoke-GhJson -Arguments $args)
 }
 
-function Invoke-GraphQlMutationWithInput {
-    param(
-        [Parameter(Mandatory = $true)][string]$Mutation,
-        [Parameter(Mandatory = $true)]$Input
-    )
+function ConvertTo-GraphQlStringLiteral {
+    param([Parameter(Mandatory = $true)][string]$Value)
 
-    $inputJson = $Input | ConvertTo-Json -Depth 50 -Compress
-    return (Invoke-GhJson -Arguments @(
-            'api', 'graphql',
-            '-f', ("query={0}" -f $Mutation),
-            '-f', ("input={0}" -f $inputJson)
-        ))
+    $escaped = $Value.Replace('\', '\\').Replace('"', '\"').Replace("`r", '\r').Replace("`n", '\n')
+    return '"' + $escaped + '"'
+}
+
+function ConvertTo-GraphQlBooleanLiteral {
+    param([Parameter(Mandatory = $true)][bool]$Value)
+
+    if ($Value) {
+        return 'true'
+    }
+
+    return 'false'
+}
+
+function ConvertTo-GraphQlStringArrayLiteral {
+    param([Parameter(Mandatory = $true)][string[]]$Values)
+
+    if (@($Values).Count -eq 0) {
+        return '[]'
+    }
+
+    $encoded = @($Values | ForEach-Object { ConvertTo-GraphQlStringLiteral -Value ([string]$_) })
+    return ('[' + ([string]::Join(',', $encoded)) + ']')
 }
 
 function Resolve-ExistingRules {
@@ -192,8 +206,8 @@ try {
     $existingRules = @($repositoryNode.branchProtectionRules.nodes)
 
     $desired = @(
-        New-DesiredRuleSpec -Pattern $MainPattern -Contexts @($MainRequiredContexts),
-        New-DesiredRuleSpec -Pattern $IntegrationPattern -Contexts @($IntegrationRequiredContexts)
+        (New-DesiredRuleSpec -Pattern $MainPattern -Contexts @($MainRequiredContexts))
+        (New-DesiredRuleSpec -Pattern $IntegrationPattern -Contexts @($IntegrationRequiredContexts))
     )
 
     $actionRecords = [System.Collections.Generic.List[object]]::new()
@@ -221,10 +235,28 @@ try {
             continue
         }
 
+        $repositoryIdLiteral = ConvertTo-GraphQlStringLiteral -Value $repositoryId
+        $patternLiteral = ConvertTo-GraphQlStringLiteral -Value ([string]$spec.pattern)
+        $requiresStatusChecksLiteral = ConvertTo-GraphQlBooleanLiteral -Value ([bool]$spec.requiresStatusChecks)
+        $requiresStrictStatusChecksLiteral = ConvertTo-GraphQlBooleanLiteral -Value ([bool]$spec.requiresStrictStatusChecks)
+        $requiredStatusCheckContextsLiteral = ConvertTo-GraphQlStringArrayLiteral -Values @($spec.requiredStatusCheckContexts | ForEach-Object { [string]$_ })
+        $allowsForcePushesLiteral = ConvertTo-GraphQlBooleanLiteral -Value ([bool]$spec.allowsForcePushes)
+        $allowsDeletionsLiteral = ConvertTo-GraphQlBooleanLiteral -Value ([bool]$spec.allowsDeletions)
+
         if ($null -eq $currentRule) {
-            $createMutation = @'
-mutation($input:CreateBranchProtectionRuleInput!) {
-  createBranchProtectionRule(input:$input) {
+            $createMutation = @"
+mutation {
+  createBranchProtectionRule(
+    input: {
+      repositoryId: $repositoryIdLiteral
+      pattern: $patternLiteral
+      requiresStatusChecks: $requiresStatusChecksLiteral
+      requiresStrictStatusChecks: $requiresStrictStatusChecksLiteral
+      requiredStatusCheckContexts: $requiredStatusCheckContextsLiteral
+      allowsForcePushes: $allowsForcePushesLiteral
+      allowsDeletions: $allowsDeletionsLiteral
+    }
+  ) {
     branchProtectionRule {
       id
       pattern
@@ -236,18 +268,12 @@ mutation($input:CreateBranchProtectionRuleInput!) {
     }
   }
 }
-'@
-            $createInput = [ordered]@{
-                repositoryId = $repositoryId
-                pattern = [string]$spec.pattern
-                requiresStatusChecks = [bool]$spec.requiresStatusChecks
-                requiresStrictStatusChecks = [bool]$spec.requiresStrictStatusChecks
-                requiredStatusCheckContexts = @($spec.requiredStatusCheckContexts)
-                allowsForcePushes = [bool]$spec.allowsForcePushes
-                allowsDeletions = [bool]$spec.allowsDeletions
-            }
+"@
 
-            $createResult = Invoke-GraphQlMutationWithInput -Mutation $createMutation -Input $createInput
+            $createResult = Invoke-GhJson -Arguments @(
+                'api', 'graphql',
+                '-f', ("query={0}" -f $createMutation)
+            )
             $createdRule = $createResult.data.createBranchProtectionRule.branchProtectionRule
             [void]$actionRecords.Add([ordered]@{
                     pattern = [string]$spec.pattern
@@ -255,9 +281,20 @@ mutation($input:CreateBranchProtectionRuleInput!) {
                     rule_id = [string]$createdRule.id
                 })
         } else {
-            $updateMutation = @'
-mutation($input:UpdateBranchProtectionRuleInput!) {
-  updateBranchProtectionRule(input:$input) {
+            $ruleIdLiteral = ConvertTo-GraphQlStringLiteral -Value ([string]$currentRule.id)
+            $updateMutation = @"
+mutation {
+  updateBranchProtectionRule(
+    input: {
+      branchProtectionRuleId: $ruleIdLiteral
+      pattern: $patternLiteral
+      requiresStatusChecks: $requiresStatusChecksLiteral
+      requiresStrictStatusChecks: $requiresStrictStatusChecksLiteral
+      requiredStatusCheckContexts: $requiredStatusCheckContextsLiteral
+      allowsForcePushes: $allowsForcePushesLiteral
+      allowsDeletions: $allowsDeletionsLiteral
+    }
+  ) {
     branchProtectionRule {
       id
       pattern
@@ -269,18 +306,12 @@ mutation($input:UpdateBranchProtectionRuleInput!) {
     }
   }
 }
-'@
-            $updateInput = [ordered]@{
-                branchProtectionRuleId = [string]$currentRule.id
-                pattern = [string]$spec.pattern
-                requiresStatusChecks = [bool]$spec.requiresStatusChecks
-                requiresStrictStatusChecks = [bool]$spec.requiresStrictStatusChecks
-                requiredStatusCheckContexts = @($spec.requiredStatusCheckContexts)
-                allowsForcePushes = [bool]$spec.allowsForcePushes
-                allowsDeletions = [bool]$spec.allowsDeletions
-            }
+"@
 
-            $updateResult = Invoke-GraphQlMutationWithInput -Mutation $updateMutation -Input $updateInput
+            $updateResult = Invoke-GhJson -Arguments @(
+                'api', 'graphql',
+                '-f', ("query={0}" -f $updateMutation)
+            )
             $updatedRule = $updateResult.data.updateBranchProtectionRule.branchProtectionRule
             [void]$actionRecords.Add([ordered]@{
                     pattern = [string]$spec.pattern
@@ -300,12 +331,14 @@ mutation($input:UpdateBranchProtectionRuleInput!) {
         }
 
         $verifyPath = Join-Path ([System.IO.Path]::GetTempPath()) ("branch-protection-verify-" + [Guid]::NewGuid().ToString('N') + '.json')
+        $mainContextsCsv = [string]::Join(',', @($MainRequiredContexts | ForEach-Object { [string]$_ }))
+        $integrationContextsCsv = [string]::Join(',', @($IntegrationRequiredContexts | ForEach-Object { [string]$_ }))
         & pwsh -NoProfile -File $verifyScript `
             -Repository $Repository `
             -MainPattern $MainPattern `
             -IntegrationPattern $IntegrationPattern `
-            -MainRequiredContexts @($MainRequiredContexts) `
-            -IntegrationRequiredContexts @($IntegrationRequiredContexts) `
+            -MainRequiredContexts $mainContextsCsv `
+            -IntegrationRequiredContexts $integrationContextsCsv `
             -OutputPath $verifyPath | Out-Null
         $verifyExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
         if ($verifyExit -ne 0) {

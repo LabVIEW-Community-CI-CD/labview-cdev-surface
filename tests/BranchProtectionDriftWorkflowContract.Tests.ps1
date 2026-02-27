@@ -54,8 +54,8 @@ Describe 'Branch protection drift workflow contract' {
     }
 
     It 'supports deterministic apply and verification of branch-protection policy' {
-        $script:applyContent | Should -Match 'CreateBranchProtectionRuleInput'
-        $script:applyContent | Should -Match 'UpdateBranchProtectionRuleInput'
+        $script:applyContent | Should -Match 'createBranchProtectionRule'
+        $script:applyContent | Should -Match 'updateBranchProtectionRule'
         $script:applyContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:applyContent | Should -Match 'reason_codes = if \(\$DryRun\)'
         $script:applyContent | Should -Match "@\('dry_run'\)"

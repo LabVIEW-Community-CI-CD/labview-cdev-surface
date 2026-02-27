@@ -49,10 +49,37 @@ function Add-ReasonCode {
     }
 }
 
+function Normalize-RequiredContexts {
+    param(
+        [Parameter()][string[]]$Values = @()
+    )
+
+    $normalized = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in @($Values)) {
+        $text = [string]$entry
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            continue
+        }
+
+        foreach ($segment in @($text.Split(','))) {
+            $candidate = [string]$segment
+            $candidate = $candidate.Trim()
+            if ([string]::IsNullOrWhiteSpace($candidate)) {
+                continue
+            }
+
+            if (-not $normalized.Contains($candidate)) {
+                [void]$normalized.Add($candidate)
+            }
+        }
+    }
+
+    return @($normalized)
+}
+
 function Test-RuleContract {
     param(
-        [Parameter(Mandatory = $true)]$Rule,
-        [Parameter(Mandatory = $true)][string]$Pattern,
+        [Parameter(Mandatory = $true)][AllowNull()]$Rule,
         [Parameter(Mandatory = $true)][string[]]$RequiredContexts
     )
 
@@ -102,6 +129,9 @@ function Test-RuleContract {
 }
 
 $reasonCodes = [System.Collections.Generic.List[string]]::new()
+
+$MainRequiredContexts = Normalize-RequiredContexts -Values @($MainRequiredContexts)
+$IntegrationRequiredContexts = Normalize-RequiredContexts -Values @($IntegrationRequiredContexts)
 
 $report = [ordered]@{
     schema_version = '1.0'
@@ -159,8 +189,8 @@ query($owner:String!, $name:String!) {
     $mainRule = @($rules | Where-Object { [string]$_.pattern -eq $MainPattern } | Select-Object -First 1)
     $integrationRule = @($rules | Where-Object { [string]$_.pattern -eq $IntegrationPattern } | Select-Object -First 1)
 
-    $mainCheck = Test-RuleContract -Rule ($mainRule | Select-Object -First 1) -Pattern $MainPattern -RequiredContexts @($MainRequiredContexts)
-    $integrationCheck = Test-RuleContract -Rule ($integrationRule | Select-Object -First 1) -Pattern $IntegrationPattern -RequiredContexts @($IntegrationRequiredContexts)
+    $mainCheck = Test-RuleContract -Rule ($mainRule | Select-Object -First 1) -RequiredContexts @($MainRequiredContexts)
+    $integrationCheck = Test-RuleContract -Rule ($integrationRule | Select-Object -First 1) -RequiredContexts @($IntegrationRequiredContexts)
 
     $report.actual.main_rule = [ordered]@{
         pattern = $MainPattern
