@@ -46,6 +46,7 @@ Describe 'Workspace surface contract' {
         $script:releaseWithGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/release-with-windows-gate.yml'
         $script:canaryWorkflowPath = Join-Path $script:repoRoot '.github/workflows/nightly-supplychain-canary.yml'
         $script:linuxNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-linux-nsis-parity-image.yml'
+        $script:windowsNsisParityImagePublishWorkflowPath = Join-Path $script:repoRoot '.github/workflows/publish-windows-nsis-parity-image.yml'
         $script:windowsImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/windows-labview-image-gate.yml'
         $script:windowsImageGateCoreWorkflowPath = Join-Path $script:repoRoot '.github/workflows/_windows-labview-image-gate-core.yml'
         $script:linuxImageGateWorkflowPath = Join-Path $script:repoRoot '.github/workflows/linux-labview-image-gate.yml'
@@ -103,6 +104,7 @@ Describe 'Workspace surface contract' {
             $script:releaseWithGateWorkflowPath,
             $script:canaryWorkflowPath,
             $script:linuxNsisParityImagePublishWorkflowPath,
+            $script:windowsNsisParityImagePublishWorkflowPath,
             $script:windowsImageGateWorkflowPath,
             $script:windowsImageGateCoreWorkflowPath,
             $script:linuxImageGateWorkflowPath,
@@ -380,6 +382,7 @@ Describe 'Workspace surface contract' {
         $script:ciWorkflowContent | Should -Match 'LinuxLabviewImageGateWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxContainerNsisParityContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'LinuxNsisParityImagePublishWorkflowContract\.Tests\.ps1'
+        $script:ciWorkflowContent | Should -Match 'WindowsNsisParityImagePublishWorkflowContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'WindowsContainerNsisSelfTestContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'IsolatedBuildWorkspacePolicyContract\.Tests\.ps1'
         $script:ciWorkflowContent | Should -Match 'GitSafeDirectoryPolicyContract\.Tests\.ps1'

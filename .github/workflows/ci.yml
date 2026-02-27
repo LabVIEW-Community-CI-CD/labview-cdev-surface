@@ -64,6 +64,7 @@ jobs:
             './tests/PortableOpsRuntimeContract.Tests.ps1',
             './tests/OpsRuntimeImagePublishWorkflowContract.Tests.ps1',
             './tests/LinuxNsisParityImagePublishWorkflowContract.Tests.ps1',
+            './tests/WindowsNsisParityImagePublishWorkflowContract.Tests.ps1',
             './tests/VsCodeTasksContract.Tests.ps1',
             './tests/ReleaseControlPlaneLocalDockerHarnessContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
