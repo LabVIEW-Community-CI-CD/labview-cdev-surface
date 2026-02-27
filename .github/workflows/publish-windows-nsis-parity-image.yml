@@ -36,7 +36,7 @@ jobs:
 
       - name: Resolve deterministic tags
         id: resolve
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -79,7 +79,7 @@ jobs:
 
       - name: Resolve Windows Docker context
         id: resolve_context
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -163,7 +163,7 @@ jobs:
           "resolved_windows_docker_context=$resolvedContext" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Exercise silent installer in Windows container
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -181,7 +181,7 @@ jobs:
             $scriptArgs += @('-DockerContext', $resolvedContext)
           }
 
-          & powershell @scriptArgs
+          & pwsh @scriptArgs
           if ($LASTEXITCODE -ne 0) {
             throw "Invoke-WindowsContainerNsisSelfTest.ps1 failed with exit code $LASTEXITCODE."
           }
@@ -204,7 +204,7 @@ jobs:
 
       - name: Publish image tags
         id: publish
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -251,7 +251,7 @@ jobs:
           "digest=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish summary
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 

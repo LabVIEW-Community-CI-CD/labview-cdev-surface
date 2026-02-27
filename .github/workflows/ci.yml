@@ -22,6 +22,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enforce hosted-runner lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerEnvironment = [string]$env:RUNNER_ENVIRONMENT
+          if ($runnerEnvironment -ne 'github-hosted') {
+            throw "hosted_runner_required: CI Pipeline must run on a github-hosted runner. actual='$runnerEnvironment'"
+          }
+
       - name: Install Pester
         shell: pwsh
         run: |

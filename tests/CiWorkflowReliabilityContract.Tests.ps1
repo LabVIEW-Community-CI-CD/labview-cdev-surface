@@ -20,6 +20,13 @@ Describe 'CI workflow reliability contract' {
         $script:workflowContent | Should -Match 'cancel-in-progress:\s*true'
     }
 
+    It 'locks the contract suite to github-hosted ubuntu CI runners' {
+        $script:workflowContent | Should -Match '(?ms)ci-pipeline:\s*.*?runs-on:\s*ubuntu-latest'
+        $script:workflowContent | Should -Match 'Enforce hosted-runner lock'
+        $script:workflowContent | Should -Match 'RUNNER_ENVIRONMENT'
+        $script:workflowContent | Should -Match 'hosted_runner_required'
+    }
+
     It 'uses reusable upload-artifact retry composite for workspace installer artifacts' {
         $script:workflowContent | Should -Match 'id:\s*upload-workspace-installer-artifact'
         $script:workflowContent | Should -Match 'uses:\s*\./\.github/actions/upload-artifact-retry'

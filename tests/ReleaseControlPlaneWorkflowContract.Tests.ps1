@@ -31,6 +31,10 @@ Describe 'Release control plane workflow contract' {
     }
 
     It 'runs autonomous control-plane runtime and uploads report' {
+        $script:workflowContent | Should -Match 'runs-on:\s*ubuntu-latest'
+        $script:workflowContent | Should -Match 'Enforce hosted-runner lock'
+        $script:workflowContent | Should -Match 'RUNNER_ENVIRONMENT'
+        $script:workflowContent | Should -Match 'hosted_runner_required'
         $script:workflowContent | Should -Match 'Invoke-ReleaseControlPlane\.ps1'
         $script:workflowContent | Should -Match 'release-control-plane-report\.json'
         $script:workflowContent | Should -Match 'Release Control Plane Alert'

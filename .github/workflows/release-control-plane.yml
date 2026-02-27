@@ -50,6 +50,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enforce hosted-runner lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runnerEnvironment = [string]$env:RUNNER_ENVIRONMENT
+          if ($runnerEnvironment -ne 'github-hosted') {
+            throw "hosted_runner_required: release-control-plane must run on a github-hosted runner. actual='$runnerEnvironment'"
+          }
+
       - name: Execute autonomous release control plane
         shell: pwsh
         env:
