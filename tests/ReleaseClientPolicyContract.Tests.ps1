@@ -60,6 +60,10 @@ Describe 'Release client policy contract' {
         @($releaseClient.ops_control_plane_policy.slo_gate.required_workflows) | Should -Contain 'release-control-plane'
         $releaseClient.ops_control_plane_policy.incident_lifecycle.auto_close_on_recovery | Should -BeTrue
         $releaseClient.ops_control_plane_policy.incident_lifecycle.reopen_on_regression | Should -BeTrue
+        $releaseClient.ops_control_plane_policy.tag_strategy.mode | Should -Be 'dual-mode-semver-preferred'
+        $releaseClient.ops_control_plane_policy.tag_strategy.legacy_tag_family | Should -Be 'legacy_date_window'
+        ([DateTime]$releaseClient.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be '2026-07-01T00:00:00Z'
+        ([DateTime]$releaseClient.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be (([DateTime]$releaseClient.signature_policy.grace_end_utc).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops SLO Gate Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Ops Policy Drift Alert'
         @($releaseClient.ops_control_plane_policy.incident_lifecycle.titles) | Should -Contain 'Release Rollback Drill Alert'
@@ -93,6 +97,7 @@ Describe 'Release client policy contract' {
         $script:policyScriptContent | Should -Match 'runtime_images_ops_runtime_base_digest'
         $script:policyScriptContent | Should -Match 'ops_control_plane_policy_exists'
         $script:policyScriptContent | Should -Match 'ops_policy_slo_min_success_rate_pct'
+        $script:policyScriptContent | Should -Match 'ops_policy_tag_strategy_semver_only_enforce'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_enabled'
         $script:policyScriptContent | Should -Match 'ops_policy_self_healing_rollback_workflow'
         $script:policyScriptContent | Should -Match 'ops_policy_rollback_release_limit'

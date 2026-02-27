@@ -58,6 +58,87 @@ foreach ($requiredScript in @($opsSnapshotScript, $opsRemediateScript, $dispatch
     }
 }
 
+function Resolve-SemVerEnforcementPolicy {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [Parameter(Mandatory = $true)][DateTimeOffset]$FallbackEnforceUtc
+    )
+
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    $policy = [ordered]@{
+        semver_only_enforce_utc = $FallbackEnforceUtc
+        source = 'default'
+        warnings = @()
+    }
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        [void]$warnings.Add("workspace_governance_missing: path=$ManifestPath")
+        $policy.warnings = @($warnings)
+        return $policy
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json -Depth 100
+        $candidateValue = $manifest.installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc
+        if ($null -eq $candidateValue) {
+            [void]$warnings.Add("semver_only_enforce_utc_missing: path=$ManifestPath")
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        if ($candidateValue -is [DateTimeOffset]) {
+            $policy.semver_only_enforce_utc = ([DateTimeOffset]$candidateValue).ToUniversalTime()
+            $policy.source = 'workspace_governance'
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        if ($candidateValue -is [DateTime]) {
+            $candidateDate = [DateTime]$candidateValue
+            if ($candidateDate.Kind -eq [DateTimeKind]::Unspecified) {
+                $candidateDate = [DateTime]::SpecifyKind($candidateDate, [DateTimeKind]::Utc)
+            }
+            $policy.semver_only_enforce_utc = ([DateTimeOffset]$candidateDate).ToUniversalTime()
+            $policy.source = 'workspace_governance'
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        $candidate = [string]$candidateValue
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            [void]$warnings.Add("semver_only_enforce_utc_missing: path=$ManifestPath")
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        $parsed = [DateTimeOffset]::MinValue
+        $parseStyles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+        if (-not [DateTimeOffset]::TryParse($candidate, [Globalization.CultureInfo]::InvariantCulture, $parseStyles, [ref]$parsed)) {
+            [void]$warnings.Add("semver_only_enforce_utc_invalid: value=$candidate")
+            $policy.warnings = @($warnings)
+            return $policy
+        }
+
+        $policy.semver_only_enforce_utc = $parsed
+        $policy.source = 'workspace_governance'
+    } catch {
+        [void]$warnings.Add("semver_policy_load_failed: $([string]$_.Exception.Message)")
+    }
+
+    $policy.warnings = @($warnings)
+    return $policy
+}
+
+$defaultSemverOnlyEnforceUtc = [DateTimeOffset]::Parse('2026-07-01T00:00:00Z')
+$workspaceGovernancePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'workspace-governance.json'
+$semverPolicy = Resolve-SemVerEnforcementPolicy -ManifestPath $workspaceGovernancePath -FallbackEnforceUtc $defaultSemverOnlyEnforceUtc
+$script:semverOnlyEnforceUtc = [DateTimeOffset]$semverPolicy.semver_only_enforce_utc
+$script:semverPolicySource = [string]$semverPolicy.source
+$script:semverOnlyEnforced = ([DateTimeOffset]::UtcNow -ge $script:semverOnlyEnforceUtc)
+foreach ($warning in @($semverPolicy.warnings)) {
+    Write-Warning "[semver_policy_warning] $warning"
+}
+
 function Get-ModeConfig {
     param([Parameter(Mandatory = $true)][string]$ModeName)
 
@@ -136,7 +217,7 @@ function Compare-CoreVersion {
 }
 
 function Get-MaxCoreVersion {
-    param([Parameter(Mandatory = $true)][object[]]$Records)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @())
 
     $maxCore = $null
     foreach ($record in @($Records)) {
@@ -272,7 +353,7 @@ function Convert-ReleaseToRecord {
 
 function Get-LatestSemVerRecordByChannel {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @(),
         [Parameter(Mandatory = $true)][string]$Channel
     )
 
@@ -292,7 +373,7 @@ function Get-LatestSemVerRecordByChannel {
 
 function Get-MaxPrereleaseSequenceForCore {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @(),
         [Parameter(Mandatory = $true)]$Core,
         [Parameter(Mandatory = $true)][string]$Channel
     )
@@ -316,7 +397,7 @@ function Get-MaxPrereleaseSequenceForCore {
 }
 
 function Resolve-CanaryTargetSemVer {
-    param([Parameter(Mandatory = $true)][object[]]$Records)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @())
 
     $semverRecords = @($Records | Where-Object { [string]$_.tag_family -eq 'semver' })
     $stableRecords = @($semverRecords | Where-Object { [string]$_.channel -eq 'stable' })
@@ -346,12 +427,14 @@ function Resolve-CanaryTargetSemVer {
         core = $targetCore
         prerelease_sequence = $nextCanarySequence
         tag = "v$(Format-CoreVersion -Core $targetCore)-canary.$nextCanarySequence"
+        skipped = $false
+        reason_code = ''
     }
 }
 
 function Resolve-PromotedTargetSemVer {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @(),
         [Parameter(Mandatory = $true)][string]$TargetChannel,
         [Parameter(Mandatory = $true)]$SourceCore
     )
@@ -426,7 +509,10 @@ function Invoke-ReleaseMode {
 
     $migrationWarnings = @()
     if (@($legacyRecords).Count -gt 0) {
-        $migrationWarnings += "Legacy date-window release tags remain present in '$Repository'. Control-plane dispatch now targets SemVer channel tags."
+        if ($script:semverOnlyEnforced) {
+            throw "semver_only_enforcement_violation: semver_only_enforce_utc=$($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')) legacy_tag_count=$(@($legacyRecords).Count)"
+        }
+        $migrationWarnings += "Legacy date-window release tags remain present in '$Repository'. Control-plane dispatch now targets SemVer channel tags and legacy compatibility ends at $($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))."
     }
 
     $sourceRecord = $null
@@ -604,6 +690,9 @@ $report = [ordered]@{
     keep_latest_canary_n = $KeepLatestCanaryN
     tag_strategy = 'semver'
     migration_mode = 'dual_mode_publish_semver_control_plane'
+    semver_policy_source = $script:semverPolicySource
+    semver_only_enforce_utc = $script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    semver_only_enforced = [bool]$script:semverOnlyEnforced
     status = 'fail'
     reason_code = ''
     message = ''

@@ -194,7 +194,7 @@ function Compare-CoreVersion {
 }
 
 function Get-MaxCoreVersion {
-    param([Parameter(Mandatory = $true)][object[]]$Records)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @())
 
     $maxCore = $null
     foreach ($record in @($Records)) {
