@@ -99,7 +99,7 @@ function Convert-InputPairsToGhArgs {
         $arguments += @('-f', ("{0}={1}" -f $key, $value))
     }
 
-    return ,$arguments
+    return $arguments
 }
 
 function Test-WorkflowRunMatch {
