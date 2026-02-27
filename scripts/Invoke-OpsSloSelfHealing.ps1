@@ -173,15 +173,13 @@ try {
             $executionOk = $true
             try {
                 $dispatchPath = Join-Path $scratchRoot ("attempt-{0}-dispatch.json" -f $attempt)
-                & pwsh -NoProfile -File $dispatchWorkflowScript `
+                $dispatchInputs = @("sync_guard_max_age_hours=$SyncGuardMaxAgeHours")
+                & $dispatchWorkflowScript `
                     -Repository $SurfaceRepository `
                     -WorkflowFile $RemediationWorkflow `
                     -Branch $RemediationBranch `
-                    -Input @("sync_guard_max_age_hours=$SyncGuardMaxAgeHours") `
+                    -Inputs $dispatchInputs `
                     -OutputPath $dispatchPath | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                    throw "slo_remediation_dispatch_failed: exit_code=$LASTEXITCODE"
-                }
                 $dispatchReport = Get-Content -LiteralPath $dispatchPath -Raw | ConvertFrom-Json -ErrorAction Stop
                 $attemptRecord.dispatch = [ordered]@{
                     run_id = [string]$dispatchReport.run_id

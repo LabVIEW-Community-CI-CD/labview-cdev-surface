@@ -270,20 +270,18 @@ try {
                     $attemptRecord.target_tag = [string]$targetTagRecord.tag
 
                     $dispatchPath = Join-Path $scratchRoot ("attempt-{0}-dispatch.json" -f $attempt)
-                    & pwsh -NoProfile -File $dispatchWorkflowScript `
+                    $dispatchInputs = @(
+                        "release_tag=$([string]$targetTagRecord.tag)",
+                        'allow_existing_tag=false',
+                        'prerelease=true',
+                        'release_channel=canary'
+                    )
+                    & $dispatchWorkflowScript `
                         -Repository $Repository `
                         -WorkflowFile $ReleaseWorkflowFile `
                         -Branch $Branch `
-                        -Input @(
-                            "release_tag=$([string]$targetTagRecord.tag)",
-                            'allow_existing_tag=false',
-                            'prerelease=true',
-                            'release_channel=canary'
-                        ) `
+                        -Inputs $dispatchInputs `
                         -OutputPath $dispatchPath | Out-Null
-                    if ($LASTEXITCODE -ne 0) {
-                        throw "rollback_auto_release_dispatch_failed: exit_code=$LASTEXITCODE"
-                    }
                     $dispatchReport = Get-Content -LiteralPath $dispatchPath -Raw | ConvertFrom-Json -ErrorAction Stop
                     $attemptRecord.dispatch = [ordered]@{
                         run_id = [string]$dispatchReport.run_id

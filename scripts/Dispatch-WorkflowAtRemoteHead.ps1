@@ -11,7 +11,8 @@ param(
     [string]$Branch = 'main',
 
     [Parameter()]
-    [string[]]$Input = @(),
+    [Alias('Input')]
+    [string[]]$Inputs = @(),
 
     [Parameter()]
     [switch]$CancelStale,
@@ -53,7 +54,7 @@ if ($CancelStale) {
 
 $dispatchStartedUtc = (Get-Date).ToUniversalTime()
 $dispatchArgs = @('workflow', 'run', $WorkflowFile, '-R', $Repository, '--ref', $Branch)
-$dispatchArgs += @(Convert-InputPairsToGhArgs -Input $Input)
+$dispatchArgs += @(Convert-InputPairsToGhArgs -Inputs $Inputs)
 Invoke-Gh -Arguments $dispatchArgs
 
 Start-Sleep -Seconds $DispatchPauseSeconds
@@ -91,7 +92,7 @@ $report = [ordered]@{
     status = [string]$selectedRun.status
     conclusion = [string]$selectedRun.conclusion
     url = [string]$selectedRun.url
-    inputs = @($Input)
+    inputs = @($Inputs)
     stale_cancel_report = $cancelReport
 }
 

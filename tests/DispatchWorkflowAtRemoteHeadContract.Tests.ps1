@@ -18,6 +18,12 @@ Describe 'Dispatch workflow at remote head contract' {
         $script:content | Should -Match 'dispatch_head_sha_mismatch'
     }
 
+    It 'uses explicit inputs parameter with backward-compatible alias' {
+        $script:content | Should -Match "\[Alias\('Input'\)\]"
+        $script:content | Should -Match '\[string\[\]\]\$Inputs'
+        $script:content | Should -Match 'Convert-InputPairsToGhArgs -Inputs \$Inputs'
+    }
+
     It 'supports stale-run cancellation before dispatch' {
         $script:content | Should -Match 'Cancel-StaleWorkflowRuns\.ps1'
         $script:content | Should -Match '-TargetHeadSha \$expectedHeadSha'

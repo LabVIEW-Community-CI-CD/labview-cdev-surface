@@ -59,6 +59,8 @@ Describe 'Ops SLO gate workflow contract' {
         $script:selfHealingContent | Should -Match 'Dispatch-WorkflowAtRemoteHead\.ps1'
         $script:selfHealingContent | Should -Match 'Watch-WorkflowRun\.ps1'
         $script:selfHealingContent | Should -Match 'ops-autoremediate\.yml'
+        $script:selfHealingContent | Should -Match '\$dispatchInputs = @\('
+        $script:selfHealingContent | Should -Match '-Inputs \$dispatchInputs'
         $script:selfHealingContent | Should -Match 'sync_guard_max_age_hours'
         $script:selfHealingContent | Should -Match 'already_healthy'
         $script:selfHealingContent | Should -Match 'remediated'

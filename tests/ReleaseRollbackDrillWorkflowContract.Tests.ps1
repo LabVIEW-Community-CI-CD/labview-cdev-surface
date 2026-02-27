@@ -57,6 +57,8 @@ Describe 'Release rollback drill workflow contract' {
         $script:selfHealingContent | Should -Match 'Invoke-ReleaseRollbackDrill\.ps1'
         $script:selfHealingContent | Should -Match 'Dispatch-WorkflowAtRemoteHead\.ps1'
         $script:selfHealingContent | Should -Match 'Watch-WorkflowRun\.ps1'
+        $script:selfHealingContent | Should -Match '\$dispatchInputs = @\('
+        $script:selfHealingContent | Should -Match '-Inputs \$dispatchInputs'
         $script:selfHealingContent | Should -Match 'release-workspace-installer\.yml'
         $script:selfHealingContent | Should -Match 'release_channel=canary'
         $script:selfHealingContent | Should -Match 'allow_existing_tag=false'
