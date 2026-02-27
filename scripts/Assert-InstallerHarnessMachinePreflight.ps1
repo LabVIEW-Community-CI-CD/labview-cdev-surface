@@ -37,6 +37,10 @@ param(
 
     [Parameter()]
     [int]$NativeCommandTimeoutSeconds = 15
+
+    ,
+    [Parameter()]
+    [switch]$RequireNonSystemAccount
 )
 
 Set-StrictMode -Version Latest
@@ -403,6 +407,28 @@ Add-Check `
     -Name 'runner:headless_session' `
     -Passed $headlessPass `
     -Detail $headlessDetail `
+    -Severity 'error'
+
+$runnerIdentity = ''
+try {
+    $runnerIdentity = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+} catch {
+    $runnerIdentity = ''
+}
+if ([string]::IsNullOrWhiteSpace($runnerIdentity)) {
+    $runnerIdentity = 'unknown'
+}
+$runnerIsSystem = ($runnerIdentity -ieq 'NT AUTHORITY\SYSTEM')
+$serviceAccountPass = (-not $RequireNonSystemAccount) -or (-not $runnerIsSystem)
+$serviceAccountDetail = if ($serviceAccountPass) {
+    ("identity='{0}'; require_non_system={1}" -f $runnerIdentity, [bool]$RequireNonSystemAccount)
+} else {
+    ("runner_account_unsupported: identity='{0}' is not allowed for this lane; reconfigure runner service to a non-system account with LabVIEW licensing." -f $runnerIdentity)
+}
+Add-Check `
+    -Name 'runner:service_account' `
+    -Passed $serviceAccountPass `
+    -Detail $serviceAccountDetail `
     -Severity 'error'
 
 $nsisResolved = $NsisPath

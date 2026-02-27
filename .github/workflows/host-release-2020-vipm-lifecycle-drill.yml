@@ -63,6 +63,7 @@ jobs:
             -ExpectedLabviewYear '2020' `
             -DockerContext 'desktop-linux' `
             -DockerCheckSeverity warning `
+            -RequireNonSystemAccount `
             -OutputPath $reportPath
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path -LiteralPath $reportPath -PathType Leaf) {

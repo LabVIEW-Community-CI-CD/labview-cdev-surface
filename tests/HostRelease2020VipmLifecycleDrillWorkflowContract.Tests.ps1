@@ -33,6 +33,7 @@ Describe 'Host release 2020 VIPM lifecycle drill workflow contract' {
         $script:workflowContent | Should -Match 'runs-on:\s*\[self-hosted,\s*windows,\s*self-hosted-windows-lv,\s*installer-harness\]'
         $script:workflowContent | Should -Match 'Assert-InstallerHarnessMachinePreflight\.ps1'
         $script:workflowContent | Should -Match "ExpectedLabviewYear '2020'"
+        $script:workflowContent | Should -Match '-RequireNonSystemAccount'
         $script:workflowContent | Should -Match 'Invoke-HostRelease2020VipmLifecycleDrill\.ps1'
         $script:workflowContent | Should -Match "TargetLabviewYear', '2020'"
         $script:workflowContent | Should -Match 'host-release-2020-vipm-lifecycle-drill-report-\$\{\{\s*github\.run_id\s*\}\}'
