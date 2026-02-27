@@ -38,6 +38,7 @@ Describe 'Ops SLO gate workflow contract' {
 
     It 'evaluates workflow and sync-guard SLO conditions with deterministic reason codes' {
         $script:runtimeContent | Should -Match 'Write-OpsSloReport\.ps1'
+        $script:runtimeContent | Should -Match 'AllowEmptyCollection'
         $script:runtimeContent | Should -Match 'ops-monitoring'
         $script:runtimeContent | Should -Match 'ops-autoremediate'
         $script:runtimeContent | Should -Match 'release-control-plane'

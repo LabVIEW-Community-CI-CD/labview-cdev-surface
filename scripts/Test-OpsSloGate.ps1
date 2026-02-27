@@ -40,7 +40,7 @@ $ErrorActionPreference = 'Stop'
 
 function Add-ReasonCode {
     param(
-        [Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$Target,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$Target,
         [Parameter(Mandatory = $true)][string]$ReasonCode
     )
 

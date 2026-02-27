@@ -39,6 +39,7 @@ Describe 'Ops monitoring workflow contract' {
     It 'checks runner and sync-guard health with deterministic reason codes' {
         $script:scriptContent | Should -Match 'repos/\$SurfaceRepository/actions/runners\?per_page=100'
         $script:scriptContent | Should -Match 'Get-GhWorkflowRunsPortable'
+        $script:scriptContent | Should -Match 'AllowEmptyCollection'
         $script:scriptContent | Should -Match 'runner_unavailable'
         $script:scriptContent | Should -Match 'runner_visibility_unavailable'
         $script:scriptContent | Should -Match 'sync_guard_failed'

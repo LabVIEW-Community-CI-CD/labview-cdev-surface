@@ -34,6 +34,7 @@ Describe 'Ops policy drift workflow contract' {
     }
 
     It 'verifies release-client policy equivalence and required ops metadata' {
+        $script:runtimeContent | Should -Match 'AllowEmptyCollection'
         $script:runtimeContent | Should -Match 'release_client_equivalent'
         $script:runtimeContent | Should -Match 'release_client_drift'
         $script:runtimeContent | Should -Match 'runtime_images_missing'
