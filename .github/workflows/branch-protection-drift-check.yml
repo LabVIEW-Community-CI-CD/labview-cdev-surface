@@ -24,7 +24,7 @@ jobs:
       - name: Verify release branch-protection policy
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'branch-protection-drift-report.json'
@@ -44,7 +44,7 @@ jobs:
         if: failure()
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -78,7 +78,7 @@ jobs:
         if: success()
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_BOT_TOKEN != '' && secrets.WORKFLOW_BOT_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

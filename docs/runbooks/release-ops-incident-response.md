@@ -319,6 +319,10 @@ Continuous drift monitor:
 gh workflow run branch-protection-drift-check.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork
 ```
 
+Token policy for branch-protection workflows:
+- prefer repository secret `WORKFLOW_BOT_TOKEN`
+- deterministic fallback to `github.token` when the secret is unavailable
+
 Local policy verify:
 
 ```powershell

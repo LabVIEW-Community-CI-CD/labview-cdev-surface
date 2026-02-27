@@ -35,6 +35,7 @@ Describe 'Release guardrails auto-remediation workflow contract' {
         $script:workflowContent | Should -Match 'release-guardrails-autoremediate-report\.json'
         $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:workflowContent | Should -Match 'Release Guardrails Auto-Remediation Alert'
+        $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN'
         $script:workflowContent | Should -Match '-Mode Fail'
         $script:workflowContent | Should -Match '-Mode Recover'
     }
