@@ -62,7 +62,7 @@ jobs:
           try {
             & pwsh -NoProfile -File ./scripts/Invoke-OpsMonitoringSnapshot.ps1 `
               -SurfaceRepository '${{ github.repository }}' `
-              -RequiredRunnerLabels @('self-hosted', 'windows', 'self-hosted-windows-lv') `
+              -RequiredRunnerLabelsCsv 'self-hosted,windows,self-hosted-windows-lv' `
               -OutputPath $reportPath
             if ($LASTEXITCODE -ne 0) {
               throw 'Ops monitoring snapshot returned non-zero exit.'

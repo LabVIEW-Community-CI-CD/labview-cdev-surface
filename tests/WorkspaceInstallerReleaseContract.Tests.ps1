@@ -49,6 +49,7 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'name:\s*Release Ops Health Preflight'
         $script:coreWorkflowContent | Should -Match 'Enforce ops health preflight'
         $script:coreWorkflowContent | Should -Match 'Invoke-OpsMonitoringSnapshot\.ps1'
+        $script:coreWorkflowContent | Should -Match 'RequiredRunnerLabelsCsv ''self-hosted,windows,self-hosted-windows-lv'''
         $script:coreWorkflowContent | Should -Match 'reason_code=ops_unhealthy'
         $script:coreWorkflowContent | Should -Match '\[ops_unhealthy\]'
         $script:coreWorkflowContent | Should -Match 'release-ops-health-preflight-\$\{\{\s*github\.run_id\s*\}\}'
