@@ -46,6 +46,25 @@ function Get-Sha256HexFromText {
     }
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [Parameter()][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter()][object]$Default = $null
+    )
+
+    if ($null -eq $Object) {
+        return $Default
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $Default
+    }
+
+    return $property.Value
+}
+
 if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     throw "control_plane_report_missing: $ReportPath"
 }
@@ -106,6 +125,9 @@ $executionSummaries = @(
         }
 )
 
+$stablePromotionWindow = Get-OptionalPropertyValue -Object $report -Name 'stable_promotion_window' -Default $null
+$stableWindowDecision = Get-OptionalPropertyValue -Object $stablePromotionWindow -Name 'decision' -Default $null
+
 $decisionTrail = [ordered]@{
     schema_version = '1.0'
     generated_at_utc = Get-UtcNowIso
@@ -132,10 +154,10 @@ $decisionTrail = [ordered]@{
         state_machine = $stateMachine
         rollback_orchestration = $rollbackOrchestration
         stable_window_decision = [ordered]@{
-            status = [string]$report.stable_promotion_window.decision.status
-            reason_code = [string]$report.stable_promotion_window.decision.reason_code
-            can_promote = [bool]$report.stable_promotion_window.decision.can_promote
-            current_utc_weekday = [string]$report.stable_promotion_window.decision.current_utc_weekday
+            status = [string](Get-OptionalPropertyValue -Object $stableWindowDecision -Name 'status' -Default '')
+            reason_code = [string](Get-OptionalPropertyValue -Object $stableWindowDecision -Name 'reason_code' -Default '')
+            can_promote = [bool](Get-OptionalPropertyValue -Object $stableWindowDecision -Name 'can_promote' -Default $false)
+            current_utc_weekday = [string](Get-OptionalPropertyValue -Object $stableWindowDecision -Name 'current_utc_weekday' -Default '')
         }
         executions = @($executionSummaries)
     }
