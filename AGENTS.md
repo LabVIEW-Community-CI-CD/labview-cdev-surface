@@ -254,6 +254,8 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `promotion_source_not_at_head`
   - `promotion_lineage_invalid`
   - `stable_window_override_invalid`
+  - `release_dispatch_report_invalid`
+  - `release_dispatch_watch_timeout`
   - `release_dispatch_watch_failed`
   - `release_verification_failed`
   - `canary_hygiene_failed`
@@ -343,6 +345,9 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Guardrails report must include `remediation_hints` when status is fail and auto-remediation cannot fully recover.
 - Race-hardening drill reason codes must remain explicit:
   - `drill_passed`
+  - `contender_dispatch_report_invalid`
+  - `control_plane_dispatch_report_invalid`
+  - `control_plane_watch_timeout`
   - `control_plane_collision_not_observed`
   - `control_plane_report_download_failed`
   - `control_plane_report_missing`

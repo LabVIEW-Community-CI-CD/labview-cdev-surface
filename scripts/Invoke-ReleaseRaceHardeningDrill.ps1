@@ -85,8 +85,11 @@ function Resolve-RaceDrillFailureReasonCode {
 
     $message = [string]$MessageText
     if ($message -match '^required_script_missing') { return 'required_script_missing' }
+    if ($message -match '^contender_dispatch_report_invalid') { return 'contender_dispatch_report_invalid' }
+    if ($message -match '^control_plane_dispatch_report_invalid') { return 'control_plane_dispatch_report_invalid' }
     if ($message -match '^contender_release_dispatch_failed') { return 'contender_release_dispatch_failed' }
     if ($message -match '^control_plane_dispatch_failed') { return 'control_plane_dispatch_failed' }
+    if ($message -match '^control_plane_watch_timeout') { return 'control_plane_watch_timeout' }
     if ($message -match '^control_plane_run_failed') { return 'control_plane_run_failed' }
     if ($message -match '^control_plane_report_download_failed') { return 'control_plane_report_download_failed' }
     if ($message -match '^control_plane_report_missing') { return 'control_plane_report_missing' }
@@ -367,6 +370,8 @@ $report = [ordered]@{
         collision_retries = 0
         predicted_target_tag = ''
         final_target_tag = ''
+        contender_run_id = ''
+        control_plane_run_id = ''
         dispatch_status = ''
         dispatch_reason_code = ''
         attempt_history_statuses = @()
@@ -402,8 +407,12 @@ try {
         throw "contender_release_dispatch_failed: workflow=$ReleaseWorkflowFile exit_code=$LASTEXITCODE"
     }
     $contenderDispatch = Get-Content -LiteralPath $contenderDispatchPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $contenderRunId = [string]$contenderDispatch.run_id
+    if ([string]::IsNullOrWhiteSpace($contenderRunId)) {
+        throw "contender_dispatch_report_invalid: workflow=$ReleaseWorkflowFile field=run_id"
+    }
     $report.dispatches.contender_release = [ordered]@{
-        run_id = [string]$contenderDispatch.run_id
+        run_id = $contenderRunId
         head_sha = [string]$contenderDispatch.head_sha
         status = [string]$contenderDispatch.status
         url = [string]$contenderDispatch.url
@@ -428,8 +437,12 @@ try {
         throw "control_plane_dispatch_failed: workflow=$ControlPlaneWorkflowFile exit_code=$LASTEXITCODE"
     }
     $controlPlaneDispatch = Get-Content -LiteralPath $controlPlaneDispatchPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $controlPlaneRunId = [string]$controlPlaneDispatch.run_id
+    if ([string]::IsNullOrWhiteSpace($controlPlaneRunId)) {
+        throw "control_plane_dispatch_report_invalid: workflow=$ControlPlaneWorkflowFile field=run_id"
+    }
     $report.dispatches.control_plane = [ordered]@{
-        run_id = [string]$controlPlaneDispatch.run_id
+        run_id = $controlPlaneRunId
         head_sha = [string]$controlPlaneDispatch.head_sha
         status = [string]$controlPlaneDispatch.status
         url = [string]$controlPlaneDispatch.url
@@ -449,7 +462,7 @@ try {
     $contenderWatchPath = Join-Path $scratchRoot 'contender-release-watch.json'
     $contenderWatch = Invoke-WorkflowWatchCapture `
         -TargetRepository $Repository `
-        -RunId ([string]$contenderDispatch.run_id) `
+        -RunId $contenderRunId `
         -TimeoutMinutes $WatchTimeoutMinutes `
         -ReportPath $contenderWatchPath
     $report.watches.contender_release = [ordered]@{
@@ -463,13 +476,13 @@ try {
         runtime_error = [string]$contenderWatch.runtime_error
     }
     if (-not [bool]$contenderWatch.successful) {
-        Add-UniqueMessage -Target $warnings -Message "contender_watch_non_success: run_id=$([string]$contenderWatch.report.run_id) conclusion=$([string]$contenderWatch.report.conclusion)"
+        Add-UniqueMessage -Target $warnings -Message "contender_watch_non_success: run_id=$([string]$contenderWatch.report.run_id) conclusion=$([string]$contenderWatch.report.conclusion) classified_reason=$([string]$contenderWatch.report.classified_reason)"
     }
 
     $controlPlaneWatchPath = Join-Path $scratchRoot 'control-plane-watch.json'
     $controlPlaneWatch = Invoke-WorkflowWatchCapture `
         -TargetRepository $Repository `
-        -RunId ([string]$controlPlaneDispatch.run_id) `
+        -RunId $controlPlaneRunId `
         -TimeoutMinutes $WatchTimeoutMinutes `
         -ReportPath $controlPlaneWatchPath
     $report.watches.control_plane = [ordered]@{
@@ -483,11 +496,14 @@ try {
         runtime_error = [string]$controlPlaneWatch.runtime_error
     }
     if (-not [bool]$controlPlaneWatch.successful) {
+        $controlPlaneClassifiedReason = [string]$controlPlaneWatch.report.classified_reason
+        if ([string]::Equals($controlPlaneClassifiedReason, 'timeout', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "control_plane_watch_timeout: run_id=$controlPlaneRunId timeout_minutes=$WatchTimeoutMinutes"
+        }
         $controlPlaneConclusion = [string]$controlPlaneWatch.report.conclusion
-        throw "control_plane_run_failed: run_id=$([string]$controlPlaneDispatch.run_id) conclusion=$controlPlaneConclusion"
+        throw "control_plane_run_failed: run_id=$controlPlaneRunId conclusion=$controlPlaneConclusion classified_reason=$controlPlaneClassifiedReason"
     }
 
-    $controlPlaneRunId = [string]$controlPlaneDispatch.run_id
     $controlPlaneArtifactName = "release-control-plane-report-$controlPlaneRunId"
     $report.artifacts.control_plane_report_artifact = $controlPlaneArtifactName
     $artifactRoot = Join-Path $scratchRoot 'control-plane-report-artifact'
@@ -589,6 +605,8 @@ try {
         collision_retries = $collisionRetries
         predicted_target_tag = [string]$targetTagRecord.tag
         final_target_tag = $targetTag
+        contender_run_id = $contenderRunId
+        control_plane_run_id = $controlPlaneRunId
         dispatch_status = $dispatchStatus
         dispatch_reason_code = $dispatchReasonCode
         attempt_history_statuses = @($attemptHistoryStatuses)

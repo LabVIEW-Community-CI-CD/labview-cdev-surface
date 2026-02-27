@@ -340,6 +340,8 @@ function Resolve-ControlPlaneFailureReasonCode {
     if ($message -match '^semver_prerelease_sequence_exhausted') { return 'semver_prerelease_sequence_exhausted' }
     if ($message -match '^release_tag_collision_retry_exhausted') { return 'release_tag_collision_retry_exhausted' }
     if ($message -match '^release_dispatch_attempts_exhausted') { return 'release_dispatch_attempts_exhausted' }
+    if ($message -match '^release_dispatch_report_invalid') { return 'release_dispatch_report_invalid' }
+    if ($message -match '^release_watch_timeout') { return 'release_dispatch_watch_timeout' }
     if ($message -match '^release_watch_failed|^release_watch_not_success') { return 'release_dispatch_watch_failed' }
     if ($message -match '^release_verification_') { return 'release_verification_failed' }
     if ($message -match '^canary_hygiene_failed') { return 'canary_hygiene_failed' }
@@ -1427,28 +1429,54 @@ function Invoke-ReleaseMode {
                 -Inputs $dispatchInputs `
                 -OutputPath $dispatchReportPath | Out-Null
             $dispatchReport = Get-Content -LiteralPath $dispatchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $dispatchRunId = [string]$dispatchReport.run_id
+            if ([string]::IsNullOrWhiteSpace($dispatchRunId)) {
+                throw "release_dispatch_report_invalid: mode=$ModeName attempt=$dispatchAttempt field=run_id"
+            }
 
             $watchReportPath = Join-Path $ScratchRoot "$ModeName-watch-$dispatchAttempt.json"
             & pwsh -NoProfile -File $watchWorkflowScript `
                 -Repository $Repository `
-                -RunId ([string]$dispatchReport.run_id) `
+                -RunId $dispatchRunId `
                 -TimeoutMinutes $WatchTimeoutMinutes `
                 -OutputPath $watchReportPath | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "release_watch_failed: mode=$ModeName run_id=$([string]$dispatchReport.run_id) exit_code=$LASTEXITCODE"
+            $watchExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+            if ($watchExitCode -ne 0) {
+                $watchFailureStatus = ''
+                $watchFailureConclusion = ''
+                $watchFailureClassifiedReason = ''
+                if (Test-Path -LiteralPath $watchReportPath -PathType Leaf) {
+                    try {
+                        $watchFailureReport = Get-Content -LiteralPath $watchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+                        $watchFailureStatus = [string]$watchFailureReport.status
+                        $watchFailureConclusion = [string]$watchFailureReport.conclusion
+                        $watchFailureClassifiedReason = [string]$watchFailureReport.classified_reason
+                    } catch {
+                        $watchFailureClassifiedReason = 'watch_report_parse_failed'
+                    }
+                } else {
+                    $watchFailureClassifiedReason = 'watch_report_missing'
+                }
+
+                if ([string]::Equals($watchFailureClassifiedReason, 'timeout', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw "release_watch_timeout: mode=$ModeName run_id=$dispatchRunId timeout_minutes=$WatchTimeoutMinutes status=$watchFailureStatus"
+                }
+
+                throw "release_watch_failed: mode=$ModeName run_id=$dispatchRunId exit_code=$watchExitCode classified_reason=$watchFailureClassifiedReason conclusion=$watchFailureConclusion status=$watchFailureStatus"
             }
 
             $watchReport = Get-Content -LiteralPath $watchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
             $watchConclusion = [string]$watchReport.conclusion
+            $watchClassifiedReason = [string]$watchReport.classified_reason
             if ($watchConclusion -ne 'success') {
-                throw "release_watch_not_success: mode=$ModeName run_id=$([string]$dispatchReport.run_id) conclusion=$watchConclusion"
+                throw "release_watch_not_success: mode=$ModeName run_id=$dispatchRunId conclusion=$watchConclusion classified_reason=$watchClassifiedReason"
             }
 
             $dispatchRecord = [ordered]@{
                 status = 'success'
                 workflow = $ReleaseWorkflowFile
                 branch = $Branch
-                run_id = [string]$dispatchReport.run_id
+                run_id = $dispatchRunId
                 url = [string]$watchReport.url
                 conclusion = [string]$watchReport.conclusion
                 attempts = $dispatchAttempt
@@ -1458,7 +1486,7 @@ function Invoke-ReleaseMode {
                 attempt = $dispatchAttempt
                 tag = $targetTag
                 status = 'success'
-                run_id = [string]$dispatchReport.run_id
+                run_id = $dispatchRunId
                 run_url = [string]$watchReport.url
             })
             break

@@ -29,6 +29,8 @@ Reason code mapping:
 - `sync_guard_incomplete`: only in-progress/queued runs exist; no completed run yet.
 - `promotion_lineage_invalid`: promotion source/target channel, SemVer core, or commit-SHA lineage check failed.
 - `stable_window_override_invalid`: requested stable override violated stable window policy (override disabled, missing reason, reason too short, or reason format mismatch).
+- `release_dispatch_report_invalid`: release dispatch metadata was incomplete (for example, missing dispatched `run_id`).
+- `release_dispatch_watch_timeout`: dispatched release run did not complete before the configured watch timeout.
 - `release_dispatch_watch_failed`: release workflow dispatch completed but run conclusion was not `success`.
 - `release_verification_failed`: post-dispatch release verification failed (missing assets or invalid `release-manifest.json` metadata).
 - `canary_hygiene_failed`: SemVer canary retention cleanup failed after publish.

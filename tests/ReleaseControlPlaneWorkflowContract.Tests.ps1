@@ -27,6 +27,7 @@ Describe 'Release control plane workflow contract' {
         $script:workflowContent | Should -Match 'FullCycle'
         $script:workflowContent | Should -Match 'auto_remediate'
         $script:workflowContent | Should -Match 'keep_latest_canary_n'
+        $script:workflowContent | Should -Match 'watch_timeout_minutes'
         $script:workflowContent | Should -Match 'force_stable_promotion_outside_window'
         $script:workflowContent | Should -Match 'force_stable_promotion_reason'
         $script:workflowContent | Should -Match 'dry_run'
@@ -73,6 +74,9 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'semver_prerelease_sequence_exhausted'
         $script:runtimeContent | Should -Match 'release_tag_collision_retry_exhausted'
         $script:runtimeContent | Should -Match 'release_dispatch_attempts_exhausted'
+        $script:runtimeContent | Should -Match 'release_dispatch_report_invalid'
+        $script:runtimeContent | Should -Match 'release_watch_timeout'
+        $script:runtimeContent | Should -Match 'release_dispatch_watch_timeout'
         $script:runtimeContent | Should -Match '\[release_tag_collision\]'
         $script:runtimeContent | Should -Match 'release_watch_not_success'
         $script:runtimeContent | Should -Match 'release_verification_asset_missing'
@@ -93,6 +97,7 @@ Describe 'Release control plane workflow contract' {
         $script:runtimeContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
         $script:runtimeContent | Should -Match '\$dispatchInputs = @\('
         $script:runtimeContent | Should -Match '-Inputs \$dispatchInputs'
+        $script:workflowContent | Should -Match '-WatchTimeoutMinutes \$watchTimeoutMinutes'
     }
 
     It 'decouples control-plane runner health gate to release-runner labels' {
