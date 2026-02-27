@@ -32,8 +32,10 @@ Describe 'Workspace surface contract' {
         $script:testReleaseClientContractsScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseClientContracts.ps1'
         $script:opsIncidentLifecycleScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-OpsIncidentLifecycle.ps1'
         $script:opsSloGateScriptPath = Join-Path $script:repoRoot 'scripts/Test-OpsSloGate.ps1'
+        $script:opsSloSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-OpsSloSelfHealing.ps1'
         $script:opsPolicyDriftScriptPath = Join-Path $script:repoRoot 'scripts/Test-ReleaseControlPlanePolicyDrift.ps1'
         $script:rollbackDrillScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-ReleaseRollbackDrill.ps1'
+        $script:rollbackSelfHealingScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-RollbackDrillSelfHealing.ps1'
         $script:dockerLinuxIterationScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-DockerDesktopLinuxIteration.ps1'
         $script:windowsContainerNsisSelfTestScriptPath = Join-Path $script:repoRoot 'scripts/Invoke-WindowsContainerNsisSelfTest.ps1'
         $script:windowsContainerNsisDockerfilePath = Join-Path $script:repoRoot 'tools/nsis-selftest-windows/Dockerfile'
@@ -97,8 +99,10 @@ Describe 'Workspace surface contract' {
             $script:testReleaseClientContractsScriptPath,
             $script:opsIncidentLifecycleScriptPath,
             $script:opsSloGateScriptPath,
+            $script:opsSloSelfHealingScriptPath,
             $script:opsPolicyDriftScriptPath,
             $script:rollbackDrillScriptPath,
+            $script:rollbackSelfHealingScriptPath,
             $script:dockerLinuxIterationScriptPath,
             $script:windowsContainerNsisSelfTestScriptPath,
             $script:windowsContainerNsisDockerfilePath,
@@ -278,6 +282,17 @@ Describe 'Workspace surface contract' {
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops SLO Gate Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Ops Policy Drift Alert') | Should -BeTrue
         (@($script:manifest.installer_contract.release_client.ops_control_plane_policy.incident_lifecycle.titles) -contains 'Release Rollback Drill Alert') | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.enabled | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.max_attempts | Should -Be 1
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.remediation_workflow | Should -Be 'ops-autoremediate.yml'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.watch_timeout_minutes | Should -Be 45
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.slo_gate.verify_after_remediation | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.release_workflow | Should -Be 'release-workspace-installer.yml'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.release_branch | Should -Be 'main'
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.watch_timeout_minutes | Should -Be 120
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.verify_after_remediation | Should -BeTrue
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.canary_sequence_min | Should -Be 1
+        $script:manifest.installer_contract.release_client.ops_control_plane_policy.self_healing.rollback_drill.canary_sequence_max | Should -Be 49
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.channel | Should -Be 'canary'
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.required_history_count | Should -Be 2
         $script:manifest.installer_contract.release_client.ops_control_plane_policy.rollback_drill.release_limit | Should -Be 100
@@ -366,10 +381,13 @@ Describe 'Workspace surface contract' {
         $script:agentsContent | Should -Match 'ops-slo-gate\.yml'
         $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
+        $script:agentsContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
+        $script:agentsContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:agentsContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:agentsContent | Should -Match 'workflow_failure_detected'
         $script:agentsContent | Should -Match 'release_client_drift'
         $script:agentsContent | Should -Match 'rollback_candidate_missing'
+        $script:agentsContent | Should -Match 'remediation_verify_failed'
         $script:agentsContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $script:agentsContent | Should -Match '8fef6f9192d81a14add28636c1100c109ae5e977'
         $script:agentsContent | Should -Match '0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'
@@ -400,10 +418,13 @@ Describe 'Workspace surface contract' {
         $script:readmeContent | Should -Match 'ops-slo-gate\.yml'
         $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
+        $script:readmeContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
+        $script:readmeContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
         $script:readmeContent | Should -Match 'workflow_failure_detected'
         $script:readmeContent | Should -Match 'release_client_drift'
         $script:readmeContent | Should -Match 'rollback_candidate_missing'
+        $script:readmeContent | Should -Match 'remediation_verify_failed'
         $script:readmeContent | Should -Match 'ghcr\.io/labview-community-ci-cd/labview-cdev-cli-runtime'
         $script:readmeContent | Should -Match '8fef6f9192d81a14add28636c1100c109ae5e977'
         $script:readmeContent | Should -Match '0506e8789680ce1c941ca9f005b75d804150aed6ad36a5ac59458b802d358423'

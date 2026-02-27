@@ -91,6 +91,15 @@ try {
                 }) | Out-Null
             if (-not $opsPolicyPresent) {
                 Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_policy_missing'
+            } else {
+                $selfHealingPresent = ($null -ne $releaseClient.ops_control_plane_policy.self_healing)
+                $checks.Add([ordered]@{
+                        check = 'release_client_ops_control_plane_policy_self_healing_present'
+                        passed = $selfHealingPresent
+                    }) | Out-Null
+                if (-not $selfHealingPresent) {
+                    Add-ReasonCode -Target $reasonCodes -ReasonCode 'ops_control_plane_self_healing_missing'
+                }
             }
         }
     }

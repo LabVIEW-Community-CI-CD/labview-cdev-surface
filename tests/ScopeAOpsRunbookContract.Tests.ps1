@@ -30,6 +30,7 @@ Describe 'Scope A ops runbook contract' {
         $script:runbookContent | Should -Match 'ops-slo-gate\.yml'
         $script:runbookContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:runbookContent | Should -Match 'release-rollback-drill\.yml'
+        $script:runbookContent | Should -Match 'auto_self_heal=false'
         $script:runbookContent | Should -Match '20260226'
     }
 
@@ -39,6 +40,8 @@ Describe 'Scope A ops runbook contract' {
         $script:readmeContent | Should -Match 'ops-slo-gate\.yml'
         $script:readmeContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:readmeContent | Should -Match 'release-rollback-drill\.yml'
+        $script:readmeContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
+        $script:readmeContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
         $script:readmeContent | Should -Match 'release-ops-incident-response\.md'
 
         $script:agentsContent | Should -Match 'Ops Monitoring Policy'
@@ -48,5 +51,7 @@ Describe 'Scope A ops runbook contract' {
         $script:agentsContent | Should -Match 'ops-slo-gate\.yml'
         $script:agentsContent | Should -Match 'ops-policy-drift-check\.yml'
         $script:agentsContent | Should -Match 'release-rollback-drill\.yml'
+        $script:agentsContent | Should -Match 'Invoke-OpsSloSelfHealing\.ps1'
+        $script:agentsContent | Should -Match 'Invoke-RollbackDrillSelfHealing\.ps1'
     }
 }

@@ -276,6 +276,23 @@
             "Release Rollback Drill Alert"
           ]
         },
+        "self_healing": {
+          "enabled": true,
+          "max_attempts": 1,
+          "slo_gate": {
+            "remediation_workflow": "ops-autoremediate.yml",
+            "watch_timeout_minutes": 45,
+            "verify_after_remediation": true
+          },
+          "rollback_drill": {
+            "release_workflow": "release-workspace-installer.yml",
+            "release_branch": "main",
+            "watch_timeout_minutes": 120,
+            "verify_after_remediation": true,
+            "canary_sequence_min": 1,
+            "canary_sequence_max": 49
+          }
+        },
         "rollback_drill": {
           "channel": "canary",
           "required_history_count": 2,
