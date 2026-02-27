@@ -26,7 +26,8 @@ Describe 'Integration gate workflow contract' {
             'CI Pipeline',
             'Workspace Installer Contract',
             'Reproducibility Contract',
-            'Provenance Contract'
+            'Provenance Contract',
+            'Release Race Hardening Drill'
         )) {
             $script:workflowContent | Should -Match ([regex]::Escape($context))
         }

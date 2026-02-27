@@ -302,7 +302,12 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
   - `rollback_assets_missing`
   - `rollback_drill_runtime_error`
 - `.github/workflows/release-race-hardening-drill.yml` must run `scripts/Invoke-ReleaseRaceHardeningDrill.ps1`.
+- Race-hardening drill workflow must run on weekly schedule and on `integration/*` push events so release PR lanes receive deterministic collision-proof status.
 - Race-hardening drill must dispatch both `release-workspace-installer.yml` (contender) and `release-control-plane.yml` (`mode=CanaryCycle`, `dry_run=false`) and validate collision handling using control-plane artifact evidence.
+- Race-hardening drill workflow must publish both:
+  - `release-race-hardening-drill-report.json`
+  - `release-race-hardening-weekly-summary.json`
+- Race-hardening drill workflow must manage incident lifecycle through `scripts/Invoke-OpsIncidentLifecycle.ps1` with title `Release Race Hardening Drill Alert`.
 - Race-hardening drill reason codes must remain explicit:
   - `drill_passed`
   - `control_plane_collision_not_observed`
@@ -314,7 +319,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 
 ## Integration Gate Policy
 - `.github/workflows/integration-gate.yml` is the integration-branch aggregator workflow.
-- It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`.
+- It must gate on required contexts: `CI Pipeline`, `Workspace Installer Contract`, `Reproducibility Contract`, `Provenance Contract`, `Release Race Hardening Drill`.
 - Keep this as a distinct check context (`Integration Gate`) for branch-protection phase-in after promotion criteria are met.
 
 ## Installer Harness Execution Contract

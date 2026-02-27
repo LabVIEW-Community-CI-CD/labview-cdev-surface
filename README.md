@@ -130,6 +130,7 @@ It polls commit statuses and only passes when these contexts are successful:
 - `Workspace Installer Contract`
 - `Reproducibility Contract`
 - `Provenance Contract`
+- `Release Race Hardening Drill`
 
 ## Installer harness (self-hosted)
 
@@ -466,7 +467,12 @@ Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` still em
 - `rollback_candidate_missing`
 - `rollback_assets_missing`
 
-`release-race-hardening-drill.yml` is scheduled weekly and supports manual dispatch. It runs `scripts/Invoke-ReleaseRaceHardeningDrill.ps1` to prove release-tag collision handling under parallel dispatch pressure:
+`release-race-hardening-drill.yml` runs on:
+- weekly schedule
+- `push` to `integration/*` (release PR enforcement lane)
+- manual dispatch
+
+It runs `scripts/Invoke-ReleaseRaceHardeningDrill.ps1` to prove release-tag collision handling under parallel dispatch pressure:
 - dispatches a contender `release-workspace-installer.yml` run at predicted next SemVer canary tag
 - dispatches `release-control-plane.yml` in `CanaryCycle` mode immediately after
 - watches both runs and downloads `release-control-plane-report-<run_id>` artifact
@@ -477,6 +483,11 @@ Underlying rollback evaluator `scripts/Invoke-ReleaseRollbackDrill.ps1` still em
   - `control_plane_report_download_failed`
   - `control_plane_report_missing`
   - `control_plane_run_failed`
+
+Operational behavior:
+- uploads `release-race-hardening-drill-report.json`
+- emits weekly-review artifact `release-race-hardening-weekly-summary.json`
+- uses incident lifecycle automation (`Invoke-OpsIncidentLifecycle.ps1`) with issue title `Release Race Hardening Drill Alert` on failure/recovery
 
 ## Local Docker package for control-plane exercise
 

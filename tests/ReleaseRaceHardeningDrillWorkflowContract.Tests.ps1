@@ -21,19 +21,23 @@ Describe 'Release race-hardening drill workflow contract' {
 
     It 'is scheduled and dispatchable with bounded drill controls' {
         $script:workflowContent | Should -Match 'schedule:'
+        $script:workflowContent | Should -Match 'push:'
+        $script:workflowContent | Should -Match 'integration/\*\*'
         $script:workflowContent | Should -Match 'workflow_dispatch:'
         $script:workflowContent | Should -Match 'auto_remediate'
         $script:workflowContent | Should -Match 'keep_latest_canary_n'
         $script:workflowContent | Should -Match 'watch_timeout_minutes'
     }
 
-    It 'runs on hosted runner, executes drill runtime, and uploads report artifact' {
+    It 'runs on hosted runner, executes drill runtime, and uploads drill + weekly summary artifacts' {
         $script:workflowContent | Should -Match 'runs-on:\s*ubuntu-latest'
         $script:workflowContent | Should -Match 'Enforce hosted-runner lock'
         $script:workflowContent | Should -Match 'RUNNER_ENVIRONMENT'
         $script:workflowContent | Should -Match 'hosted_runner_required'
         $script:workflowContent | Should -Match 'Invoke-ReleaseRaceHardeningDrill\.ps1'
         $script:workflowContent | Should -Match 'release-race-hardening-drill-report\.json'
+        $script:workflowContent | Should -Match 'release-race-hardening-weekly-summary\.json'
+        $script:workflowContent | Should -Match 'Upload release race-hardening weekly summary'
         $script:workflowContent | Should -Match 'actions:\s*write'
     }
 
@@ -57,5 +61,13 @@ Describe 'Release race-hardening drill workflow contract' {
         $script:runtimeContent | Should -Match "tag_family = 'semver'"
         $script:runtimeContent | Should -Match '-canary\.'
         $script:runtimeContent | Should -Match 'semver_prerelease_sequence_exhausted'
+    }
+
+    It 'manages incident lifecycle for drill failures and recoveries' {
+        $script:workflowContent | Should -Match 'Release Race Hardening Drill Alert'
+        $script:workflowContent | Should -Match 'Invoke-OpsIncidentLifecycle\.ps1'
+        $script:workflowContent | Should -Match '-Mode Fail'
+        $script:workflowContent | Should -Match '-Mode Recover'
+        $script:workflowContent | Should -Match 'issues:\s*write'
     }
 }

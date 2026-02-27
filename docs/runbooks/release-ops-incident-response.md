@@ -268,11 +268,28 @@ Deterministic drill failure reason codes:
 - `control_plane_report_download_failed`
 - `control_plane_report_missing`
 - `control_plane_run_failed`
+- incident title on failure/recovery: `Release Race Hardening Drill Alert`
+
+Weekly summary artifact review:
+
+```powershell
+gh run list -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  --workflow release-race-hardening-drill.yml `
+  --limit 1
+
+gh run download <release_race_hardening_run_id> `
+  -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -n release-race-hardening-weekly-summary-<run_id> `
+  -D .\tmp-race-hardening-summary
+
+Get-Content .\tmp-race-hardening-summary\release-race-hardening-weekly-summary.json -Raw
+```
 
 ## Evidence to Attach to Incident
 - `ops-monitoring-report.json`
 - `canary-smoke-tag-hygiene-report.json`
 - `release-control-plane-override-audit.json` (when override is requested/applied)
 - `release-race-hardening-drill-report.json`
+- `release-race-hardening-weekly-summary.json`
 - sync guard run URL
 - parity SHAs (upstream and fork)

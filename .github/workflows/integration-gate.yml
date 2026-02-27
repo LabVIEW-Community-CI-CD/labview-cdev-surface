@@ -50,7 +50,8 @@ jobs:
             'CI Pipeline',
             'Workspace Installer Contract',
             'Reproducibility Contract',
-            'Provenance Contract'
+            'Provenance Contract',
+            'Release Race Hardening Drill'
           )
 
           $pollSeconds = 20
