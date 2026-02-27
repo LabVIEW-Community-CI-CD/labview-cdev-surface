@@ -236,7 +236,13 @@ try {
         $report.message = 'Rollback drill failed and auto-remediation is disabled.'
     } else {
         $initialReasons = @($initialReport.reason_codes | ForEach-Object { [string]$_ })
-        $canAutomate = (($initialReasons -contains 'rollback_candidate_missing') -and ([string]$Channel -eq 'canary'))
+        $canAutomate = (
+            ([string]$Channel -eq 'canary') -and
+            (
+                ($initialReasons -contains 'rollback_candidate_missing') -or
+                ($initialReasons -contains 'rollback_assets_missing')
+            )
+        )
         if (-not $canAutomate) {
             $report.status = 'fail'
             $report.reason_code = 'no_automatable_action'
