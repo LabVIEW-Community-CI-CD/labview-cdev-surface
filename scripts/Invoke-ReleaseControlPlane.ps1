@@ -338,6 +338,8 @@ function Resolve-ControlPlaneFailureReasonCode {
     if ($message -match '^stable_window_override_') { return 'stable_window_override_invalid' }
     if ($message -match '^branch_head_unresolved') { return 'branch_head_unresolved' }
     if ($message -match '^semver_prerelease_sequence_exhausted') { return 'semver_prerelease_sequence_exhausted' }
+    if ($message -match '^release_tag_collision_retry_exhausted') { return 'release_tag_collision_retry_exhausted' }
+    if ($message -match '^release_dispatch_attempts_exhausted') { return 'release_dispatch_attempts_exhausted' }
     if ($message -match '^release_watch_failed|^release_watch_not_success') { return 'release_dispatch_watch_failed' }
     if ($message -match '^release_verification_') { return 'release_verification_failed' }
     if ($message -match '^canary_hygiene_failed') { return 'canary_hygiene_failed' }
@@ -899,6 +901,86 @@ function Resolve-PromotedTargetSemVer {
     throw "unsupported_target_channel: $TargetChannel"
 }
 
+function Get-ReleasePlanningState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository
+    )
+
+    $releaseList = @(Get-GhReleasesPortable -Repository $Repository -Limit 100 -ExcludeDrafts)
+    $allRecords = @(
+        $releaseList |
+            ForEach-Object { Convert-ReleaseToRecord -Release $_ } |
+            Where-Object { $null -ne $_ }
+    )
+    $legacyRecords = @(
+        $allRecords |
+            Where-Object { [string]$_.tag_family -eq 'legacy_date_window' -and [string]$_.channel -ne 'unknown' }
+    )
+
+    $migrationWarnings = @()
+    if (@($legacyRecords).Count -gt 0) {
+        if ($script:semverOnlyEnforced) {
+            throw "semver_only_enforcement_violation: semver_only_enforce_utc=$($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')) legacy_tag_count=$(@($legacyRecords).Count)"
+        }
+        $migrationWarnings += "Legacy date-window release tags remain present in '$Repository'. Control-plane dispatch now targets SemVer channel tags and legacy compatibility ends at $($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))."
+    }
+
+    return [ordered]@{
+        records = @($allRecords)
+        migration_warnings = @($migrationWarnings)
+    }
+}
+
+function Resolve-TargetPlanForMode {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModeName,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records = @(),
+        [Parameter(Mandatory = $true)]$ModeConfig,
+        [Parameter()][AllowNull()]$SourceCore = $null
+    )
+
+    if ($ModeName -eq 'CanaryCycle') {
+        return Resolve-CanaryTargetSemVer -Records $Records
+    }
+
+    if ($ModeName -eq 'PromotePrerelease' -or $ModeName -eq 'PromoteStable') {
+        if ($null -eq $SourceCore) {
+            throw "promotion_source_missing: channel=$([string]$ModeConfig.source_channel_for_promotion) strategy=semver"
+        }
+        return Resolve-PromotedTargetSemVer -Records $Records -TargetChannel ([string]$ModeConfig.channel) -SourceCore $SourceCore
+    }
+
+    throw "unsupported_release_mode: $ModeName"
+}
+
+function Get-ReleaseByTagOrNull {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Tag
+    )
+
+    $viewOutput = & gh release view $Tag -R $Repository --json tagName,publishedAt,url 2>&1
+    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    $viewText = if ($viewOutput -is [System.Array]) {
+        (($viewOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine)
+    } else {
+        [string]$viewOutput
+    }
+
+    if ($exitCode -eq 0) {
+        if ([string]::IsNullOrWhiteSpace($viewText)) {
+            throw ("gh_command_failed: exit={0} command=gh release view {1} -R {2} --json tagName,publishedAt,url" -f $exitCode, $Tag, $Repository)
+        }
+        return ($viewText | ConvertFrom-Json -ErrorAction Stop)
+    }
+
+    if ($viewText -match '(?i)not found|http 404|release.*not found') {
+        return $null
+    }
+
+    throw ("gh_command_failed: exit={0} command=gh release view {1} -R {2} --json tagName,publishedAt,url error={3}" -f $exitCode, $Tag, $Repository, ($viewText.Trim()))
+}
+
 function Resolve-StablePromotionWindowDecision {
     param(
         [Parameter(Mandatory = $true)][DateTimeOffset]$NowUtc,
@@ -1154,21 +1236,9 @@ function Invoke-ReleaseMode {
     }
 
     $modeConfig = Get-ModeConfig -ModeName $ModeName
-    $releaseList = @(Get-GhReleasesPortable -Repository $Repository -Limit 100 -ExcludeDrafts)
-    $allRecords = @(
-        $releaseList |
-            ForEach-Object { Convert-ReleaseToRecord -Release $_ } |
-            Where-Object { $null -ne $_ }
-    )
-    $legacyRecords = @($allRecords | Where-Object { [string]$_.tag_family -eq 'legacy_date_window' -and [string]$_.channel -ne 'unknown' })
-
-    $migrationWarnings = @()
-    if (@($legacyRecords).Count -gt 0) {
-        if ($script:semverOnlyEnforced) {
-            throw "semver_only_enforcement_violation: semver_only_enforce_utc=$($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')) legacy_tag_count=$(@($legacyRecords).Count)"
-        }
-        $migrationWarnings += "Legacy date-window release tags remain present in '$Repository'. Control-plane dispatch now targets SemVer channel tags and legacy compatibility ends at $($script:semverOnlyEnforceUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))."
-    }
+    $planningState = Get-ReleasePlanningState -Repository $Repository
+    $allRecords = @($planningState.records)
+    $migrationWarnings = @($planningState.migration_warnings)
 
     $sourceRecord = $null
     $sourceCore = $null
@@ -1224,17 +1294,7 @@ function Invoke-ReleaseMode {
         }
     }
 
-    $targetPlan = $null
-    if ($ModeName -eq 'CanaryCycle') {
-        $targetPlan = Resolve-CanaryTargetSemVer -Records $allRecords
-    } elseif ($ModeName -eq 'PromotePrerelease' -or $ModeName -eq 'PromoteStable') {
-        if ($null -eq $sourceCore) {
-            throw "promotion_source_missing: channel=$([string]$modeConfig.source_channel_for_promotion) strategy=semver"
-        }
-        $targetPlan = Resolve-PromotedTargetSemVer -Records $allRecords -TargetChannel ([string]$modeConfig.channel) -SourceCore $sourceCore
-    } else {
-        throw "unsupported_release_mode: $ModeName"
-    }
+    $targetPlan = Resolve-TargetPlanForMode -ModeName $ModeName -Records $allRecords -ModeConfig $modeConfig -SourceCore $sourceCore
 
     $targetTag = [string]$targetPlan.tag
     $targetCoreText = Format-CoreVersion -Core $targetPlan.core
@@ -1249,6 +1309,10 @@ function Invoke-ReleaseMode {
         status = if ([bool]$targetPlan.skipped) { 'skipped' } else { 'planned' }
         reason_code = if ([bool]$targetPlan.skipped) { [string]$targetPlan.reason_code } else { '' }
         migration_warnings = @($migrationWarnings)
+        dispatch_retry_max_attempts = 4
+        dispatch_attempts = 0
+        collision_retries = 0
+        dispatch_attempt_history = @()
     }
 
     if (@($migrationWarnings).Count -gt 0) {
@@ -1268,56 +1332,201 @@ function Invoke-ReleaseMode {
             branch = $Branch
             run_id = ''
             url = ''
+            attempts = 0
+            collision_retries = 0
         }
         return $executionReport
     }
 
-    $dispatchReportPath = Join-Path $ScratchRoot "$ModeName-dispatch.json"
-    $dispatchInputs = @(
-        "release_tag=$targetTag",
-        'allow_existing_tag=false',
-        "prerelease=$(([string]([bool]$modeConfig.prerelease)).ToLowerInvariant())",
-        "release_channel=$([string]$modeConfig.channel)"
-    )
-    & $dispatchWorkflowScript `
-        -Repository $Repository `
-        -WorkflowFile $ReleaseWorkflowFile `
-        -Branch $Branch `
-        -Inputs $dispatchInputs `
-        -OutputPath $dispatchReportPath | Out-Null
-    $dispatchReport = Get-Content -LiteralPath $dispatchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $dispatchRetryMaxAttempts = 4
+    $dispatchAttempt = 0
+    $collisionRetryCount = 0
+    $attemptHistory = [System.Collections.Generic.List[object]]::new()
+    $dispatchRecord = $null
+    $releaseVerification = $null
 
-    $watchReportPath = Join-Path $ScratchRoot "$ModeName-watch.json"
-    & pwsh -NoProfile -File $watchWorkflowScript `
-        -Repository $Repository `
-        -RunId ([string]$dispatchReport.run_id) `
-        -TimeoutMinutes $WatchTimeoutMinutes `
-        -OutputPath $watchReportPath | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "release_watch_failed: mode=$ModeName run_id=$([string]$dispatchReport.run_id) exit_code=$LASTEXITCODE"
+    while ($dispatchAttempt -lt $dispatchRetryMaxAttempts) {
+        $dispatchAttempt++
+
+        if ($dispatchAttempt -gt 1) {
+            $planningState = Get-ReleasePlanningState -Repository $Repository
+            $allRecords = @($planningState.records)
+            $targetPlan = Resolve-TargetPlanForMode -ModeName $ModeName -Records $allRecords -ModeConfig $modeConfig -SourceCore $sourceCore
+            $targetTag = [string]$targetPlan.tag
+            $targetCoreText = Format-CoreVersion -Core $targetPlan.core
+
+            $executionReport.target_release.tag = $targetTag
+            $executionReport.target_release.core = $targetCoreText
+            $executionReport.target_release.prerelease_sequence = [int]$targetPlan.prerelease_sequence
+            $executionReport.target_release.status = if ([bool]$targetPlan.skipped) { 'skipped' } else { 'planned' }
+            $executionReport.target_release.reason_code = if ([bool]$targetPlan.skipped) { [string]$targetPlan.reason_code } else { '' }
+            $executionReport.target_release.migration_warnings = @($planningState.migration_warnings)
+        }
+
+        if ([bool]$targetPlan.skipped) {
+            if ([string]$targetPlan.reason_code -eq 'stable_already_published') {
+                $releaseVerification = Verify-DispatchedRelease `
+                    -TargetTag $targetTag `
+                    -ExpectedChannel ([string]$modeConfig.channel) `
+                    -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
+                    -ModeName $ModeName `
+                    -ScratchRoot $ScratchRoot
+                $dispatchRecord = [ordered]@{
+                    status = 'collision_resolved_existing_stable'
+                    workflow = $ReleaseWorkflowFile
+                    branch = $Branch
+                    run_id = ''
+                    url = [string]$releaseVerification.release_url
+                    conclusion = 'success'
+                    attempts = $dispatchAttempt
+                    collision_retries = $collisionRetryCount
+                    reason_code = 'stable_already_published'
+                }
+                [void]$attemptHistory.Add([ordered]@{
+                    attempt = $dispatchAttempt
+                    tag = $targetTag
+                    status = 'stable_already_published'
+                    reason_code = 'stable_already_published'
+                })
+                break
+            }
+
+            throw "release_dispatch_attempts_exhausted: mode=$ModeName attempts=$dispatchAttempt tag=$targetTag reason=$([string]$targetPlan.reason_code)"
+        }
+
+        $existingBeforeDispatch = Get-ReleaseByTagOrNull -Repository $Repository -Tag $targetTag
+        if ($null -ne $existingBeforeDispatch) {
+            $collisionRetryCount++
+            Write-Warning ("[release_tag_collision] mode={0} attempt={1} tag={2} already exists at {3}. Replanning." -f $ModeName, $dispatchAttempt, $targetTag, [string]$existingBeforeDispatch.url)
+            [void]$attemptHistory.Add([ordered]@{
+                attempt = $dispatchAttempt
+                tag = $targetTag
+                status = 'collision_pre_dispatch'
+                existing_release_url = [string]$existingBeforeDispatch.url
+                existing_release_published_at_utc = [string]$existingBeforeDispatch.publishedAt
+            })
+            if ($dispatchAttempt -ge $dispatchRetryMaxAttempts) {
+                throw "release_tag_collision_retry_exhausted: mode=$ModeName attempts=$dispatchAttempt tag=$targetTag"
+            }
+            continue
+        }
+
+        $dispatchReportPath = Join-Path $ScratchRoot "$ModeName-dispatch-$dispatchAttempt.json"
+        $dispatchInputs = @(
+            "release_tag=$targetTag",
+            'allow_existing_tag=false',
+            "prerelease=$(([string]([bool]$modeConfig.prerelease)).ToLowerInvariant())",
+            "release_channel=$([string]$modeConfig.channel)"
+        )
+
+        try {
+            & $dispatchWorkflowScript `
+                -Repository $Repository `
+                -WorkflowFile $ReleaseWorkflowFile `
+                -Branch $Branch `
+                -Inputs $dispatchInputs `
+                -OutputPath $dispatchReportPath | Out-Null
+            $dispatchReport = Get-Content -LiteralPath $dispatchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+
+            $watchReportPath = Join-Path $ScratchRoot "$ModeName-watch-$dispatchAttempt.json"
+            & pwsh -NoProfile -File $watchWorkflowScript `
+                -Repository $Repository `
+                -RunId ([string]$dispatchReport.run_id) `
+                -TimeoutMinutes $WatchTimeoutMinutes `
+                -OutputPath $watchReportPath | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "release_watch_failed: mode=$ModeName run_id=$([string]$dispatchReport.run_id) exit_code=$LASTEXITCODE"
+            }
+
+            $watchReport = Get-Content -LiteralPath $watchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $watchConclusion = [string]$watchReport.conclusion
+            if ($watchConclusion -ne 'success') {
+                throw "release_watch_not_success: mode=$ModeName run_id=$([string]$dispatchReport.run_id) conclusion=$watchConclusion"
+            }
+
+            $dispatchRecord = [ordered]@{
+                status = 'success'
+                workflow = $ReleaseWorkflowFile
+                branch = $Branch
+                run_id = [string]$dispatchReport.run_id
+                url = [string]$watchReport.url
+                conclusion = [string]$watchReport.conclusion
+                attempts = $dispatchAttempt
+                collision_retries = $collisionRetryCount
+            }
+            [void]$attemptHistory.Add([ordered]@{
+                attempt = $dispatchAttempt
+                tag = $targetTag
+                status = 'success'
+                run_id = [string]$dispatchReport.run_id
+                run_url = [string]$watchReport.url
+            })
+            break
+        } catch {
+            $dispatchError = [string]$_.Exception.Message
+            $existingAfterFailure = Get-ReleaseByTagOrNull -Repository $Repository -Tag $targetTag
+            if ($null -ne $existingAfterFailure) {
+                $collisionRetryCount++
+                Write-Warning ("[release_tag_collision] mode={0} attempt={1} tag={2} observed after failure. Verifying existing release." -f $ModeName, $dispatchAttempt, $targetTag)
+                [void]$attemptHistory.Add([ordered]@{
+                    attempt = $dispatchAttempt
+                    tag = $targetTag
+                    status = 'collision_post_dispatch'
+                    dispatch_error = $dispatchError
+                    existing_release_url = [string]$existingAfterFailure.url
+                    existing_release_published_at_utc = [string]$existingAfterFailure.publishedAt
+                })
+
+                try {
+                    $releaseVerification = Verify-DispatchedRelease `
+                        -TargetTag $targetTag `
+                        -ExpectedChannel ([string]$modeConfig.channel) `
+                        -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
+                        -ModeName $ModeName `
+                        -ScratchRoot $ScratchRoot
+                    $dispatchRecord = [ordered]@{
+                        status = 'collision_resolved_existing_release'
+                        workflow = $ReleaseWorkflowFile
+                        branch = $Branch
+                        run_id = ''
+                        url = [string]$releaseVerification.release_url
+                        conclusion = 'success'
+                        attempts = $dispatchAttempt
+                        collision_retries = $collisionRetryCount
+                        reason_code = 'tag_already_published_by_peer'
+                    }
+                    break
+                } catch {
+                    $verifyError = [string]$_.Exception.Message
+                    if ($dispatchAttempt -ge $dispatchRetryMaxAttempts) {
+                        throw "release_tag_collision_retry_exhausted: mode=$ModeName attempts=$dispatchAttempt tag=$targetTag last_error=$dispatchError verify_error=$verifyError"
+                    }
+                    continue
+                }
+            }
+
+            throw
+        }
     }
-    $watchReport = Get-Content -LiteralPath $watchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
 
-    $watchConclusion = [string]$watchReport.conclusion
-    if ($watchConclusion -ne 'success') {
-        throw "release_watch_not_success: mode=$ModeName run_id=$([string]$dispatchReport.run_id) conclusion=$watchConclusion"
+    if ($null -eq $dispatchRecord) {
+        throw "release_dispatch_attempts_exhausted: mode=$ModeName attempts=$dispatchAttempt tag=$targetTag"
     }
 
-    $executionReport.dispatch = [ordered]@{
-        status = 'success'
-        workflow = $ReleaseWorkflowFile
-        branch = $Branch
-        run_id = [string]$dispatchReport.run_id
-        url = [string]$watchReport.url
-        conclusion = [string]$watchReport.conclusion
-    }
+    $executionReport.target_release.dispatch_attempts = $dispatchAttempt
+    $executionReport.target_release.collision_retries = $collisionRetryCount
+    $executionReport.target_release.dispatch_attempt_history = @($attemptHistory)
+    $executionReport.dispatch = $dispatchRecord
 
-    $executionReport.release_verification = Verify-DispatchedRelease `
-        -TargetTag $targetTag `
-        -ExpectedChannel ([string]$modeConfig.channel) `
-        -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
-        -ModeName $ModeName `
-        -ScratchRoot $ScratchRoot
+    if ($null -eq $releaseVerification) {
+        $releaseVerification = Verify-DispatchedRelease `
+            -TargetTag $targetTag `
+            -ExpectedChannel ([string]$modeConfig.channel) `
+            -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
+            -ModeName $ModeName `
+            -ScratchRoot $ScratchRoot
+    }
+    $executionReport.release_verification = $releaseVerification
 
     $executionReport.promotion_lineage = Verify-PromotionLineage `
         -ModeName $ModeName `
