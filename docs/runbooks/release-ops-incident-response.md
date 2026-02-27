@@ -27,6 +27,10 @@ Reason code mapping:
 - `sync_guard_stale`: latest successful sync-guard run exceeded max-age policy.
 - `sync_guard_missing`: no sync-guard run found for branch.
 - `sync_guard_incomplete`: only in-progress/queued runs exist; no completed run yet.
+- `release_dispatch_watch_failed`: release workflow dispatch completed but run conclusion was not `success`.
+- `release_verification_failed`: post-dispatch release verification failed (missing assets or invalid `release-manifest.json` metadata).
+- `canary_hygiene_failed`: SemVer canary retention cleanup failed after publish.
+- `semver_only_enforcement_violation`: legacy date-window tags still present after SemVer-only enforcement gate.
 
 ## Runner Unavailable Remediation
 1. Verify repository runner state:
@@ -121,6 +125,50 @@ Run validation-only health/policy gate:
 gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
   -f mode=Validate `
   -f dry_run=true
+```
+
+## Release Verification Failure Remediation
+Use this when `reason_code=release_verification_failed` from `release-control-plane`.
+
+1. Download control-plane report and capture target tag:
+
+```powershell
+gh run download <release_control_plane_run_id> `
+  -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -D .\tmp-rcp-report
+Get-Content .\tmp-rcp-report\release-control-plane-report-<run_id>\release-control-plane-report.json -Raw
+```
+
+2. Verify release asset contract for the failed tag:
+
+```powershell
+gh release view <tag> -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  --json tagName,isPrerelease,publishedAt,targetCommitish,assets,url
+```
+
+3. Verify `release-manifest.json` fields:
+
+```powershell
+gh release download <tag> -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -p release-manifest.json -D .\tmp-release-manifest
+Get-Content .\tmp-release-manifest\release-manifest.json -Raw
+```
+
+Expected minimum:
+- `release_tag` equals `<tag>`
+- `channel` matches release-control-plane mode/channel
+- `provenance.assets` contains:
+  - `workspace-installer.spdx.json`
+  - `workspace-installer.slsa.json`
+  - `reproducibility-report.json`
+
+4. Re-run canary cycle after remediation:
+
+```powershell
+gh workflow run release-control-plane.yml -R LabVIEW-Community-CI-CD/labview-cdev-surface-fork `
+  -f mode=CanaryCycle `
+  -f auto_remediate=true `
+  -f dry_run=false
 ```
 
 ## SLO Gate Dispatch
