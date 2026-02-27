@@ -313,6 +313,7 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - Race-hardening gate must fail when latest successful drill evidence is missing/stale, `reason_code != drill_passed`, or collision evidence is absent.
 - `.github/workflows/branch-protection-drift-check.yml` must run `scripts/Test-ReleaseBranchProtectionPolicy.ps1` and maintain incident lifecycle title `Branch Protection Drift Alert`.
 - `.github/workflows/release-guardrails-autoremediate.yml` must run `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` and maintain incident lifecycle title `Release Guardrails Auto-Remediation Alert`.
+- Branch-protection query/apply workflows must use `WORKFLOW_BOT_TOKEN` when available, with deterministic fallback to `github.token`.
 - `scripts/Set-ReleaseBranchProtectionPolicy.ps1` is the deterministic apply path for required-check drift repair.
 - Guardrails self-healing policy must remain explicit under `ops_control_plane_policy.self_healing.guardrails`:
   - `remediation_workflow`

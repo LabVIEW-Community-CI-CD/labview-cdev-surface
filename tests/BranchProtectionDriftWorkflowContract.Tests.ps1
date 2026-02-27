@@ -32,6 +32,7 @@ Describe 'Branch protection drift workflow contract' {
         $script:workflowContent | Should -Match 'Test-ReleaseBranchProtectionPolicy\.ps1'
         $script:workflowContent | Should -Match 'branch-protection-drift-report\.json'
         $script:workflowContent | Should -Match 'Branch Protection Drift Check'
+        $script:workflowContent | Should -Match 'WORKFLOW_BOT_TOKEN'
     }
 
     It 'manages failure and recovery incidents for branch-protection drift' {

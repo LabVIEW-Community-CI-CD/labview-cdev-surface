@@ -507,6 +507,7 @@ It runs `scripts/Test-ReleaseRaceHardeningGate.ps1` and fails when:
 - `integration/*`
 
 Use `scripts/Set-ReleaseBranchProtectionPolicy.ps1` to deterministically apply/repair required check contracts.
+Branch-protection workflows prefer `WORKFLOW_BOT_TOKEN` when available and deterministically fall back to `github.token`.
 
 `release-guardrails-autoremediate.yml` is scheduled hourly and supports manual dispatch. It runs `scripts/Invoke-ReleaseGuardrailsSelfHealing.ps1` to:
 - evaluate branch-protection drift and release race-hardening freshness in one pass
