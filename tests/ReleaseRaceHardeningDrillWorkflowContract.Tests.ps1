@@ -25,6 +25,7 @@ Describe 'Release race-hardening drill workflow contract' {
         $script:workflowContent | Should -Match 'auto_remediate'
         $script:workflowContent | Should -Match 'keep_latest_canary_n'
         $script:workflowContent | Should -Match 'watch_timeout_minutes'
+        $script:workflowContent | Should -Match 'force_control_plane_watch_timeout'
     }
 
     It 'runs on hosted runner, executes drill runtime, and uploads drill + weekly summary artifacts' {
@@ -52,6 +53,7 @@ Describe 'Release race-hardening drill workflow contract' {
         $script:runtimeContent | Should -Match 'contender_dispatch_report_invalid'
         $script:runtimeContent | Should -Match 'control_plane_dispatch_report_invalid'
         $script:runtimeContent | Should -Match 'control_plane_watch_timeout'
+        $script:runtimeContent | Should -Match 'injected_for_drill'
         $script:runtimeContent | Should -Match 'contender_run_id'
         $script:runtimeContent | Should -Match 'control_plane_run_id'
         $script:runtimeContent | Should -Match 'tag_already_published_by_peer'

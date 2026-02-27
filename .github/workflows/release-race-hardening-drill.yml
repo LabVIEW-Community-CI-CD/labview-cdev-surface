@@ -20,6 +20,11 @@ on:
         required: false
         default: '120'
         type: string
+      force_control_plane_watch_timeout:
+        description: Force a deterministic control-plane watch-timeout failure for incident-path drills.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -77,12 +82,19 @@ jobs:
             $autoRemediate = [System.Convert]::ToBoolean($autoRemediateText)
           }
 
+          $forceControlPlaneWatchTimeoutText = [string]'${{ inputs.force_control_plane_watch_timeout }}'
+          $forceControlPlaneWatchTimeout = $false
+          if (-not [string]::IsNullOrWhiteSpace($forceControlPlaneWatchTimeoutText)) {
+            $forceControlPlaneWatchTimeout = [System.Convert]::ToBoolean($forceControlPlaneWatchTimeoutText)
+          }
+
           & pwsh -NoProfile -File ./scripts/Invoke-ReleaseRaceHardeningDrill.ps1 `
             -Repository '${{ github.repository }}' `
             -Branch 'main' `
             -AutoRemediate:$autoRemediate `
             -KeepLatestCanaryN $keepLatestCanaryN `
             -WatchTimeoutMinutes $watchTimeoutMinutes `
+            -ForceControlPlaneWatchTimeout:$forceControlPlaneWatchTimeout `
             -OutputPath $reportPath
 
       - name: Upload release race-hardening drill report
