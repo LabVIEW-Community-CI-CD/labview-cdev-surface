@@ -230,12 +230,15 @@ Build and gate lanes must run in isolated workspaces on every run (`D:\dev` pref
 - After `semver_only_enforce_utc`, legacy tag presence must fail control-plane execution with `semver_only_enforcement_violation`.
 - Promotion must gate on source release integrity (required assets + source commit equals branch head).
 - Control-plane must verify every dispatched release before completion: required release assets and `release-manifest.json` (`release_tag`, `channel`, provenance asset names).
+- Control-plane must verify promotion lineage for `PromotePrerelease` and `PromoteStable`: source/target channel, SemVer core equality, and source/target commit SHA equality.
 - Release-control-plane top-level reason codes must remain explicit:
   - `ops_health_gate_failed`
   - `ops_unhealthy`
   - `promotion_source_missing`
+  - `promotion_source_not_prerelease`
   - `promotion_source_asset_missing`
   - `promotion_source_not_at_head`
+  - `promotion_lineage_invalid`
   - `release_dispatch_watch_failed`
   - `release_verification_failed`
   - `canary_hygiene_failed`

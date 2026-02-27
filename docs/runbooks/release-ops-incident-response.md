@@ -27,6 +27,7 @@ Reason code mapping:
 - `sync_guard_stale`: latest successful sync-guard run exceeded max-age policy.
 - `sync_guard_missing`: no sync-guard run found for branch.
 - `sync_guard_incomplete`: only in-progress/queued runs exist; no completed run yet.
+- `promotion_lineage_invalid`: promotion source/target channel, SemVer core, or commit-SHA lineage check failed.
 - `release_dispatch_watch_failed`: release workflow dispatch completed but run conclusion was not `success`.
 - `release_verification_failed`: post-dispatch release verification failed (missing assets or invalid `release-manifest.json` metadata).
 - `canary_hygiene_failed`: SemVer canary retention cleanup failed after publish.

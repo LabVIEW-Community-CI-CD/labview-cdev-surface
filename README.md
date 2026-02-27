@@ -394,20 +394,24 @@ Control-plane behavior:
    - stable: `vX.Y.Z` (promoted from latest semver prerelease on Monday window)
 3. Verifies run completion and promotion source integrity (`assets + source commit == branch head`).
 4. Performs post-dispatch release verification (`required assets + release-manifest channel/tag/provenance checks`).
-5. Applies canary smoke tag hygiene with `tag_family=semver` after canary publish.
-6. Reads SemVer gate policy from `installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`).
-7. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
+5. Verifies promotion lineage for `PromotePrerelease` and `PromoteStable` (`source/target channel + SemVer core + commit SHA`).
+6. Applies canary smoke tag hygiene with `tag_family=semver` after canary publish.
+7. Reads SemVer gate policy from `installer_contract.release_client.ops_control_plane_policy.tag_strategy.semver_only_enforce_utc` (default `2026-07-01T00:00:00Z`).
+8. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present before the gate and fails with `semver_only_enforcement_violation` after the gate.
 
 Top-level release-control-plane deterministic failure reason codes include:
 - `ops_health_gate_failed`
 - `ops_unhealthy`
 - `promotion_source_missing`
+- `promotion_source_not_prerelease`
 - `promotion_source_asset_missing`
 - `promotion_source_not_at_head`
+- `promotion_lineage_invalid`
 - `release_dispatch_watch_failed`
 - `release_verification_failed`
 - `canary_hygiene_failed`
 - `semver_only_enforcement_violation`
+- `control_plane_runtime_error`
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
 
