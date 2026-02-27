@@ -139,6 +139,135 @@ foreach ($warning in @($semverPolicy.warnings)) {
     Write-Warning "[semver_policy_warning] $warning"
 }
 
+$script:releaseRequiredAssets = @(
+    'lvie-cdev-workspace-installer.exe',
+    'lvie-cdev-workspace-installer.exe.sha256',
+    'reproducibility-report.json',
+    'workspace-installer.spdx.json',
+    'workspace-installer.slsa.json',
+    'release-manifest.json'
+)
+
+$script:releaseManifestRequiredProvenanceAssets = @(
+    'workspace-installer.spdx.json',
+    'workspace-installer.slsa.json',
+    'reproducibility-report.json'
+)
+
+function Resolve-ControlPlaneFailureReasonCode {
+    param([Parameter()][string]$MessageText = '')
+
+    $message = [string]$MessageText
+    if ($message -match '^required_script_missing') { return 'required_script_missing' }
+    if ($message -match '^ops_health_gate_failed') { return 'ops_health_gate_failed' }
+    if ($message -match '^ops_unhealthy') { return 'ops_unhealthy' }
+    if ($message -match '^unsupported_mode_config|^unsupported_release_mode') { return 'unsupported_mode' }
+    if ($message -match '^semver_only_enforcement_violation') { return 'semver_only_enforcement_violation' }
+    if ($message -match '^promotion_source_missing') { return 'promotion_source_missing' }
+    if ($message -match '^promotion_source_not_prerelease') { return 'promotion_source_not_prerelease' }
+    if ($message -match '^promotion_source_asset_missing') { return 'promotion_source_asset_missing' }
+    if ($message -match '^promotion_source_commit_invalid') { return 'promotion_source_commit_invalid' }
+    if ($message -match '^promotion_source_not_at_head') { return 'promotion_source_not_at_head' }
+    if ($message -match '^branch_head_unresolved') { return 'branch_head_unresolved' }
+    if ($message -match '^semver_prerelease_sequence_exhausted') { return 'semver_prerelease_sequence_exhausted' }
+    if ($message -match '^release_watch_failed|^release_watch_not_success') { return 'release_dispatch_watch_failed' }
+    if ($message -match '^release_verification_') { return 'release_verification_failed' }
+    if ($message -match '^canary_hygiene_failed') { return 'canary_hygiene_failed' }
+    if ($message -match '^gh_command_failed') { return 'gh_command_failed' }
+
+    return 'control_plane_runtime_error'
+}
+
+function Verify-DispatchedRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetTag,
+        [Parameter(Mandatory = $true)][string]$ExpectedChannel,
+        [Parameter(Mandatory = $true)][bool]$ExpectedIsPrerelease,
+        [Parameter(Mandatory = $true)][string]$ModeName,
+        [Parameter(Mandatory = $true)][string]$ScratchRoot
+    )
+
+    $release = Invoke-GhJson -Arguments @(
+        'release', 'view',
+        $TargetTag,
+        '-R', $Repository,
+        '--json', 'tagName,isPrerelease,targetCommitish,publishedAt,assets,url'
+    )
+    if ($null -eq $release) {
+        throw "release_verification_release_missing: tag=$TargetTag"
+    }
+
+    $actualTag = [string]$release.tagName
+    if ([string]::IsNullOrWhiteSpace($actualTag)) {
+        throw "release_verification_tag_missing: tag=$TargetTag"
+    }
+    if ($actualTag -ne $TargetTag) {
+        throw "release_verification_tag_mismatch: expected=$TargetTag actual=$actualTag"
+    }
+    if ([bool]$release.isPrerelease -ne $ExpectedIsPrerelease) {
+        throw "release_verification_prerelease_mismatch: tag=$TargetTag expected=$ExpectedIsPrerelease actual=$([bool]$release.isPrerelease)"
+    }
+
+    $assetNames = @($release.assets | ForEach-Object { [string]$_.name })
+    foreach ($requiredAsset in @($script:releaseRequiredAssets)) {
+        if ($assetNames -notcontains $requiredAsset) {
+            throw "release_verification_asset_missing: tag=$TargetTag asset=$requiredAsset"
+        }
+    }
+
+    $manifestDownloadRoot = Join-Path $ScratchRoot "release-manifest-$ModeName-$($TargetTag -replace '[^A-Za-z0-9._-]', '_')"
+    New-Item -Path $manifestDownloadRoot -ItemType Directory -Force | Out-Null
+    & gh release download $TargetTag -R $Repository -p 'release-manifest.json' -D $manifestDownloadRoot
+    $downloadExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    if ($downloadExit -ne 0) {
+        throw "release_verification_manifest_download_failed: tag=$TargetTag exit_code=$downloadExit"
+    }
+
+    $manifestPath = Join-Path $manifestDownloadRoot 'release-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "release_verification_manifest_missing: tag=$TargetTag"
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 100
+    if ([string]$manifest.schema_version -ne '1.0') {
+        throw "release_verification_manifest_schema_invalid: tag=$TargetTag schema=$([string]$manifest.schema_version)"
+    }
+    if ([string]$manifest.repository -ne $Repository) {
+        throw "release_verification_manifest_repository_mismatch: tag=$TargetTag expected=$Repository actual=$([string]$manifest.repository)"
+    }
+    if ([string]$manifest.release_tag -ne $TargetTag) {
+        throw "release_verification_manifest_tag_mismatch: expected=$TargetTag actual=$([string]$manifest.release_tag)"
+    }
+    if ([string]$manifest.channel -ne $ExpectedChannel) {
+        throw "release_verification_manifest_channel_mismatch: tag=$TargetTag expected=$ExpectedChannel actual=$([string]$manifest.channel)"
+    }
+    if ([string]$manifest.installer.name -ne 'lvie-cdev-workspace-installer.exe') {
+        throw "release_verification_manifest_installer_name_mismatch: tag=$TargetTag actual=$([string]$manifest.installer.name)"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$manifest.installer.sha256)) {
+        throw "release_verification_manifest_installer_sha_missing: tag=$TargetTag"
+    }
+
+    $provenanceAssetNames = @($manifest.provenance.assets | ForEach-Object { [string]$_.name })
+    foreach ($requiredProvenanceAsset in @($script:releaseManifestRequiredProvenanceAssets)) {
+        if ($provenanceAssetNames -notcontains $requiredProvenanceAsset) {
+            throw "release_verification_manifest_provenance_missing: tag=$TargetTag asset=$requiredProvenanceAsset"
+        }
+    }
+
+    return [ordered]@{
+        status = 'pass'
+        tag = $TargetTag
+        channel = $ExpectedChannel
+        prerelease = $ExpectedIsPrerelease
+        release_url = [string]$release.url
+        published_at_utc = [string]$release.publishedAt
+        release_assets_checked = @($script:releaseRequiredAssets)
+        manifest_path = $manifestPath
+        manifest_provenance_assets_checked = @($script:releaseManifestRequiredProvenanceAssets)
+    }
+}
+
 function Get-ModeConfig {
     param([Parameter(Mandatory = $true)][string]$ModeName)
 
@@ -493,9 +622,17 @@ function Invoke-ReleaseMode {
     param(
         [Parameter(Mandatory = $true)][string]$ModeName,
         [Parameter(Mandatory = $true)][string]$DateKey,
-        [Parameter(Mandatory = $true)][string]$ScratchRoot,
-        [Parameter(Mandatory = $true)][hashtable]$ExecutionReport
+        [Parameter(Mandatory = $true)][string]$ScratchRoot
     )
+
+    $executionReport = [ordered]@{
+        mode = $ModeName
+        source_release = $null
+        target_release = $null
+        dispatch = $null
+        release_verification = $null
+        hygiene = $null
+    }
 
     $modeConfig = Get-ModeConfig -ModeName $ModeName
     $releaseList = @(Get-GhReleasesPortable -Repository $Repository -Limit 100 -ExcludeDrafts)
@@ -505,7 +642,6 @@ function Invoke-ReleaseMode {
             Where-Object { $null -ne $_ }
     )
     $legacyRecords = @($allRecords | Where-Object { [string]$_.tag_family -eq 'legacy_date_window' -and [string]$_.channel -ne 'unknown' })
-    $semverRecords = @($allRecords | Where-Object { [string]$_.tag_family -eq 'semver' })
 
     $migrationWarnings = @()
     if (@($legacyRecords).Count -gt 0) {
@@ -537,16 +673,8 @@ function Invoke-ReleaseMode {
             throw "promotion_source_not_prerelease: tag=$sourceTag channel=$([string]$modeConfig.source_channel_for_promotion)"
         }
 
-        $requiredAssets = @(
-            'lvie-cdev-workspace-installer.exe',
-            'lvie-cdev-workspace-installer.exe.sha256',
-            'reproducibility-report.json',
-            'workspace-installer.spdx.json',
-            'workspace-installer.slsa.json',
-            'release-manifest.json'
-        )
         $assetNames = @($sourceRelease.assets | ForEach-Object { [string]$_.name })
-        foreach ($requiredAsset in $requiredAssets) {
+        foreach ($requiredAsset in @($script:releaseRequiredAssets)) {
             if ($assetNames -notcontains $requiredAsset) {
                 throw "promotion_source_asset_missing: tag=$sourceTag asset=$requiredAsset"
             }
@@ -564,7 +692,7 @@ function Invoke-ReleaseMode {
             throw "promotion_source_not_at_head: tag=$sourceTag source_sha=$sourceCommit head_sha=$headSha"
         }
 
-        $ExecutionReport.source_release = [ordered]@{
+        $executionReport.source_release = [ordered]@{
             channel = [string]$modeConfig.source_channel_for_promotion
             tag = $sourceTag
             tag_family = 'semver'
@@ -590,7 +718,7 @@ function Invoke-ReleaseMode {
 
     $targetTag = [string]$targetPlan.tag
     $targetCoreText = Format-CoreVersion -Core $targetPlan.core
-    $ExecutionReport.target_release = [ordered]@{
+    $executionReport.target_release = [ordered]@{
         mode = $ModeName
         channel = [string]$modeConfig.channel
         prerelease = [bool]$modeConfig.prerelease
@@ -610,18 +738,18 @@ function Invoke-ReleaseMode {
     }
 
     if ([bool]$targetPlan.skipped) {
-        return
+        return $executionReport
     }
 
     if ($DryRun) {
-        $ExecutionReport.dispatch = [ordered]@{
+        $executionReport.dispatch = [ordered]@{
             status = 'skipped_dry_run'
             workflow = $ReleaseWorkflowFile
             branch = $Branch
             run_id = ''
             url = ''
         }
-        return
+        return $executionReport
     }
 
     $dispatchReportPath = Join-Path $ScratchRoot "$ModeName-dispatch.json"
@@ -650,7 +778,12 @@ function Invoke-ReleaseMode {
     }
     $watchReport = Get-Content -LiteralPath $watchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
 
-    $ExecutionReport.dispatch = [ordered]@{
+    $watchConclusion = [string]$watchReport.conclusion
+    if ($watchConclusion -ne 'success') {
+        throw "release_watch_not_success: mode=$ModeName run_id=$([string]$dispatchReport.run_id) conclusion=$watchConclusion"
+    }
+
+    $executionReport.dispatch = [ordered]@{
         status = 'success'
         workflow = $ReleaseWorkflowFile
         branch = $Branch
@@ -658,6 +791,13 @@ function Invoke-ReleaseMode {
         url = [string]$watchReport.url
         conclusion = [string]$watchReport.conclusion
     }
+
+    $executionReport.release_verification = Verify-DispatchedRelease `
+        -TargetTag $targetTag `
+        -ExpectedChannel ([string]$modeConfig.channel) `
+        -ExpectedIsPrerelease ([bool]$modeConfig.prerelease) `
+        -ModeName $ModeName `
+        -ScratchRoot $ScratchRoot
 
     if ($ModeName -eq 'CanaryCycle') {
         $hygienePath = Join-Path $ScratchRoot 'canary-hygiene.json'
@@ -671,8 +811,10 @@ function Invoke-ReleaseMode {
         if ($LASTEXITCODE -ne 0) {
             throw "canary_hygiene_failed: tag_family=semver date=$DateKey exit_code=$LASTEXITCODE"
         }
-        $ExecutionReport.hygiene = Get-Content -LiteralPath $hygienePath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $executionReport.hygiene = Get-Content -LiteralPath $hygienePath -Raw | ConvertFrom-Json -ErrorAction Stop
     }
+
+    return $executionReport
 }
 
 $scratchRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("release-control-plane-" + [Guid]::NewGuid().ToString('N'))
@@ -758,12 +900,10 @@ try {
         $executionList = [System.Collections.Generic.List[object]]::new()
 
         if ($Mode -eq 'FullCycle') {
-            $canaryExec = [ordered]@{}
-            Invoke-ReleaseMode -ModeName 'CanaryCycle' -DateKey $dateKey -ScratchRoot $scratchRoot -ExecutionReport $canaryExec
+            $canaryExec = Invoke-ReleaseMode -ModeName 'CanaryCycle' -DateKey $dateKey -ScratchRoot $scratchRoot
             [void]$executionList.Add($canaryExec)
 
-            $prereleaseExec = [ordered]@{}
-            Invoke-ReleaseMode -ModeName 'PromotePrerelease' -DateKey $dateKey -ScratchRoot $scratchRoot -ExecutionReport $prereleaseExec
+            $prereleaseExec = Invoke-ReleaseMode -ModeName 'PromotePrerelease' -DateKey $dateKey -ScratchRoot $scratchRoot
             [void]$executionList.Add($prereleaseExec)
 
             $stableExec = [ordered]@{
@@ -776,13 +916,11 @@ try {
             }
             $dayOfWeekUtc = (Get-Date).ToUniversalTime().DayOfWeek.ToString()
             if ($dayOfWeekUtc -eq 'Monday') {
-                $stableExec = [ordered]@{}
-                Invoke-ReleaseMode -ModeName 'PromoteStable' -DateKey $dateKey -ScratchRoot $scratchRoot -ExecutionReport $stableExec
+                $stableExec = Invoke-ReleaseMode -ModeName 'PromoteStable' -DateKey $dateKey -ScratchRoot $scratchRoot
             }
             [void]$executionList.Add($stableExec)
         } else {
-            $singleExec = [ordered]@{}
-            Invoke-ReleaseMode -ModeName $Mode -DateKey $dateKey -ScratchRoot $scratchRoot -ExecutionReport $singleExec
+            $singleExec = Invoke-ReleaseMode -ModeName $Mode -DateKey $dateKey -ScratchRoot $scratchRoot
             [void]$executionList.Add($singleExec)
         }
 
@@ -793,9 +931,10 @@ try {
     }
 }
 catch {
+    $failureMessage = [string]$_.Exception.Message
     $report.status = 'fail'
-    $report.reason_code = 'control_plane_failed'
-    $report.message = [string]$_.Exception.Message
+    $report.reason_code = Resolve-ControlPlaneFailureReasonCode -MessageText $failureMessage
+    $report.message = $failureMessage
 }
 finally {
     Write-WorkflowOpsReport -Report $report -OutputPath $OutputPath | Out-Null
