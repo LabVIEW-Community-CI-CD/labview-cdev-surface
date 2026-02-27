@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to publish (for example, v0.1.0).
+        description: Release tag to publish (SemVer preferred: vX.Y.Z / vX.Y.Z-rc.N / vX.Y.Z-canary.N; legacy migration: v0.YYYYMMDD.N).
         required: true
         type: string
       allow_existing_tag:

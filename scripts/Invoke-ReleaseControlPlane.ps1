@@ -249,11 +249,15 @@ function Invoke-ReleaseMode {
     }
 
     $targetTag = "v0.$DateKey.$nextSequence"
+    $tagMigrationWarning = "Control-plane generated legacy date-window tag '$targetTag'. Prefer SemVer tags for manual dispatch (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
+    Write-Warning "[tag_migration_warning] $tagMigrationWarning"
     $ExecutionReport.target_release = [ordered]@{
         mode = $ModeName
         channel = [string]$modeConfig.channel
         prerelease = [bool]$modeConfig.prerelease
         tag = $targetTag
+        tag_family = 'legacy_date_window'
+        migration_warning = $tagMigrationWarning
         range_min = [int]$modeConfig.range_min
         range_max = [int]$modeConfig.range_max
     }

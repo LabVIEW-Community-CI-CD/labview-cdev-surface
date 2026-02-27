@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       release_tag:
-        description: Release tag to publish (for example, v0.1.0).
+        description: Release tag to publish (SemVer preferred: vX.Y.Z / vX.Y.Z-rc.N / vX.Y.Z-canary.N; legacy migration: v0.YYYYMMDD.N).
         required: true
         type: string
       allow_existing_tag:
@@ -168,13 +168,73 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          $releaseTag = [string]'${{ inputs.release_tag }}'
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            throw 'release_tag is required.'
+          }
+
+          $legacyTagPattern = '^v0\.(?<date>\d{8})\.(?<sequence>\d{1,3})$'
+          $semverTagPattern = '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+          $legacyMatch = [regex]::Match($releaseTag, $legacyTagPattern)
+          $semverMatch = [regex]::Match($releaseTag, $semverTagPattern)
+
+          $tagFamily = ''
+          $channelFromTag = ''
+          $tagImpliesPrerelease = $false
+          $tagMigrationWarning = ''
+
+          if ($legacyMatch.Success) {
+            $sequence = [int]$legacyMatch.Groups['sequence'].Value
+            if ($sequence -ge 1 -and $sequence -le 49) {
+              $channelFromTag = 'canary'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 50 -and $sequence -le 79) {
+              $channelFromTag = 'prerelease'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 80 -and $sequence -le 99) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              throw "Invalid legacy release_tag '$releaseTag'. Sequence must be within 1-99."
+            }
+
+            $tagFamily = 'legacy_date_window'
+            $tagMigrationWarning = "Legacy date-window tag '$releaseTag' is accepted during migration. Prefer SemVer tags (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
+          } elseif ($semverMatch.Success) {
+            $tagFamily = 'semver'
+            $prereleaseLabel = [string]$semverMatch.Groups['prerelease'].Value
+            if ([string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              $tagImpliesPrerelease = $true
+              if ($prereleaseLabel -match '(?i)(^|[.\-])canary([.\-]|$)') {
+                $channelFromTag = 'canary'
+              } else {
+                $channelFromTag = 'prerelease'
+              }
+            }
+          } else {
+            throw "Invalid release_tag '$releaseTag'. Accepted formats: SemVer (vX.Y.Z, vX.Y.Z-rc.N, vX.Y.Z-canary.N) or legacy migration format (v0.YYYYMMDD.N)."
+          }
+
           $releaseChannel = [string]'${{ inputs.release_channel }}'
           $isPrereleaseInput = [System.Convert]::ToBoolean([string]'${{ inputs.prerelease }}')
+          if ($isPrereleaseInput -ne $tagImpliesPrerelease) {
+            throw "[channel_tag_mismatch] prerelease input '$isPrereleaseInput' does not match release_tag '$releaseTag' (implied prerelease=$tagImpliesPrerelease)."
+          }
+
           if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
             $releaseChannel = if ($isPrereleaseInput) { 'prerelease' } else { 'stable' }
           }
           if ($releaseChannel -notin @('stable', 'prerelease', 'canary')) {
             throw "Unsupported release channel '$releaseChannel'. Expected stable, prerelease, or canary."
+          }
+          if ($releaseChannel -ne $channelFromTag) {
+            throw "[channel_tag_mismatch] release_channel '$releaseChannel' does not match release_tag '$releaseTag' (implied channel=$channelFromTag)."
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            Write-Warning "[tag_migration_warning] $tagMigrationWarning"
           }
 
           $assetName = 'lvie-cdev-workspace-installer.exe'
@@ -353,7 +413,7 @@ jobs:
           $releaseManifestPath = Join-Path $releaseRoot 'release-manifest.json'
           & pwsh -NoProfile -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/Write-ReleaseManifest.ps1') `
             -Repository '${{ github.repository }}' `
-            -ReleaseTag '${{ inputs.release_tag }}' `
+            -ReleaseTag $releaseTag `
             -Channel $releaseChannel `
             -InstallerPath $assetPath `
             -InstallerSha256 $assetSha `
@@ -374,7 +434,12 @@ jobs:
             asset_name = $assetName
             asset_path = $assetPath
             asset_sha256 = $assetSha
+            release_tag = $releaseTag
             release_channel = $releaseChannel
+            channel_from_tag = $channelFromTag
+            tag_family = $tagFamily
+            tag_implies_prerelease = $tagImpliesPrerelease
+            tag_migration_warning = $tagMigrationWarning
             install_command = 'lvie-cdev-workspace-installer.exe /S'
             repro_report = (Join-Path $reproRoot 'workspace-installer-determinism-summary.json')
             spdx_path = (Join-Path $provRoot 'workspace-installer.spdx.json')
@@ -438,8 +503,67 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $releaseTag = [string]$env:RELEASE_TAG
-          if ($releaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-            throw "Invalid release_tag '$releaseTag'. Expected semantic tag like v0.1.0."
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            throw 'release_tag is required.'
+          }
+
+          $allowExistingTag = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:ALLOW_EXISTING_TAG)) {
+            $allowExistingTag = [System.Convert]::ToBoolean($env:ALLOW_EXISTING_TAG)
+          }
+          $prerelease = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:PRERELEASE)) {
+            $prerelease = [System.Convert]::ToBoolean($env:PRERELEASE)
+          }
+          $overrideApplied = $false
+          if (-not [string]::IsNullOrWhiteSpace($env:OVERRIDE_APPLIED)) {
+            $overrideApplied = [System.Convert]::ToBoolean($env:OVERRIDE_APPLIED)
+          }
+
+          $legacyTagPattern = '^v0\.(?<date>\d{8})\.(?<sequence>\d{1,3})$'
+          $semverTagPattern = '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+          $legacyMatch = [regex]::Match($releaseTag, $legacyTagPattern)
+          $semverMatch = [regex]::Match($releaseTag, $semverTagPattern)
+
+          $channelFromTag = ''
+          $tagImpliesPrerelease = $false
+          $tagMigrationWarning = ''
+
+          if ($legacyMatch.Success) {
+            $sequence = [int]$legacyMatch.Groups['sequence'].Value
+            if ($sequence -ge 1 -and $sequence -le 49) {
+              $channelFromTag = 'canary'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 50 -and $sequence -le 79) {
+              $channelFromTag = 'prerelease'
+              $tagImpliesPrerelease = $true
+            } elseif ($sequence -ge 80 -and $sequence -le 99) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              throw "Invalid legacy release_tag '$releaseTag'. Sequence must be within 1-99."
+            }
+
+            $tagMigrationWarning = "Legacy date-window tag '$releaseTag' is accepted during migration. Prefer SemVer tags (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
+          } elseif ($semverMatch.Success) {
+            $prereleaseLabel = [string]$semverMatch.Groups['prerelease'].Value
+            if ([string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+              $channelFromTag = 'stable'
+              $tagImpliesPrerelease = $false
+            } else {
+              $tagImpliesPrerelease = $true
+              if ($prereleaseLabel -match '(?i)(^|[.\-])canary([.\-]|$)') {
+                $channelFromTag = 'canary'
+              } else {
+                $channelFromTag = 'prerelease'
+              }
+            }
+          } else {
+            throw "Invalid release_tag '$releaseTag'. Accepted formats: SemVer (vX.Y.Z, vX.Y.Z-rc.N, vX.Y.Z-canary.N) or legacy migration format (v0.YYYYMMDD.N)."
+          }
+
+          if ($prerelease -ne $tagImpliesPrerelease) {
+            throw "[channel_tag_mismatch] prerelease input '$prerelease' does not match release_tag '$releaseTag' (implied prerelease=$tagImpliesPrerelease)."
           }
 
           $artifactRoot = Join-Path $env:RUNNER_TEMP 'workspace-installer-release'
@@ -468,25 +592,21 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($releaseChannel)) {
             $releaseChannel = if ($prerelease) { 'prerelease' } else { 'stable' }
           }
+          if ($releaseChannel -notin @('stable', 'prerelease', 'canary')) {
+            throw "Unsupported release channel '$releaseChannel'. Expected stable, prerelease, or canary."
+          }
+          if ($releaseChannel -ne $channelFromTag) {
+            throw "[channel_tag_mismatch] release_channel '$releaseChannel' does not match release_tag '$releaseTag' (implied channel=$channelFromTag)."
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            Write-Warning "[tag_migration_warning] $tagMigrationWarning"
+          }
           if ([string]::IsNullOrWhiteSpace($assetName) -or [string]::IsNullOrWhiteSpace($assetSha)) {
             throw "Installer metadata is missing required fields."
           }
           $assetPathNormalized = [string]$assetPath
           if ($assetPathNormalized -match '(?i)[\\/](artifacts)[\\/](parity)([\\/]|$)') {
             throw "Parity artifact path was selected for release publish input: $assetPathNormalized"
-          }
-
-          $allowExistingTag = $false
-          if (-not [string]::IsNullOrWhiteSpace($env:ALLOW_EXISTING_TAG)) {
-            $allowExistingTag = [System.Convert]::ToBoolean($env:ALLOW_EXISTING_TAG)
-          }
-          $prerelease = $false
-          if (-not [string]::IsNullOrWhiteSpace($env:PRERELEASE)) {
-            $prerelease = [System.Convert]::ToBoolean($env:PRERELEASE)
-          }
-          $overrideApplied = $false
-          if (-not [string]::IsNullOrWhiteSpace($env:OVERRIDE_APPLIED)) {
-            $overrideApplied = [System.Convert]::ToBoolean($env:OVERRIDE_APPLIED)
           }
 
           $releaseNotesPath = Join-Path $env:RUNNER_TEMP "release-notes-$releaseTag.md"
@@ -523,6 +643,13 @@ jobs:
               "- Incident: $env:OVERRIDE_INCIDENT_URL"
             )
           }
+          if (-not [string]::IsNullOrWhiteSpace($tagMigrationWarning)) {
+            $releaseNoteLines += @(
+              ""
+              "Tag Policy Notice:"
+              "- $tagMigrationWarning"
+            )
+          }
           $releaseNoteLines | Set-Content -LiteralPath $releaseNotesPath -Encoding utf8
 
           $repo = [string]$env:TARGET_REPOSITORY
@@ -542,7 +669,7 @@ jobs:
           if ($releaseExists -and -not $allowExistingTag) {
             $publishedAt = [string]$existingReleaseMetadata.publishedAt
             $releaseUrl = [string]$existingReleaseMetadata.url
-            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new semantic tag or set allow_existing_tag=true for break-glass overwrite."
+            throw "Release tag '$releaseTag' already exists (publishedAt=$publishedAt, url=$releaseUrl). Use a new release tag or set allow_existing_tag=true for break-glass overwrite."
           }
 
           $releaseTitle = "Workspace Installer $releaseTag"
@@ -568,7 +695,7 @@ jobs:
               if ($LASTEXITCODE -ne 0) {
                 $uploadText = ($uploadOutput | Out-String).Trim()
                 if ($uploadText -match '(?i)immutable release') {
-                  throw "[release_immutable] Release tag '$releaseTag' is immutable and cannot be overwritten. Publish a new semantic tag."
+                  throw "[release_immutable] Release tag '$releaseTag' is immutable and cannot be overwritten. Publish a new release tag."
                 }
                 throw "Failed to upload release assets for '$releaseTag': $uploadText"
               }
