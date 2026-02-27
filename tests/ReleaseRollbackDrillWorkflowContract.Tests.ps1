@@ -44,6 +44,9 @@ Describe 'Release rollback drill workflow contract' {
     It 'validates channel-specific release history and required rollback assets' {
         $script:runtimeContent | Should -Match "ValidateSet\('stable', 'prerelease', 'canary'\)"
         $script:runtimeContent | Should -Match 'AllowEmptyCollection'
+        $script:runtimeContent | Should -Match 'semver_preferred_dual_mode'
+        $script:runtimeContent | Should -Match 'candidate_tag_family_selected'
+        $script:runtimeContent | Should -Match 'SemVer candidates were selected for rollback drill'
         $script:runtimeContent | Should -Match 'rollback_candidate_missing'
         $script:runtimeContent | Should -Match 'rollback_assets_missing'
         $script:runtimeContent | Should -Match 'lvie-cdev-workspace-installer\.exe'
@@ -61,6 +64,10 @@ Describe 'Release rollback drill workflow contract' {
         $script:selfHealingContent | Should -Match '-Inputs \$dispatchInputs'
         $script:selfHealingContent | Should -Match 'release-workspace-installer\.yml'
         $script:selfHealingContent | Should -Match 'release_channel=canary'
+        $script:selfHealingContent | Should -Match "ValidateSet\('semver', 'legacy_date_window'\)"
+        $script:selfHealingContent | Should -Match 'canary_tag_family'
+        $script:selfHealingContent | Should -Match 'v\$\('
+        $script:selfHealingContent | Should -Match '-canary\.\$nextCanarySequence'
         $script:selfHealingContent | Should -Match 'allow_existing_tag=false'
         $script:selfHealingContent | Should -Match 'rollback_candidate_missing'
         $script:selfHealingContent | Should -Match 'rollback_assets_missing'

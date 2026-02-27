@@ -27,7 +27,7 @@ on:
         default: true
         type: boolean
       keep_latest_canary_n:
-        description: Number of canary smoke tags to keep per date.
+        description: Number of latest SemVer canary tags to keep.
         required: false
         default: '1'
         type: string

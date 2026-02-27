@@ -66,8 +66,6 @@ function Get-ModeConfig {
             return [ordered]@{
                 channel = 'canary'
                 prerelease = $true
-                range_min = 1
-                range_max = 49
                 source_channel_for_promotion = ''
                 enforce_prerelease_source = $false
             }
@@ -76,8 +74,6 @@ function Get-ModeConfig {
             return [ordered]@{
                 channel = 'prerelease'
                 prerelease = $true
-                range_min = 50
-                range_max = 79
                 source_channel_for_promotion = 'canary'
                 enforce_prerelease_source = $true
             }
@@ -86,8 +82,6 @@ function Get-ModeConfig {
             return [ordered]@{
                 channel = 'stable'
                 prerelease = $false
-                range_min = 80
-                range_max = 99
                 source_channel_for_promotion = 'prerelease'
                 enforce_prerelease_source = $true
             }
@@ -98,67 +92,318 @@ function Get-ModeConfig {
     }
 }
 
-function Parse-ReleaseTag {
-    param([Parameter(Mandatory = $true)][string]$TagName)
+function Get-ReleasePublishedSortValue {
+    param([Parameter(Mandatory = $true)][object]$Record)
 
-    $match = [regex]::Match($TagName, '^v0\.(?<date>\d{8})\.(?<sequence>\d+)$')
+    $parsed = [DateTimeOffset]::MinValue
+    [void][DateTimeOffset]::TryParse([string]$Record.published_at_utc, [ref]$parsed)
+    return $parsed
+}
+
+function New-CoreVersion {
+    param(
+        [Parameter(Mandatory = $true)][int]$Major,
+        [Parameter(Mandatory = $true)][int]$Minor,
+        [Parameter(Mandatory = $true)][int]$Patch
+    )
+
+    return [ordered]@{
+        major = $Major
+        minor = $Minor
+        patch = $Patch
+    }
+}
+
+function Format-CoreVersion {
+    param([Parameter(Mandatory = $true)]$Core)
+    return "{0}.{1}.{2}" -f [int]$Core.major, [int]$Core.minor, [int]$Core.patch
+}
+
+function Compare-CoreVersion {
+    param(
+        [Parameter(Mandatory = $true)]$Left,
+        [Parameter(Mandatory = $true)]$Right
+    )
+
+    foreach ($part in @('major', 'minor', 'patch')) {
+        $l = [int]$Left.$part
+        $r = [int]$Right.$part
+        if ($l -gt $r) { return 1 }
+        if ($l -lt $r) { return -1 }
+    }
+
+    return 0
+}
+
+function Get-MaxCoreVersion {
+    param([Parameter(Mandatory = $true)][object[]]$Records)
+
+    $maxCore = $null
+    foreach ($record in @($Records)) {
+        $candidate = New-CoreVersion -Major ([int]$record.major) -Minor ([int]$record.minor) -Patch ([int]$record.patch)
+        if ($null -eq $maxCore) {
+            $maxCore = $candidate
+            continue
+        }
+
+        if ((Compare-CoreVersion -Left $candidate -Right $maxCore) -gt 0) {
+            $maxCore = $candidate
+        }
+    }
+
+    return $maxCore
+}
+
+function Test-CoreEquals {
+    param(
+        [Parameter(Mandatory = $true)]$Left,
+        [Parameter(Mandatory = $true)]$Right
+    )
+
+    return ((Compare-CoreVersion -Left $Left -Right $Right) -eq 0)
+}
+
+function Get-SequenceFromLabel {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Token
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Label)) {
+        return 0
+    }
+
+    $pattern = "(?i)(?:^|[.-]){0}[.-](?<n>\d+)(?:$|[.-])" -f [regex]::Escape($Token)
+    $match = [regex]::Match($Label, $pattern)
     if (-not $match.Success) {
+        return 0
+    }
+
+    $value = 0
+    if (-not [int]::TryParse([string]$match.Groups['n'].Value, [ref]$value)) {
+        return 0
+    }
+
+    return $value
+}
+
+function Convert-ReleaseToRecord {
+    param([Parameter(Mandatory = $true)][object]$Release)
+
+    $tagName = [string]$Release.tagName
+    if ([string]::IsNullOrWhiteSpace($tagName)) {
         return $null
     }
 
-    $sequence = 0
-    if (-not [int]::TryParse([string]$match.Groups['sequence'].Value, [ref]$sequence)) {
+    $isPrerelease = [bool]$Release.isPrerelease
+    $publishedAt = [string]$Release.publishedAt
+    $url = [string]$Release.url
+
+    $legacyMatch = [regex]::Match($tagName, '^v0\.(?<date>\d{8})\.(?<sequence>\d+)$')
+    if ($legacyMatch.Success) {
+        $legacySequence = 0
+        if (-not [int]::TryParse([string]$legacyMatch.Groups['sequence'].Value, [ref]$legacySequence)) {
+            return $null
+        }
+
+        $legacyChannel = 'unknown'
+        if ($legacySequence -ge 1 -and $legacySequence -le 49 -and $isPrerelease) {
+            $legacyChannel = 'canary'
+        } elseif ($legacySequence -ge 50 -and $legacySequence -le 79 -and $isPrerelease) {
+            $legacyChannel = 'prerelease'
+        } elseif ($legacySequence -ge 80 -and $legacySequence -le 99 -and -not $isPrerelease) {
+            $legacyChannel = 'stable'
+        }
+
+        return [ordered]@{
+            tag_name = $tagName
+            tag_family = 'legacy_date_window'
+            channel = $legacyChannel
+            is_prerelease = $isPrerelease
+            published_at_utc = $publishedAt
+            url = $url
+            major = 0
+            minor = 0
+            patch = 0
+            prerelease_label = ''
+            prerelease_sequence = 0
+            legacy_date = [string]$legacyMatch.Groups['date'].Value
+            legacy_sequence = $legacySequence
+        }
+    }
+
+    $semverMatch = [regex]::Match(
+        $tagName,
+        '^v(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+    )
+    if (-not $semverMatch.Success) {
         return $null
+    }
+
+    $prereleaseLabel = [string]$semverMatch.Groups['prerelease'].Value
+    $channel = 'stable'
+    $sequence = 0
+    if (-not [string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+        if ($prereleaseLabel -match '(?i)(^|[.\-])canary([.\-]|$)') {
+            $channel = 'canary'
+            $sequence = Get-SequenceFromLabel -Label $prereleaseLabel -Token 'canary'
+        } else {
+            $channel = 'prerelease'
+            $sequence = Get-SequenceFromLabel -Label $prereleaseLabel -Token 'rc'
+        }
     }
 
     return [ordered]@{
-        tag_name = $TagName
-        date = [string]$match.Groups['date'].Value
-        sequence = $sequence
+        tag_name = $tagName
+        tag_family = 'semver'
+        channel = $channel
+        is_prerelease = $isPrerelease
+        published_at_utc = $publishedAt
+        url = $url
+        major = [int]$semverMatch.Groups['major'].Value
+        minor = [int]$semverMatch.Groups['minor'].Value
+        patch = [int]$semverMatch.Groups['patch'].Value
+        prerelease_label = $prereleaseLabel
+        prerelease_sequence = $sequence
+        legacy_date = ''
+        legacy_sequence = 0
     }
 }
 
-function Get-ReleaseRecordsForDate {
-    param(
-        [Parameter(Mandatory = $true)][object[]]$ReleaseList,
-        [Parameter(Mandatory = $true)][string]$DateKey
-    )
-
-    $records = @()
-    foreach ($release in $ReleaseList) {
-        $parsed = Parse-ReleaseTag -TagName ([string]$release.tagName)
-        if ($null -eq $parsed) {
-            continue
-        }
-        if ([string]$parsed.date -ne $DateKey) {
-            continue
-        }
-
-        $records += [ordered]@{
-            tag_name = [string]$parsed.tag_name
-            date = [string]$parsed.date
-            sequence = [int]$parsed.sequence
-            is_prerelease = [bool]$release.isPrerelease
-            published_at_utc = [string]$release.publishedAt
-        }
-    }
-
-    return @($records | Sort-Object @{ Expression = { [int]$_.sequence }; Descending = $true })
-}
-
-function Get-LatestRecordInRange {
+function Get-LatestSemVerRecordByChannel {
     param(
         [Parameter(Mandatory = $true)][object[]]$Records,
-        [Parameter(Mandatory = $true)][int]$RangeMin,
-        [Parameter(Mandatory = $true)][int]$RangeMax
+        [Parameter(Mandatory = $true)][string]$Channel
     )
 
     return @(
         $Records |
-            Where-Object { [int]$_.sequence -ge $RangeMin -and [int]$_.sequence -le $RangeMax } |
-            Sort-Object @{ Expression = { [int]$_.sequence }; Descending = $true } |
+            Where-Object { [string]$_.tag_family -eq 'semver' -and [string]$_.channel -eq $Channel } |
+            Sort-Object `
+                @{ Expression = { [int]$_.major }; Descending = $true }, `
+                @{ Expression = { [int]$_.minor }; Descending = $true }, `
+                @{ Expression = { [int]$_.patch }; Descending = $true }, `
+                @{ Expression = { [int]$_.prerelease_sequence }; Descending = $true }, `
+                @{ Expression = { Get-ReleasePublishedSortValue -Record $_ }; Descending = $true }, `
+                @{ Expression = { [string]$_.tag_name }; Descending = $false } |
             Select-Object -First 1
     )
+}
+
+function Get-MaxPrereleaseSequenceForCore {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)]$Core,
+        [Parameter(Mandatory = $true)][string]$Channel
+    )
+
+    $matched = @(
+        $Records |
+            Where-Object {
+                ([string]$_.tag_family -eq 'semver') -and
+                ([string]$_.channel -eq $Channel) -and
+                ([int]$_.major -eq [int]$Core.major) -and
+                ([int]$_.minor -eq [int]$Core.minor) -and
+                ([int]$_.patch -eq [int]$Core.patch)
+            } |
+            ForEach-Object { [int]$_.prerelease_sequence }
+    )
+    if (@($matched).Count -eq 0) {
+        return 0
+    }
+
+    return [int]((@($matched) | Measure-Object -Maximum).Maximum)
+}
+
+function Resolve-CanaryTargetSemVer {
+    param([Parameter(Mandatory = $true)][object[]]$Records)
+
+    $semverRecords = @($Records | Where-Object { [string]$_.tag_family -eq 'semver' })
+    $stableRecords = @($semverRecords | Where-Object { [string]$_.channel -eq 'stable' })
+    $nonStableRecords = @($semverRecords | Where-Object { [string]$_.channel -ne 'stable' })
+
+    $latestStableCore = Get-MaxCoreVersion -Records $stableRecords
+    $latestNonStableCore = Get-MaxCoreVersion -Records $nonStableRecords
+
+    $targetCore = $null
+    if ($null -ne $latestNonStableCore -and (($null -eq $latestStableCore) -or ((Compare-CoreVersion -Left $latestNonStableCore -Right $latestStableCore) -gt 0))) {
+        $targetCore = $latestNonStableCore
+    } elseif ($null -ne $latestStableCore) {
+        $targetCore = New-CoreVersion -Major ([int]$latestStableCore.major) -Minor ([int]$latestStableCore.minor) -Patch ([int]$latestStableCore.patch + 1)
+    } elseif ($null -ne $latestNonStableCore) {
+        $targetCore = $latestNonStableCore
+    } else {
+        $targetCore = New-CoreVersion -Major 0 -Minor 1 -Patch 0
+    }
+
+    $maxCanarySequence = Get-MaxPrereleaseSequenceForCore -Records $semverRecords -Core $targetCore -Channel 'canary'
+    $nextCanarySequence = $maxCanarySequence + 1
+    if ($nextCanarySequence -gt 9999) {
+        throw "semver_prerelease_sequence_exhausted: channel=canary core=$(Format-CoreVersion -Core $targetCore) next_sequence=$nextCanarySequence"
+    }
+
+    return [ordered]@{
+        core = $targetCore
+        prerelease_sequence = $nextCanarySequence
+        tag = "v$(Format-CoreVersion -Core $targetCore)-canary.$nextCanarySequence"
+    }
+}
+
+function Resolve-PromotedTargetSemVer {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][string]$TargetChannel,
+        [Parameter(Mandatory = $true)]$SourceCore
+    )
+
+    if ([string]$TargetChannel -eq 'prerelease') {
+        $maxRcSequence = Get-MaxPrereleaseSequenceForCore -Records $Records -Core $SourceCore -Channel 'prerelease'
+        $nextRcSequence = $maxRcSequence + 1
+        if ($nextRcSequence -gt 9999) {
+            throw "semver_prerelease_sequence_exhausted: channel=prerelease core=$(Format-CoreVersion -Core $SourceCore) next_sequence=$nextRcSequence"
+        }
+
+        return [ordered]@{
+            core = $SourceCore
+            prerelease_sequence = $nextRcSequence
+            tag = "v$(Format-CoreVersion -Core $SourceCore)-rc.$nextRcSequence"
+            skipped = $false
+            reason_code = ''
+        }
+    }
+
+    if ([string]$TargetChannel -eq 'stable') {
+        $stableExists = @(
+            $Records |
+                Where-Object {
+                    ([string]$_.tag_family -eq 'semver') -and
+                    ([string]$_.channel -eq 'stable') -and
+                    ([int]$_.major -eq [int]$SourceCore.major) -and
+                    ([int]$_.minor -eq [int]$SourceCore.minor) -and
+                    ([int]$_.patch -eq [int]$SourceCore.patch)
+                }
+        ).Count -gt 0
+
+        if ($stableExists) {
+            return [ordered]@{
+                core = $SourceCore
+                prerelease_sequence = 0
+                tag = "v$(Format-CoreVersion -Core $SourceCore)"
+                skipped = $true
+                reason_code = 'stable_already_published'
+            }
+        }
+
+        return [ordered]@{
+            core = $SourceCore
+            prerelease_sequence = 0
+            tag = "v$(Format-CoreVersion -Core $SourceCore)"
+            skipped = $false
+            reason_code = ''
+        }
+    }
+
+    throw "unsupported_target_channel: $TargetChannel"
 }
 
 function Invoke-ReleaseMode {
@@ -171,26 +416,30 @@ function Invoke-ReleaseMode {
 
     $modeConfig = Get-ModeConfig -ModeName $ModeName
     $releaseList = @(Get-GhReleasesPortable -Repository $Repository -Limit 100 -ExcludeDrafts)
-
-    $records = @(Get-ReleaseRecordsForDate -ReleaseList $releaseList -DateKey $DateKey)
-    $targetRangeRecords = @(
-        $records |
-            Where-Object { [int]$_.sequence -ge [int]$modeConfig.range_min -and [int]$_.sequence -le [int]$modeConfig.range_max } |
-            Sort-Object @{ Expression = { [int]$_.sequence }; Descending = $true }
+    $allRecords = @(
+        $releaseList |
+            ForEach-Object { Convert-ReleaseToRecord -Release $_ } |
+            Where-Object { $null -ne $_ }
     )
+    $legacyRecords = @($allRecords | Where-Object { [string]$_.tag_family -eq 'legacy_date_window' -and [string]$_.channel -ne 'unknown' })
+    $semverRecords = @($allRecords | Where-Object { [string]$_.tag_family -eq 'semver' })
 
+    $migrationWarnings = @()
+    if (@($legacyRecords).Count -gt 0) {
+        $migrationWarnings += "Legacy date-window release tags remain present in '$Repository'. Control-plane dispatch now targets SemVer channel tags."
+    }
+
+    $sourceRecord = $null
+    $sourceCore = $null
     if (-not [string]::IsNullOrWhiteSpace([string]$modeConfig.source_channel_for_promotion)) {
-        $sourceRange = switch ([string]$modeConfig.source_channel_for_promotion) {
-            'canary' { [ordered]@{ min = 1; max = 49 } }
-            'prerelease' { [ordered]@{ min = 50; max = 79 } }
-            default { throw "unsupported_source_channel: $([string]$modeConfig.source_channel_for_promotion)" }
-        }
-        $sourceRecord = @(Get-LatestRecordInRange -Records $records -RangeMin $sourceRange.min -RangeMax $sourceRange.max)
-        if (@($sourceRecord).Count -ne 1) {
-            throw "promotion_source_missing: channel=$([string]$modeConfig.source_channel_for_promotion) date=$DateKey"
+        $sourceCandidates = @(Get-LatestSemVerRecordByChannel -Records $allRecords -Channel ([string]$modeConfig.source_channel_for_promotion))
+        if (@($sourceCandidates).Count -ne 1) {
+            throw "promotion_source_missing: channel=$([string]$modeConfig.source_channel_for_promotion) strategy=semver"
         }
 
-        $sourceTag = [string]$sourceRecord[0].tag_name
+        $sourceRecord = $sourceCandidates[0]
+        $sourceTag = [string]$sourceRecord.tag_name
+        $sourceCore = New-CoreVersion -Major ([int]$sourceRecord.major) -Minor ([int]$sourceRecord.minor) -Patch ([int]$sourceRecord.patch)
         $sourceRelease = Invoke-GhJson -Arguments @(
             'release', 'view',
             $sourceTag,
@@ -232,34 +481,50 @@ function Invoke-ReleaseMode {
         $ExecutionReport.source_release = [ordered]@{
             channel = [string]$modeConfig.source_channel_for_promotion
             tag = $sourceTag
+            tag_family = 'semver'
+            core = Format-CoreVersion -Core $sourceCore
+            prerelease_sequence = [int]$sourceRecord.prerelease_sequence
             source_sha = $sourceCommit
             head_sha = $headSha
             url = [string]$sourceRelease.url
         }
     }
 
-    $nextSequence = if (@($targetRangeRecords).Count -eq 0) {
-        [int]$modeConfig.range_min
+    $targetPlan = $null
+    if ($ModeName -eq 'CanaryCycle') {
+        $targetPlan = Resolve-CanaryTargetSemVer -Records $allRecords
+    } elseif ($ModeName -eq 'PromotePrerelease' -or $ModeName -eq 'PromoteStable') {
+        if ($null -eq $sourceCore) {
+            throw "promotion_source_missing: channel=$([string]$modeConfig.source_channel_for_promotion) strategy=semver"
+        }
+        $targetPlan = Resolve-PromotedTargetSemVer -Records $allRecords -TargetChannel ([string]$modeConfig.channel) -SourceCore $sourceCore
     } else {
-        ([int]$targetRangeRecords[0].sequence) + 1
+        throw "unsupported_release_mode: $ModeName"
     }
 
-    if ($nextSequence -gt [int]$modeConfig.range_max) {
-        throw "release_tag_range_exhausted: mode=$ModeName date=$DateKey next_sequence=$nextSequence range_max=$([int]$modeConfig.range_max)"
-    }
-
-    $targetTag = "v0.$DateKey.$nextSequence"
-    $tagMigrationWarning = "Control-plane generated legacy date-window tag '$targetTag'. Prefer SemVer tags for manual dispatch (stable: vX.Y.Z, prerelease: vX.Y.Z-rc.N, canary: vX.Y.Z-canary.N)."
-    Write-Warning "[tag_migration_warning] $tagMigrationWarning"
+    $targetTag = [string]$targetPlan.tag
+    $targetCoreText = Format-CoreVersion -Core $targetPlan.core
     $ExecutionReport.target_release = [ordered]@{
         mode = $ModeName
         channel = [string]$modeConfig.channel
         prerelease = [bool]$modeConfig.prerelease
         tag = $targetTag
-        tag_family = 'legacy_date_window'
-        migration_warning = $tagMigrationWarning
-        range_min = [int]$modeConfig.range_min
-        range_max = [int]$modeConfig.range_max
+        tag_family = 'semver'
+        core = $targetCoreText
+        prerelease_sequence = [int]$targetPlan.prerelease_sequence
+        status = if ([bool]$targetPlan.skipped) { 'skipped' } else { 'planned' }
+        reason_code = if ([bool]$targetPlan.skipped) { [string]$targetPlan.reason_code } else { '' }
+        migration_warnings = @($migrationWarnings)
+    }
+
+    if (@($migrationWarnings).Count -gt 0) {
+        foreach ($warning in @($migrationWarnings)) {
+            Write-Warning "[tag_migration_warning] $warning"
+        }
+    }
+
+    if ([bool]$targetPlan.skipped) {
+        return
     }
 
     if ($DryRun) {
@@ -313,11 +578,12 @@ function Invoke-ReleaseMode {
         & pwsh -NoProfile -File $canaryHygieneScript `
             -Repository $Repository `
             -DateUtc $DateKey `
+            -TagFamily semver `
             -KeepLatestN $KeepLatestCanaryN `
             -Delete `
             -OutputPath $hygienePath
         if ($LASTEXITCODE -ne 0) {
-            throw "canary_hygiene_failed: date=$DateKey exit_code=$LASTEXITCODE"
+            throw "canary_hygiene_failed: tag_family=semver date=$DateKey exit_code=$LASTEXITCODE"
         }
         $ExecutionReport.hygiene = Get-Content -LiteralPath $hygienePath -Raw | ConvertFrom-Json -ErrorAction Stop
     }
@@ -336,6 +602,8 @@ $report = [ordered]@{
     auto_remediate = [bool]$AutoRemediate
     sync_guard_max_age_hours = $SyncGuardMaxAgeHours
     keep_latest_canary_n = $KeepLatestCanaryN
+    tag_strategy = 'semver'
+    migration_mode = 'dual_mode_publish_semver_control_plane'
     status = 'fail'
     reason_code = ''
     message = ''
@@ -414,6 +682,7 @@ try {
                     mode = 'PromoteStable'
                     status = 'skipped'
                     reason_code = 'stable_window_closed'
+                    tag_family = 'semver'
                 }
             }
             $dayOfWeekUtc = (Get-Date).ToUniversalTime().DayOfWeek.ToString()
