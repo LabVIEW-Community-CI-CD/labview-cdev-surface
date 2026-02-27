@@ -98,12 +98,14 @@ Describe 'Workspace installer release workflow contract' {
         $script:coreWorkflowContent | Should -Match 'Parity artifact path was selected for release publish input'
         $script:coreWorkflowContent | Should -Match 'workspace-installer-release-\$\{\{\s*github\.run_id\s*\}\}'
         $script:coreWorkflowContent | Should -Match '(gh release create|''release'',\s*''create'')'
+        $script:coreWorkflowContent | Should -Match '\$releaseAssets = @\(\$assetPath, \$shaPath, \$reproPath, \$spdxPath, \$slsaPath, \$releaseManifestPath\)'
         $script:coreWorkflowContent | Should -Match '--target \$releaseTargetSha'
         $script:coreWorkflowContent | Should -Match 'RELEASE_TARGET_SHA:\s*\$\{\{\s*github\.sha\s*\}\}'
         $script:coreWorkflowContent | Should -Match 'already exists'
         $script:coreWorkflowContent | Should -Match 'allow_existing_tag=true'
         $script:coreWorkflowContent | Should -Match 'gh release upload'
         $script:coreWorkflowContent | Should -Match '--clobber'
+        $script:coreWorkflowContent | Should -Match '\[release_immutable\]'
     }
 
     It 'enforces release notes, tag validation, and override disclosure support' {
