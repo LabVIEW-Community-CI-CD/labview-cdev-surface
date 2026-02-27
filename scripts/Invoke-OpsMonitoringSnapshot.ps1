@@ -17,6 +17,9 @@ param(
     ),
 
     [Parameter()]
+    [string]$RequiredRunnerLabelsCsv = '',
+
+    [Parameter()]
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$SyncGuardRepository = 'LabVIEW-Community-CI-CD/labview-cdev-cli',
 
@@ -40,6 +43,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib/WorkflowOps.Common.ps1')
+
+if (-not [string]::IsNullOrWhiteSpace($RequiredRunnerLabelsCsv)) {
+    $RequiredRunnerLabels = @(
+        $RequiredRunnerLabelsCsv.Split(',') |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
 
 function Convert-RunRecord {
     param([Parameter(Mandatory = $true)][object]$Run)

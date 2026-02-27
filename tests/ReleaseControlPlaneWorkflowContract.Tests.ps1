@@ -58,7 +58,7 @@ Describe 'Release control plane workflow contract' {
     }
 
     It 'decouples control-plane runner health gate to release-runner labels' {
-        $script:runtimeContent | Should -Match 'RequiredRunnerLabels \$releaseRunnerLabels'
+        $script:runtimeContent | Should -Match 'RequiredRunnerLabelsCsv \$releaseRunnerLabelsCsv'
         $script:runtimeContent | Should -Match "self-hosted', 'windows', 'self-hosted-windows-lv"
         $script:runtimeContent | Should -Not -Match 'windows-containers'
         $script:runtimeContent | Should -Not -Match 'user-session'

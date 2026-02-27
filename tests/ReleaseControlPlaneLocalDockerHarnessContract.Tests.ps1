@@ -33,7 +33,7 @@ Describe 'Release control plane local Docker harness contract' {
         $script:harnessContent | Should -Match 'Invoke-OpsAutoRemediation\.ps1'
         $script:harnessContent | Should -Match 'Invoke-ReleaseControlPlane\.ps1'
         $script:harnessContent | Should -Match 'Write-OpsSloReport\.ps1'
-        $script:harnessContent | Should -Match 'RequiredRunnerLabels \$releaseRunnerLabels'
+        $script:harnessContent | Should -Match 'RequiredRunnerLabelsCsv \$releaseRunnerLabelsCsv'
         $script:harnessContent | Should -Match "self-hosted', 'windows', 'self-hosted-windows-lv"
         $script:harnessContent | Should -Match 'release-control-plane-local-summary\.json'
     }
