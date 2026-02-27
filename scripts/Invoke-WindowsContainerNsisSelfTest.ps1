@@ -193,6 +193,11 @@ $hostOut = '__OUTPUT_MOUNT__'
 $workspaceRoot = '__WORKSPACE_ROOT__'
 $workRoot = 'C:\workspace\nsis-selftest'
 $installerPath = Join-Path $workRoot 'lvie-cdev-workspace-installer-container-smoke.exe'
+$cliExtractRoot = Join-Path $workRoot 'cdev-cli'
+$cliBundleZipPath = Join-Path $payloadRoot 'tools\cdev-cli\cdev-cli-win-x64.zip'
+$cliEntrypointPath = Join-Path $cliExtractRoot 'cdev-cli\scripts\Invoke-CdevCli.ps1'
+$cliRunReportPath = Join-Path $hostOut 'cdev-cli-installer-run-report.json'
+$cliRunStatus = ''
 $installReportPath = Join-Path $workspaceRoot 'artifacts\workspace-install-latest.json'
 $launchLogPath = Join-Path $workspaceRoot 'artifacts\workspace-installer-launch.log'
 $buildInstallerScript = Join-Path $repoRoot 'scripts\Build-WorkspaceBootstrapInstaller.ps1'
@@ -218,6 +223,9 @@ try {
     if (-not (Test-Path -LiteralPath $containerMakensisPath -PathType Leaf)) {
         throw "Mounted NSIS binary not found: $containerMakensisPath"
     }
+    if (-not (Test-Path -LiteralPath $cliBundleZipPath -PathType Leaf)) {
+        throw "Mounted cdev-cli Windows bundle not found: $cliBundleZipPath"
+    }
 
     if (Test-Path -LiteralPath $workRoot -PathType Container) {
         Remove-Item -LiteralPath $workRoot -Recurse -Force
@@ -227,14 +235,15 @@ try {
     }
     Ensure-Directory -Path $workRoot
     Ensure-Directory -Path $workspaceRoot
+    Ensure-Directory -Path $hostOut
 
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $buildInstallerScript `
+    & $buildInstallerScript `
         -PayloadRoot $payloadRoot `
         -OutputPath $installerPath `
         -WorkspaceRootDefault $workspaceRoot `
         -InstallerExecutionContext 'ContainerSmoke' `
         -NsisRoot $nsisRoot `
-        -Deterministic:$true | Out-Host
+        -Deterministic $true | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "Build-WorkspaceBootstrapInstaller.ps1 failed in container with exit code $LASTEXITCODE"
     }
@@ -245,11 +254,35 @@ try {
     $installerSha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     "{0} *{1}" -f $installerSha256, (Split-Path -Path $installerPath -Leaf) | Set-Content -LiteralPath "$installerPath.sha256" -Encoding ascii
 
-    & $installerPath '/S' | Out-Host
+    if (Test-Path -LiteralPath $cliExtractRoot -PathType Container) {
+        Remove-Item -LiteralPath $cliExtractRoot -Recurse -Force
+    }
+    Expand-Archive -LiteralPath $cliBundleZipPath -DestinationPath $cliExtractRoot -Force
+    if (-not (Test-Path -LiteralPath $cliEntrypointPath -PathType Leaf)) {
+        throw "cdev-cli entrypoint not found after bundle extraction: $cliEntrypointPath"
+    }
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $cliEntrypointPath `
+        -ReportPath $cliRunReportPath `
+        installer install `
+        --installer-path $installerPath `
+        --report-path $installReportPath | Out-Host
     $installerExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
     if ($installerExitCode -ne 0) {
         $reasonCode = 'installer_exit_nonzero'
-        throw "Installer failed in container with exit code $installerExitCode"
+        throw "cdev-cli installer install failed in container with exit code $installerExitCode"
+    }
+
+    if (-not (Test-Path -LiteralPath $cliRunReportPath -PathType Leaf)) {
+        $reasonCode = 'install_report_missing'
+        throw "cdev-cli run report missing after installer operation: $cliRunReportPath"
+    }
+
+    $cliRunReport = Get-Content -LiteralPath $cliRunReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $cliRunStatus = [string]$cliRunReport.status
+    if ($cliRunStatus -ne 'succeeded') {
+        $reasonCode = 'installer_exit_nonzero'
+        throw "cdev-cli run report status is '$cliRunStatus' (expected 'succeeded')."
     }
 
     if (-not (Test-Path -LiteralPath $installReportPath -PathType Leaf)) {
@@ -295,6 +328,9 @@ try {
     installer_path = $installerPath
     installer_sha256 = $installerSha256
     installer_exit_code = $installerExitCode
+    cdev_cli_entrypoint_path = $cliEntrypointPath
+    cdev_cli_run_report_path = $cliRunReportPath
+    cdev_cli_status = $cliRunStatus
     install_report_path = $installReportPath
     install_report_status = $installReportStatus
     install_report_errors = @($installReportErrors)
