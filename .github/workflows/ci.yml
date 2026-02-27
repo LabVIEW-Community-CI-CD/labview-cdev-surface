@@ -78,6 +78,7 @@ jobs:
             './tests/ReleaseControlPlaneLocalDockerHarnessContract.Tests.ps1',
             './tests/UploadArtifactRetryCompositeContract.Tests.ps1',
             './tests/InstallerHarnessWorkflowContract.Tests.ps1',
+            './tests/HostRelease2020VipmLifecycleDrillWorkflowContract.Tests.ps1',
             './tests/OpsMonitoringWorkflowContract.Tests.ps1',
             './tests/OpsIncidentLifecycleContract.Tests.ps1',
             './tests/OpsAutoRemediationWorkflowContract.Tests.ps1',
