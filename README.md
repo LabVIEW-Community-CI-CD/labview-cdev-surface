@@ -388,9 +388,13 @@ Every run uploads `ops-monitoring-report.json`.
 
 Control-plane behavior:
 1. Runs ops health gate and optional auto-remediation.
-2. Dispatches release workflow with deterministic channel-specific legacy tag windows (`canary=1-49`, `prerelease=50-79`, `stable=80-99` for `v0.YYYYMMDD.N`) and emits deterministic migration warnings.
-3. Verifies run completion.
-4. Applies canary smoke tag hygiene after canary publish.
+2. Dispatches release workflow with deterministic SemVer channel tags:
+   - canary: `vX.Y.Z-canary.N`
+   - prerelease: `vX.Y.Z-rc.N` (promoted from latest semver canary)
+   - stable: `vX.Y.Z` (promoted from latest semver prerelease on Monday window)
+3. Verifies run completion and promotion source integrity (`assets + source commit == branch head`).
+4. Applies canary smoke tag hygiene with `tag_family=semver` after canary publish.
+5. Emits deterministic migration warnings when legacy `v0.YYYYMMDD.N` tags are still present.
 
 `weekly-ops-slo-report.yml` emits machine-readable weekly SLO evidence via `scripts/Write-OpsSloReport.ps1`.
 

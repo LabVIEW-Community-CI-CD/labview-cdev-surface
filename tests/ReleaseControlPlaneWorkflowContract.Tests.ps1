@@ -45,20 +45,19 @@ Describe 'Release control plane workflow contract' {
         $script:workflowContent | Should -Match 'contents:\s*write'
     }
 
-    It 'implements mode sequencing, promotion guards, and deterministic tag ranges' {
+    It 'implements mode sequencing, semver promotion guards, and semver tag planning' {
         $script:runtimeContent | Should -Match "ValidateSet\('Validate', 'CanaryCycle', 'PromotePrerelease', 'PromoteStable', 'FullCycle'\)"
-        $script:runtimeContent | Should -Match 'range_min = 1'
-        $script:runtimeContent | Should -Match 'range_max = 49'
-        $script:runtimeContent | Should -Match 'range_min = 50'
-        $script:runtimeContent | Should -Match 'range_max = 79'
-        $script:runtimeContent | Should -Match 'range_min = 80'
-        $script:runtimeContent | Should -Match 'range_max = 99'
+        $script:runtimeContent | Should -Match 'Resolve-CanaryTargetSemVer'
+        $script:runtimeContent | Should -Match 'Resolve-PromotedTargetSemVer'
+        $script:runtimeContent | Should -Match 'tag_strategy = ''semver'''
+        $script:runtimeContent | Should -Match 'semver_prerelease_sequence_exhausted'
         $script:runtimeContent | Should -Match 'promotion_source_missing'
         $script:runtimeContent | Should -Match 'promotion_source_asset_missing'
         $script:runtimeContent | Should -Match 'promotion_source_not_at_head'
-        $script:runtimeContent | Should -Match 'release_tag_range_exhausted'
+        $script:runtimeContent | Should -Match 'stable_already_published'
         $script:runtimeContent | Should -Match '\[tag_migration_warning\]'
-        $script:runtimeContent | Should -Match "tag_family = 'legacy_date_window'"
+        $script:runtimeContent | Should -Match "tag_family = 'semver'"
+        $script:runtimeContent | Should -Match '-TagFamily semver'
         $script:runtimeContent | Should -Match 'Invoke-CanarySmokeTagHygiene\.ps1'
         $script:runtimeContent | Should -Match '\$dispatchInputs = @\('
         $script:runtimeContent | Should -Match '-Inputs \$dispatchInputs'
