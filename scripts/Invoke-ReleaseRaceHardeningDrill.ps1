@@ -61,6 +61,25 @@ function Add-UniqueMessage {
     }
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [Parameter()][AllowNull()]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter()][AllowNull()]$DefaultValue = $null
+    )
+
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
 function Resolve-RaceDrillFailureReasonCode {
     param([Parameter()][string]$MessageText = '')
 
@@ -523,19 +542,26 @@ try {
         throw "control_plane_release_verification_failed: status=$([string]$releaseVerification.status)"
     }
 
-    $attemptHistoryStatuses = @($targetRelease.dispatch_attempt_history | ForEach-Object { [string]$_.status })
+    $attemptHistory = @(Get-OptionalPropertyValue -Object $targetRelease -Name 'dispatch_attempt_history' -DefaultValue @())
+    $attemptHistoryStatuses = @(
+        $attemptHistory |
+            ForEach-Object {
+                [string](Get-OptionalPropertyValue -Object $_ -Name 'status' -DefaultValue '')
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    )
     $collisionRetries = 0
-    [void][int]::TryParse([string]$targetRelease.collision_retries, [ref]$collisionRetries)
+    [void][int]::TryParse([string](Get-OptionalPropertyValue -Object $targetRelease -Name 'collision_retries' -DefaultValue 0), [ref]$collisionRetries)
     if ($collisionRetries -ge 1) {
         Add-UniqueMessage -Target $collisionSignals -Message 'collision_retries_ge_1'
     }
 
-    $dispatchStatus = [string]$dispatchRecord.status
+    $dispatchStatus = [string](Get-OptionalPropertyValue -Object $dispatchRecord -Name 'status' -DefaultValue '')
     if ($dispatchStatus -like 'collision_*') {
         Add-UniqueMessage -Target $collisionSignals -Message ("dispatch_status_{0}" -f $dispatchStatus)
     }
 
-    $dispatchReasonCode = [string]$dispatchRecord.reason_code
+    $dispatchReasonCode = [string](Get-OptionalPropertyValue -Object $dispatchRecord -Name 'reason_code' -DefaultValue '')
     if ($dispatchReasonCode -eq 'tag_already_published_by_peer') {
         Add-UniqueMessage -Target $collisionSignals -Message ("dispatch_reason_{0}" -f $dispatchReasonCode)
     }
@@ -546,7 +572,7 @@ try {
         }
     }
 
-    $targetTag = [string]$targetRelease.tag
+    $targetTag = [string](Get-OptionalPropertyValue -Object $targetRelease -Name 'tag' -DefaultValue '')
     if (-not [string]::Equals($targetTag, [string]$targetTagRecord.tag, [System.StringComparison]::Ordinal)) {
         Add-UniqueMessage -Target $warnings -Message ("target_tag_replanned: predicted={0} final={1}" -f [string]$targetTagRecord.tag, $targetTag)
     }
