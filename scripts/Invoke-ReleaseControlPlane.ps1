@@ -764,7 +764,7 @@ function Invoke-ReleaseMode {
         -WorkflowFile $ReleaseWorkflowFile `
         -Branch $Branch `
         -Inputs $dispatchInputs `
-        -OutputPath $dispatchReportPath
+        -OutputPath $dispatchReportPath | Out-Null
     $dispatchReport = Get-Content -LiteralPath $dispatchReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
 
     $watchReportPath = Join-Path $ScratchRoot "$ModeName-watch.json"
@@ -772,7 +772,7 @@ function Invoke-ReleaseMode {
         -Repository $Repository `
         -RunId ([string]$dispatchReport.run_id) `
         -TimeoutMinutes $WatchTimeoutMinutes `
-        -OutputPath $watchReportPath
+        -OutputPath $watchReportPath | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "release_watch_failed: mode=$ModeName run_id=$([string]$dispatchReport.run_id) exit_code=$LASTEXITCODE"
     }
@@ -807,7 +807,7 @@ function Invoke-ReleaseMode {
             -TagFamily semver `
             -KeepLatestN $KeepLatestCanaryN `
             -Delete `
-            -OutputPath $hygienePath
+            -OutputPath $hygienePath | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "canary_hygiene_failed: tag_family=semver date=$DateKey exit_code=$LASTEXITCODE"
         }
