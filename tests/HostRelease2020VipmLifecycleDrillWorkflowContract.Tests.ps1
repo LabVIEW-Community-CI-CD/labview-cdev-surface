@@ -38,6 +38,10 @@ Describe 'Host release 2020 VIPM lifecycle drill workflow contract' {
         $script:workflowContent | Should -Match '-RequireNonSystemAccount'
         $script:workflowContent | Should -Match 'Invoke-HostRelease2020VipmLifecycleDrill\.ps1'
         $script:workflowContent | Should -Match "TargetLabviewYear', '2020'"
+        $script:workflowContent | Should -Match 'Prepare host-release 2020 VIPM lifecycle artifact bundle'
+        $script:workflowContent | Should -Match 'artifact-manifest\.json'
+        $script:workflowContent | Should -Match 'Upload host-release 2020 VIPM lifecycle artifacts \(retry\)'
+        $script:workflowContent | Should -Match 'Assert host-release artifact upload completed'
         $script:workflowContent | Should -Match 'host-release-2020-vipm-lifecycle-drill-report-\$\{\{\s*github\.run_id\s*\}\}'
         $script:workflowContent | Should -Match 'host-release-2020-vipm-lifecycle-drill-report\.json'
     }
