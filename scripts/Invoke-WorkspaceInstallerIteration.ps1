@@ -124,6 +124,7 @@ function Invoke-IterationRun {
     $startUtc = (Get-Date).ToUniversalTime()
     $runExitCode = 0
     $status = 'unknown'
+    $failureMessage = ''
 
     try {
         & pwsh @argList | Out-Host
@@ -135,7 +136,7 @@ function Invoke-IterationRun {
     } catch {
         $status = 'failed'
         $runExitCode = if ($runExitCode -ne 0) { $runExitCode } else { 1 }
-        throw
+        $failureMessage = [string]$_.Exception.Message
     }
 
     $endUtc = (Get-Date).ToUniversalTime()
@@ -148,6 +149,7 @@ function Invoke-IterationRun {
         end_utc = $endUtc.ToString('o')
         exit_code = $runExitCode
         status = $status
+        failure_message = $failureMessage
     }
 }
 
@@ -160,10 +162,18 @@ if (-not (Test-Path -LiteralPath $exerciseScript -PathType Leaf)) {
 $resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 Ensure-Directory -Path $resolvedOutputRoot
 
-$runResults = @()
+$runResults = [System.Collections.Generic.List[object]]::new()
+$failureDetected = $false
+$failureMessage = ''
 if (-not $Watch) {
     for ($i = 1; $i -le $Iterations; $i++) {
-        $runResults += Invoke-IterationRun -RunIndex $i -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+        $runResult = Invoke-IterationRun -RunIndex $i -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+        $runResults.Add($runResult) | Out-Null
+        if ([string]$runResult.status -ne 'succeeded') {
+            $failureDetected = $true
+            $failureMessage = if (-not [string]::IsNullOrWhiteSpace([string]$runResult.failure_message)) { [string]$runResult.failure_message } else { "Iteration run $([string]$runResult.run) failed." }
+            break
+        }
     }
 } else {
     $runIndex = 0
@@ -178,7 +188,14 @@ if (-not $Watch) {
 
         if ($runIndex -eq 0) {
             $runIndex++
-            $runResults += Invoke-IterationRun -RunIndex $runIndex -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+            $runResult = Invoke-IterationRun -RunIndex $runIndex -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+            $runResults.Add($runResult) | Out-Null
+            if ([string]$runResult.status -ne 'succeeded') {
+                $failureDetected = $true
+                $failureMessage = if (-not [string]::IsNullOrWhiteSpace([string]$runResult.failure_message)) { [string]$runResult.failure_message } else { "Iteration run $([string]$runResult.run) failed." }
+                break
+            }
+
             $fingerprint = Get-WorkspaceFingerprint -RepoRoot $repoRoot
             continue
         }
@@ -192,12 +209,19 @@ if (-not $Watch) {
         Write-Host "Change detected. Re-running installer iteration."
         $fingerprint = $newFingerprint
         $runIndex++
-        $runResults += Invoke-IterationRun -RunIndex $runIndex -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+        $runResult = Invoke-IterationRun -RunIndex $runIndex -ResolvedOutputRoot $resolvedOutputRoot -ModeValue $Mode -SmokeRootBase $SmokeWorkspaceRoot -KeepSmoke ([bool]$KeepSmokeWorkspace) -NsisRootValue $NsisRoot -ExerciseScriptPath $exerciseScript
+        $runResults.Add($runResult) | Out-Null
+        if ([string]$runResult.status -ne 'succeeded') {
+            $failureDetected = $true
+            $failureMessage = if (-not [string]::IsNullOrWhiteSpace([string]$runResult.failure_message)) { [string]$runResult.failure_message } else { "Iteration run $([string]$runResult.run) failed." }
+            break
+        }
+
         $fingerprint = Get-WorkspaceFingerprint -RepoRoot $repoRoot
     }
 }
 
-$latest = $runResults | Select-Object -Last 1
+$latest = @($runResults) | Select-Object -Last 1
 $summaryPath = Join-Path $resolvedOutputRoot 'iteration-summary.json'
 [ordered]@{
     timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -207,8 +231,15 @@ $summaryPath = Join-Path $resolvedOutputRoot 'iteration-summary.json'
     requested_iterations = $Iterations
     max_runs = $MaxRuns
     executed_runs = @($runResults).Count
+    status = if ($failureDetected) { 'failed' } else { 'succeeded' }
+    failure_message = $failureMessage
     latest = $latest
-    runs = $runResults
+    runs = @($runResults)
 } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 
 Write-Host "Iteration summary: $summaryPath"
+
+if ($failureDetected) {
+    Write-Error $failureMessage
+    exit 1
+}

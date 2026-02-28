@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      allow_system_account:
+        description: Allow running on NT AUTHORITY\\SYSTEM for diagnostic-only execution.
+        required: false
+        default: false
+        type: boolean
       nsis_root:
         description: Optional NSIS root override. Defaults to repository variable NSIS_ROOT or C:\Program Files (x86)\NSIS.
         required: false
@@ -59,12 +64,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-machine-preflight.json'
-          & pwsh -NoProfile -File ./scripts/Assert-InstallerHarnessMachinePreflight.ps1 `
-            -ExpectedLabviewYear '2020' `
-            -DockerContext 'desktop-linux' `
-            -DockerCheckSeverity warning `
-            -RequireNonSystemAccount `
-            -OutputPath $reportPath
+          $allowSystemAccountText = [string]'${{ inputs.allow_system_account }}'
+          $allowSystemAccount = $false
+          if (-not [string]::IsNullOrWhiteSpace($allowSystemAccountText)) {
+            try {
+              $allowSystemAccount = [System.Convert]::ToBoolean($allowSystemAccountText)
+            } catch {
+              throw "allow_system_account must be boolean. actual='$allowSystemAccountText'"
+            }
+          }
+
+          $preflightArgs = @(
+            '-NoProfile',
+            '-File', './scripts/Assert-InstallerHarnessMachinePreflight.ps1',
+            '-ExpectedLabviewYear', '2020',
+            '-DockerContext', 'desktop-linux',
+            '-DockerCheckSeverity', 'warning',
+            '-OutputPath', $reportPath
+          )
+          if (-not $allowSystemAccount) {
+            $preflightArgs += '-RequireNonSystemAccount'
+          }
+
+          & pwsh @preflightArgs
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path -LiteralPath $reportPath -PathType Leaf) {
               Get-Content -LiteralPath $reportPath -Raw | Write-Host
@@ -124,17 +146,106 @@ jobs:
             throw "Host-release 2020 VIPM lifecycle drill failed."
           }
 
-      - name: Upload host-release 2020 VIPM lifecycle artifacts
+      - name: Prepare host-release 2020 VIPM lifecycle artifact bundle
         if: always()
+        id: prepare_host_release_bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Copy-PathIfExists {
+            param(
+              [Parameter(Mandatory = $true)][string]$SourcePath,
+              [Parameter(Mandatory = $true)][string]$BundleRoot,
+              [Parameter(Mandatory = $true)][string]$RelativePath,
+              [Parameter(Mandatory = $true)][ref]$IncludedPaths,
+              [Parameter(Mandatory = $true)][ref]$MissingPaths
+            )
+
+            if (-not (Test-Path -LiteralPath $SourcePath)) {
+              $MissingPaths.Value += $SourcePath
+              return
+            }
+
+            $targetPath = Join-Path $BundleRoot $RelativePath
+            $targetParent = Split-Path -Parent $targetPath
+            if (-not [string]::IsNullOrWhiteSpace($targetParent) -and -not (Test-Path -LiteralPath $targetParent -PathType Container)) {
+              New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+            }
+
+            if (Test-Path -LiteralPath $SourcePath -PathType Container) {
+              Copy-Item -LiteralPath $SourcePath -Destination $targetPath -Recurse -Force
+            } else {
+              Copy-Item -LiteralPath $SourcePath -Destination $targetPath -Force
+            }
+            $IncludedPaths.Value += $SourcePath
+          }
+
+          $bundleRoot = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-lifecycle-drill-bundle'
+          if (Test-Path -LiteralPath $bundleRoot -PathType Container) {
+            Remove-Item -LiteralPath $bundleRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null
+
+          $reportPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-lifecycle-drill-report.json'
+          $preflightPath = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-machine-preflight.json'
+          $iterationRoot = Join-Path $env:RUNNER_TEMP 'host-release-2020-vipm-lifecycle'
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'dev-smoke-lvie-2020'
+
+          $includedPaths = @()
+          $missingPaths = @()
+
+          Copy-PathIfExists -SourcePath $reportPath -BundleRoot $bundleRoot -RelativePath 'host-release-2020-vipm-lifecycle-drill-report.json' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath $preflightPath -BundleRoot $bundleRoot -RelativePath 'host-release-2020-vipm-machine-preflight.json' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath $iterationRoot -BundleRoot $bundleRoot -RelativePath 'host-release-2020-vipm-lifecycle' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'artifacts/workspace-install-latest.json') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/artifacts/workspace-install-latest.json' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'labview-icon-editor/builds/status') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/labview-icon-editor/builds/status' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'labview-icon-editor/builds/logs') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/labview-icon-editor/builds/logs' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'labview-icon-editor/builds/status/workspace-installer-vip-build.json') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/labview-icon-editor/builds/status/workspace-installer-vip-build.json' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'labview-icon-editor/builds/logs/vipm-build.log') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm-build.log' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+          Copy-PathIfExists -SourcePath (Join-Path $smokeRoot 'labview-icon-editor/builds/logs/vipm') -BundleRoot $bundleRoot -RelativePath 'dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm' -IncludedPaths ([ref]$includedPaths) -MissingPaths ([ref]$missingPaths)
+
+          $manifestPath = Join-Path $bundleRoot 'artifact-manifest.json'
+          [ordered]@{
+            schema_version = '1.0'
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+            run_id = '${{ github.run_id }}'
+            run_attempt = '${{ github.run_attempt }}'
+            branch = '${{ github.ref_name }}'
+            included_paths = @($includedPaths)
+            missing_paths = @($missingPaths)
+          } | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+
+          "bundle_root=$bundleRoot" >> $env:GITHUB_OUTPUT
+          Get-Content -LiteralPath $manifestPath -Raw | Write-Host
+
+      - name: Upload host-release 2020 VIPM lifecycle artifacts (primary)
+        if: always()
+        id: upload_host_release_primary
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: host-release-2020-vipm-lifecycle-drill-report-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/host-release-2020-vipm-lifecycle-drill-report.json
-            ${{ runner.temp }}/host-release-2020-vipm-machine-preflight.json
-            ${{ runner.temp }}/host-release-2020-vipm-lifecycle/**
-            ${{ runner.temp }}/dev-smoke-lvie-2020/artifacts/workspace-install-latest.json
-            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/status/workspace-installer-vip-build.json
-            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm-build.log
-            ${{ runner.temp }}/dev-smoke-lvie-2020/labview-icon-editor/builds/logs/vipm/**
+          path: ${{ steps.prepare_host_release_bundle.outputs.bundle_root }}
           if-no-files-found: error
+
+      - name: Upload host-release 2020 VIPM lifecycle artifacts (retry)
+        if: always() && steps.upload_host_release_primary.outcome == 'failure'
+        id: upload_host_release_retry
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-release-2020-vipm-lifecycle-drill-report-${{ github.run_id }}-retry-${{ github.run_attempt }}
+          path: ${{ steps.prepare_host_release_bundle.outputs.bundle_root }}
+          if-no-files-found: error
+
+      - name: Assert host-release artifact upload completed
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $primaryOutcome = [string]'${{ steps.upload_host_release_primary.outcome }}'
+          $retryOutcome = [string]'${{ steps.upload_host_release_retry.outcome }}'
+          if ($primaryOutcome -ne 'success' -and $retryOutcome -ne 'success') {
+            throw "Artifact upload failed on primary and retry attempts."
+          }

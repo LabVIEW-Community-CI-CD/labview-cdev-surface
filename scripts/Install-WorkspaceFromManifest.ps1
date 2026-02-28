@@ -758,9 +758,38 @@ function Invoke-RunnerCliPplCapabilityCheck {
         )
         $result.command = @($commandArgs)
 
-        $runnerCliOutputLines = @(
-            & $RunnerCliPath @commandArgs 2>&1 | ForEach-Object { [string]$_ }
-        )
+        $runnerCliOutputLines = @()
+        $runnerCliInvocationError = $null
+        $nativePreferenceAvailable = ($null -ne (Get-Variable -Name 'PSNativeCommandUseErrorActionPreference' -ErrorAction SilentlyContinue))
+        $nativePreferenceSnapshot = $null
+        $errorActionSnapshot = $ErrorActionPreference
+        if ($nativePreferenceAvailable) {
+            $nativePreferenceSnapshot = [bool]$PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        $ErrorActionPreference = 'Continue'
+        try {
+            try {
+                $runnerCliOutputLines = @(
+                    & $RunnerCliPath @commandArgs 2>&1 | ForEach-Object { [string]$_ }
+                )
+            } catch {
+                $runnerCliInvocationError = [string]$_.Exception.Message
+            }
+        } finally {
+            $ErrorActionPreference = $errorActionSnapshot
+            if ($nativePreferenceAvailable) {
+                $PSNativeCommandUseErrorActionPreference = $nativePreferenceSnapshot
+            }
+        }
+
+        $result.exit_code = if ($null -eq $LASTEXITCODE) { if ($null -ne $runnerCliInvocationError) { 1 } else { 0 } } else { [int]$LASTEXITCODE }
+        if (-not [string]::IsNullOrWhiteSpace($runnerCliInvocationError)) {
+            $runnerCliOutputLines += ("runner-cli invocation error: {0}" -f $runnerCliInvocationError)
+        }
+        if (@($runnerCliOutputLines).Count -eq 0) {
+            $runnerCliOutputLines = @("runner-cli emitted no output. exit_code=$($result.exit_code)")
+        }
         foreach ($line in @($runnerCliOutputLines)) {
             Write-Host $line
         }
@@ -772,9 +801,9 @@ function Invoke-RunnerCliPplCapabilityCheck {
         if (@($runnerCliOutputLines).Count -gt 0) {
             $result.runner_cli_output_tail = @($runnerCliOutputLines | Select-Object -Last 40)
         }
-        $result.exit_code = $LASTEXITCODE
         if ($result.exit_code -ne 0) {
-            throw "runner-cli ppl build failed with exit code $($result.exit_code)."
+            $firstOutput = [string]($runnerCliOutputLines | Select-Object -First 1)
+            throw "runner-cli ppl build failed with exit code $($result.exit_code). first_output=$firstOutput"
         }
 
         if (-not (Test-Path -LiteralPath $result.output_ppl_path -PathType Leaf)) {
