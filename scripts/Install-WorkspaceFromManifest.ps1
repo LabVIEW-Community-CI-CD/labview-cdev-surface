@@ -762,10 +762,12 @@ function Invoke-RunnerCliPplCapabilityCheck {
         $runnerCliInvocationError = $null
         $nativePreferenceAvailable = ($null -ne (Get-Variable -Name 'PSNativeCommandUseErrorActionPreference' -ErrorAction SilentlyContinue))
         $nativePreferenceSnapshot = $null
+        $errorActionSnapshot = $ErrorActionPreference
         if ($nativePreferenceAvailable) {
             $nativePreferenceSnapshot = [bool]$PSNativeCommandUseErrorActionPreference
             $PSNativeCommandUseErrorActionPreference = $false
         }
+        $ErrorActionPreference = 'Continue'
         try {
             try {
                 $runnerCliOutputLines = @(
@@ -775,6 +777,7 @@ function Invoke-RunnerCliPplCapabilityCheck {
                 $runnerCliInvocationError = [string]$_.Exception.Message
             }
         } finally {
+            $ErrorActionPreference = $errorActionSnapshot
             if ($nativePreferenceAvailable) {
                 $PSNativeCommandUseErrorActionPreference = $nativePreferenceSnapshot
             }
